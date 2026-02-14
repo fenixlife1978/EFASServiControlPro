@@ -78,12 +78,12 @@ export function CreateClassroomDialog({
             createdAt: serverTimestamp(),
         });
 
-        toast({ title: 'Éxito', description: `El sector "${nombre_completo}" ha sido creado.` });
+        toast({ title: 'Éxito', description: `El salon/aula "${nombre_completo}" ha sido creado.` });
         form.reset();
         onOpenChange(false);
     } catch (error) {
         console.error('Error creating classroom: ', error);
-        toast({ variant: 'destructive', title: 'Error en Firestore', description: 'No se pudo crear el sector.' });
+        toast({ variant: 'destructive', title: 'Error en Firestore', description: 'No se pudo crear el salon/aula.' });
     } finally {
         setIsSubmitting(false);
     }
@@ -96,7 +96,7 @@ export function CreateClassroomDialog({
           <DialogTitle className="text-2xl font-black text-slate-800 uppercase italic tracking-tighter">
             EFAS <span className="text-orange-500">ServiControlPro</span>
           </DialogTitle>
-          <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-1">Configurar Nuevo Sector</p>
+          <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-1">Configurar Nuevo Salon/Aula</p>
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -107,7 +107,7 @@ export function CreateClassroomDialog({
                 <FormItem>
                   <FormLabel className="block text-xs font-black text-slate-400 uppercase mb-2">Grado (Ej: 1er Grado, Nivel Inicial)</FormLabel>
                   <FormControl>
-                    <Input className="bg-slate-50 border-slate-200 p-4 h-auto rounded-xl" placeholder="Grado al que pertenece el sector" {...field} />
+                    <Input className="bg-slate-50 border-slate-200 p-4 h-auto rounded-xl" placeholder="Grado al que pertenece el salon/aula" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -118,9 +118,9 @@ export function CreateClassroomDialog({
               name="seccion"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel className="block text-xs font-black text-slate-400 uppercase mb-2">Identificación del Sector (Ej: "A")</FormLabel>
+                  <FormLabel className="block text-xs font-black text-slate-400 uppercase mb-2">Identificación del Salon/Aula (Ej: "A")</FormLabel>
                   <FormControl>
-                    <Input className="bg-slate-50 border-slate-200 p-4 h-auto rounded-xl" placeholder="Nombre o Letra del Sector" {...field} />
+                    <Input className="bg-slate-50 border-slate-200 p-4 h-auto rounded-xl" placeholder="Nombre o Letra del Salon/Aula" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -151,7 +151,7 @@ export function CreateClassroomDialog({
                 </Button>
                 <Button type="submit" className="flex-1 h-auto py-4 font-bold rounded-xl shadow-lg shadow-blue-200" disabled={isSubmitting}>
                     {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    {isSubmitting ? 'Creando...' : 'Crear Sector'}
+                    {isSubmitting ? 'Creando...' : 'Crear Salon/Aula'}
                 </Button>
             </DialogFooter>
           </form>

@@ -82,8 +82,8 @@ export default function ClassroomDetailPage() {
                             </>
                         ) : (
                             <>
-                                <h1 className="text-2xl font-black text-slate-800">{classroom?.nombre_completo || 'Sector'}</h1>
-                                <p className="text-slate-500 text-sm">Gestiona los alumnos y dispositivos de este sector.</p>
+                                <h1 className="text-2xl font-black text-slate-800">{classroom?.nombre_completo || 'Salon/Aula'}</h1>
+                                <p className="text-slate-500 text-sm">Gestiona los alumnos y dispositivos de este salon/aula.</p>
                             </>
                         )}
                     </div>

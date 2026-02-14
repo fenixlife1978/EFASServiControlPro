@@ -73,7 +73,7 @@ export default function ClassroomsPage() {
                 </p>
             </div>
             <Button onClick={() => setIsCreateOpen(true)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl px-6 py-6 shadow-lg shadow-blue-200">
-                + Nuevo Sector
+                + Nuevo Salon/Aula
             </Button>
         </header>
 
@@ -113,8 +113,8 @@ export default function ClassroomsPage() {
         {!isLoading && (!classrooms || classrooms.length === 0) && (
             <div className="col-span-full flex flex-col items-center justify-center h-full text-center p-12 border-4 border-dashed border-slate-100 rounded-3xl mt-12 bg-white">
                 <Building className="h-20 w-20 mb-4 text-slate-200" />
-                <h2 className="text-2xl font-black text-slate-800 uppercase italic tracking-tighter">Sin sectores configurados</h2>
-                <p className="text-slate-400 font-medium max-w-xs mx-auto">Comienza creando tu primer sector para asignar dispositivos y alumnos.</p>
+                <h2 className="text-2xl font-black text-slate-800 uppercase italic tracking-tighter">Sin salones/aulas configurados</h2>
+                <p className="text-slate-400 font-medium max-w-xs mx-auto">Comienza creando tu primer salon/aula para asignar dispositivos y alumnos.</p>
             </div>
         )}
       </div>

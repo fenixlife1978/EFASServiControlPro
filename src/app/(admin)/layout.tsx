@@ -47,7 +47,7 @@ const AdminSidebar = () => {
 
     const menuItems = [
       { 
-        label: "Sectores", 
+        label: "Salones/Aulas", 
         href: "/dashboard/classrooms", 
         icon: <School className="w-5 h-5" /> 
       },

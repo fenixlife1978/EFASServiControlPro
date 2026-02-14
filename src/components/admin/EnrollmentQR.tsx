@@ -40,7 +40,7 @@ export default function EnrollmentQR({ activeId, workingCondoId }: QRProps) {
       </div>
 
       <div className="mt-6 text-center">
-        <p className="text-xs text-slate-500 font-bold uppercase mb-1">Sector Activo</p>
+        <p className="text-xs text-slate-500 font-bold uppercase mb-1">Salon/Aula Activo</p>
         <p className="text-sm text-blue-600 font-mono font-bold">{workingCondoId}</p>
       </div>
       
