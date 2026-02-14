@@ -1,8 +1,10 @@
-export const firebaseConfig = {
+import type { FirebaseOptions } from 'firebase/app';
+
+export const firebaseConfig: FirebaseOptions = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: "studio-7637044995-2342d.firebaseapp.com",
-  projectId: "studio-7637044995-2342d",
-  storageBucket: "studio-7637044995-2342d.appspot.com",
-  messagingSenderId: "646726561371",
-  appId: "1:646726561371:web:1772f48489677d3891997e"
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
