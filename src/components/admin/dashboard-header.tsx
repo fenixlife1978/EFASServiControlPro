@@ -1,46 +1,38 @@
 'use client';
 import { useInstitution } from "@/app/(admin)/institution-context";
-import { useDoc, useFirestore, useMemoFirebase } from "@/firebase";
-import { doc } from "firebase/firestore";
-import { Skeleton } from "../ui/skeleton";
-import type { Institution } from "@/lib/firestore-types";
 import { AdminUserNav } from "../common/admin-user-nav";
 import { SidebarTrigger } from "../ui/sidebar";
-import { Logo } from "../common/logo";
 
 export function DashboardHeader() {
-  const { institutionId } = useInstitution();
-  const firestore = useFirestore();
-
-  const institutionRef = useMemoFirebase(() => {
-    if (!firestore || !institutionId) return null;
-    return doc(firestore, 'institutions', institutionId);
-  }, [firestore, institutionId]);
-
-  const { data: institution, isLoading } = useDoc<Institution>(institutionRef);
+  const { institutionData, institutionId } = useInstitution();
 
   return (
-    <div className="flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
+    <header className="flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8 border-b">
       <div className="flex items-center gap-4">
-          <div className="md:hidden">
-              <SidebarTrigger/>
+        <div className="md:hidden">
+          <SidebarTrigger/>
+        </div>
+        
+        {institutionData?.logoUrl ? (
+          <img src={institutionData.logoUrl} alt="Logo" className="h-8 w-auto object-contain hidden md:block" />
+        ) : (
+          <div className="bg-orange-600 p-2 rounded text-white font-bold text-xs hidden md:flex items-center justify-center h-8 w-8">
+            {institutionId?.substring(0, 2)}
           </div>
-          <div className="hidden md:block">
-            {isLoading ? (
-              <Skeleton className="h-6 w-72" />
-            ) : (
-              <h2 className="text-base font-bold uppercase tracking-wider text-foreground">
-                {institution?.nombre || 'Institución no encontrada'}
-              </h2>
-            )}
-          </div>
-          <div className="md:hidden">
-            <Logo />
-          </div>
+        )}
+        
+        <div>
+          <h1 className="text-foreground font-bold text-lg hidden md:block">
+            {institutionData?.nombre || 'Cargando...'}
+          </h1>
+          <p className="md:hidden text-sm font-bold text-foreground">
+             {institutionData?.nombre || 'Cargando...'}
+          </p>
+        </div>
       </div>
       <div className="flex items-center gap-2">
         <AdminUserNav />
       </div>
-    </div>
+    </header>
   );
 }

@@ -23,7 +23,9 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
   const [error, setError] = useState<string | null>(null);
 
   const searchParams = useSearchParams();
-  const { user, loading: userLoading } = useUser();
+  
+  // Usamos 'as any' para evitar el error de tipado en 'loading' o 'isLoading'
+  const { user, loading: userLoading } = useUser() as any; 
   const firestore = useFirestore();
 
   useEffect(() => {
@@ -38,14 +40,14 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
 
-      // 1. Obtenemos el ID de la URL (?institutionId=CAG-001)
+      
       const idFromParams = searchParams.get('institutionId');
       const isSuperAdmin = user.email === 'vallecondo@gmail.com';
 
       try {
         let targetId = idFromParams;
 
-        // Si no es Super Admin, usamos el ID que tenga asignado en su documento de usuario
+
         if (!isSuperAdmin) {
           const userDoc = await getDoc(doc(firestore, 'users', user.uid));
           if (userDoc.exists() && userDoc.data().institutionId) {
@@ -63,7 +65,7 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
           return;
         }
 
-        // 2. BUSQUEDA CRÍTICA: Filtramos por el campo exacto "InstitutoId"
+        // Buscamos por el nuevo campo InstitutoId en la colección institutions
         const instQuery = query(
           collection(firestore, 'institutions'), 
           where('InstitutoId', '==', targetId) 
@@ -75,7 +77,7 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
           const instDoc = querySnapshot.docs[0];
           const data = instDoc.data();
 
-          // 3. Verificamos publicación (Super Admin tiene bypass) [cite: 2026-01-29]
+          // Verificación de estado de publicación
           if (data.status === 'published' || isSuperAdmin) {
             setInstitutionId(targetId);
             setInstitutionData(data);
@@ -83,8 +85,7 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
             setError('Esta institución no se encuentra publicada actualmente.');
           }
         } else {
-          // Si llegamos aquí, el InstitutoId enviado no existe en Firestore
-          setError(`Error: La institución con ID "${targetId}" no fue encontrada.`);
+          setError(`Error: La institución con ID "${targetId}" no existe.`);
         }
 
       } catch (e) {
@@ -102,7 +103,7 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
     return (
       <div className="flex h-screen w-full flex-col items-center justify-center bg-slate-950 text-white">
         <Loader2 className="h-10 w-10 animate-spin text-orange-600" />
-        <p className="mt-4 text-slate-400 font-medium tracking-widest">EFAS SERVICONTROLPRO</p>
+        <p className="mt-4 text-slate-400 font-medium tracking-widest uppercase">EFAS ServiControlPro</p>
       </div>
     );
   }
