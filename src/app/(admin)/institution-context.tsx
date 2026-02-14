@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useUser, useFirestore } from '@/firebase';
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { Loader2, Terminal } from 'lucide-react';
@@ -38,12 +38,14 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
 
+      // 1. Obtenemos el ID de la URL (?institutionId=CAG-001)
       const idFromParams = searchParams.get('institutionId');
       const isSuperAdmin = user.email === 'vallecondo@gmail.com';
 
       try {
         let targetId = idFromParams;
 
+        // Si no es Super Admin, usamos el ID que tenga asignado en su documento de usuario
         if (!isSuperAdmin) {
           const userDoc = await getDoc(doc(firestore, 'users', user.uid));
           if (userDoc.exists() && userDoc.data().institutionId) {
@@ -56,14 +58,15 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
         }
 
         if (!targetId) {
-          setError(isSuperAdmin ? 'Selecciona una institución desde el Panel Maestro.' : 'No se encontró el ID.');
+          setError(isSuperAdmin ? 'Por favor, selecciona una institución desde el Panel Maestro.' : 'No se pudo determinar la institución.');
           setLoading(false);
           return;
         }
 
+        // 2. BUSQUEDA CRÍTICA: Filtramos por el campo exacto "InstitutoId"
         const instQuery = query(
           collection(firestore, 'institutions'), 
-          where('InstitutoId', '==', targetId)
+          where('InstitutoId', '==', targetId) 
         );
         
         const querySnapshot = await getDocs(instQuery);
@@ -72,18 +75,21 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
           const instDoc = querySnapshot.docs[0];
           const data = instDoc.data();
 
+          // 3. Verificamos publicación (Super Admin tiene bypass) [cite: 2026-01-29]
           if (data.status === 'published' || isSuperAdmin) {
             setInstitutionId(targetId);
             setInstitutionData(data);
           } else {
-            setError('La institución no está publicada.');
+            setError('Esta institución no se encuentra publicada actualmente.');
           }
         } else {
-          setError(`La institución con ID "${targetId}" no existe en la base de datos.`);
+          // Si llegamos aquí, el InstitutoId enviado no existe en Firestore
+          setError(`Error: La institución con ID "${targetId}" no fue encontrada.`);
         }
+
       } catch (e) {
-        console.error("Error:", e);
-        setError('Error al conectar con Firestore.');
+        console.error("Error en InstitutionProvider:", e);
+        setError('Error de conexión con la base de datos.');
       } finally {
         setLoading(false);
       }
@@ -94,9 +100,9 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
 
   if (loading || userLoading) {
     return (
-      <div className="flex h-screen w-full flex-col items-center justify-center bg-slate-950">
+      <div className="flex h-screen w-full flex-col items-center justify-center bg-slate-950 text-white">
         <Loader2 className="h-10 w-10 animate-spin text-orange-600" />
-        <p className="mt-4 text-slate-400">Cargando EFAS ServiControlPro...</p>
+        <p className="mt-4 text-slate-400 font-medium tracking-widest">EFAS SERVICONTROLPRO</p>
       </div>
     );
   }
@@ -106,13 +112,13 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
       <div className="flex h-screen w-full items-center justify-center bg-slate-950 p-6">
         <Alert variant="destructive" className="max-w-md bg-slate-900 border-red-900/50">
           <Terminal className="h-4 w-4 text-red-500" />
-          <AlertTitle className="text-red-500 font-bold">Error de Acceso</AlertTitle>
-          <AlertDescription>
+          <AlertTitle className="text-red-500 font-bold uppercase tracking-tighter">Acceso Denegado</AlertTitle>
+          <AlertDescription className="text-slate-300">
             <p className="mt-2">{error}</p>
             {user?.email === 'vallecondo@gmail.com' && (
               <div className="mt-6">
-                <Button asChild className="bg-orange-600 hover:bg-orange-700 w-full">
-                  <Link href="/super-admin">Ir al Panel Maestro</Link>
+                <Button asChild className="bg-orange-600 hover:bg-orange-700 w-full font-bold">
+                  <Link href="/super-admin">Volver al Panel Maestro</Link>
                 </Button>
               </div>
             )}
@@ -131,6 +137,6 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
 
 export const useInstitution = () => {
   const context = useContext(InstitutionContext);
-  if (context === undefined) throw new Error('useInstitution debe usarse dentro de InstitutionProvider');
+  if (context === undefined) throw new Error('useInstitution debe usarse dentro de un InstitutionProvider');
   return context;
 };

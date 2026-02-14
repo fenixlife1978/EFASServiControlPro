@@ -43,13 +43,14 @@ export function InstitutionList() {
     }
   };
 
-  const gestionarInstitucion = (idDelInstituto: string) => {
-    if (!idDelInstituto) {
-      alert("Esta institución no tiene un InstitutoId asignado.");
+  const gestionarInstitucion = (valorInstitutoId: string) => {
+    if (!valorInstitutoId) {
+      alert("Error: Esta institución no tiene un 'InstitutoId' válido.");
       return;
     }
-    // The query parameter MUST be 'institutionId' for the context to work.
-    router.push(`/dashboard?institutionId=${idDelInstituto}`);
+    
+    // Enviamos el valor (ej: CAG-001) a través del parámetro institutionId
+    router.push(`/dashboard?institutionId=${valorInstitutoId}`);
   };
 
   if (isLoading) {
