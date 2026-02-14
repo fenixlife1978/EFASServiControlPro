@@ -1,0 +1,78 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    //-------------------------------------------------------------------------
+    // Helper Functions
+    //-------------------------------------------------------------------------
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // isSuperAdmin is ONLY checked by the global rule below.
+    function isSuperAdmin() {
+      return isSignedIn() && request.auth.uid == 'QeGMDNE4GaSJOU8XEnY3lFJ9by13';
+    }
+
+    // isInstitutionAdmin checks if a regular user is an admin for a specific tenant.
+    // This relies on a custom claim.
+    function isInstitutionAdmin(institutionId) {
+      return isSignedIn() && request.auth.token.institutionId == institutionId;
+    }
+
+
+    //-------------------------------------------------------------------------
+    // Global Super Admin Rule
+    //-------------------------------------------------------------------------
+    
+    // This is the master rule. If the user is the Super Admin, they can do anything.
+    // No other rules will be checked for the Super Admin.
+    match /{path=**} {
+      allow read, write: if isSuperAdmin();
+    }
+
+
+    //-------------------------------------------------------------------------
+    // Rules for Regular (Non-Super Admin) Users
+    //-------------------------------------------------------------------------
+    // These rules are only evaluated if the user is NOT a Super Admin.
+
+    match /users/{userId} {
+      // A regular user can only get or update their own profile.
+      allow get, update: if request.auth.uid == userId;
+    }
+
+    match /institutions/{institutionId} {
+      // An admin can get their own institution's document.
+      allow get: if isInstitutionAdmin(institutionId);
+
+      match /Aulas/{classroomId} {
+        // An admin can read and delete classrooms in their own institution.
+        allow get, list, delete: if isInstitutionAdmin(institutionId);
+        
+        // An admin can create a classroom if the data contains the correct institutionId.
+        allow create: if isInstitutionAdmin(institutionId) && request.resource.data.institutionId == institutionId;
+        
+        // An admin can update a classroom if the institutionId is not changed.
+        allow update: if isInstitutionAdmin(institutionId) && request.resource.data.institutionId == resource.data.institutionId;
+
+        match /Alumnos/{deviceId} {
+            // Same logic for devices within classrooms.
+            allow get, list, delete: if isInstitutionAdmin(institutionId);
+            allow create: if isInstitutionAdmin(institutionId) 
+                            && request.resource.data.institutionId == institutionId
+                            && request.resource.data.classroomId == classroomId;
+            allow update: if isInstitutionAdmin(institutionId)
+                            && request.resource.data.institutionId == resource.data.institutionId
+                            && request.resource.data.classroomId == resource.data.classroomId;
+        }
+      }
+    }
+    
+    // Temp collection for enrollment flow can be used by any signed-in user.
+    match /pending_enrollments/{enrollmentId} {
+        allow read, write: if isSignedIn();
+    }
+  }
+}

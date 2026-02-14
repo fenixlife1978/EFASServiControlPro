@@ -1,0 +1,22 @@
+{
+  "placeholderImages": [
+    {
+      "id": "user-avatar",
+      "description": "User avatar placeholder",
+      "imageUrl": "https://images.unsplash.com/photo-1704726135027-9c6f034cfa41?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHwxfHxhdmF0YXIlMjB1c2VyfGVufDB8fHx8MTc3MDQ5Mjk5Mnww&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "avatar user"
+    },
+    {
+      "id": "qr-code",
+      "description": "QR code placeholder",
+      "imageUrl": "https://images.unsplash.com/photo-1662383729882-e03ce8e00887?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHw2fHxxciUyMGNvZGV8ZW58MHx8fHwxNzcwNDMwNzM4fDA&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "qr code"
+    },
+    {
+      "id": "efas-logo",
+      "description": "EFAS ServiControlPro Logo",
+      "imageUrl": "https://images.unsplash.com/photo-1734562379606-597ecdb9fea5?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHw0fHxzaGllbGQlMjBsb2dvfGVufDB8fHx8MTc3MTAzNDg4OXww&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "shield logo"
+    }
+  ]
+}
