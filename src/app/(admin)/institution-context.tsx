@@ -61,7 +61,6 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
           return;
         }
 
-        // CAMBIO CLAVE: Buscamos por "InstitutoId" en la colección "institutions"
         const instQuery = query(
           collection(firestore, 'institutions'), 
           where('InstitutoId', '==', targetId)
@@ -73,20 +72,18 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
           const instDoc = querySnapshot.docs[0];
           const data = instDoc.data();
 
-          // Validación de estado de publicación [cite: 2026-01-29]
           if (data.status === 'published' || isSuperAdmin) {
             setInstitutionId(targetId);
             setInstitutionData(data);
           } else {
-            setError('Acceso denegado: Esta institución no está publicada.');
+            setError('La institución no está publicada.');
           }
         } else {
-          setError('El ID de institución no existe en el sistema.');
+          setError(`La institución con ID "${targetId}" no existe en la base de datos.`);
         }
-
       } catch (e) {
         console.error("Error:", e);
-        setError('Error al verificar la institución.');
+        setError('Error al conectar con Firestore.');
       } finally {
         setLoading(false);
       }
