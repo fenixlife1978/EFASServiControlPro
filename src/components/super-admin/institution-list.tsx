@@ -43,7 +43,7 @@ export function InstitutionList() {
     }
   };
 
-  const handleManage = (condoId: string) => {
+  const gestionarInstitucion = (condoId: string) => {
     if (!condoId) {
       toast({
         title: 'Error',
@@ -52,7 +52,7 @@ export function InstitutionList() {
       });
       return;
     }
-    router.push(`/dashboard/classrooms?institutionId=${condoId}`);
+    router.push(`/dashboard?institutionId=${condoId}`);
   };
 
   if (isLoading) {
@@ -108,7 +108,7 @@ export function InstitutionList() {
               <Button 
                 variant="outline" 
                 size="sm" 
-                onClick={() => handleManage(inst.condoId)}
+                onClick={() => gestionarInstitucion(inst.condoId)}
                 className="border-orange-500 text-orange-600 hover:bg-orange-500 hover:text-white"
                 disabled={!inst.condoId}
               >
