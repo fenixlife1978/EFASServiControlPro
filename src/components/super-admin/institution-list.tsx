@@ -43,16 +43,16 @@ export function InstitutionList() {
     }
   };
 
-  const gestionarInstitucion = (condoId: string) => {
-    if (!condoId) {
+  const gestionarInstitucion = (institutoId: string) => {
+    if (!institutoId) {
       toast({
         title: 'Error',
-        description: 'Esta institución no tiene un ID de acceso (condoId) asignado.',
+        description: 'Esta institución no tiene un ID de acceso (InstitutoId) asignado.',
         variant: 'destructive',
       });
       return;
     }
-    router.push(`/dashboard?institutionId=${condoId}`);
+    router.push(`/dashboard?institutionId=${institutoId}`);
   };
 
   if (isLoading) {
@@ -73,7 +73,7 @@ export function InstitutionList() {
       <TableHeader>
         <TableRow className="bg-slate-100 hover:bg-slate-100">
           <TableHead className="font-bold text-slate-900">Institución</TableHead>
-          <TableHead className="font-bold text-slate-900">condoId</TableHead>
+          <TableHead className="font-bold text-slate-900">InstitutoId</TableHead>
           <TableHead className="font-bold text-slate-900">Estado</TableHead>
           <TableHead className="text-right font-bold text-slate-900">Acciones</TableHead>
         </TableRow>
@@ -84,7 +84,7 @@ export function InstitutionList() {
             <TableCell className="font-medium text-slate-900">{inst.nombre}</TableCell>
             <TableCell>
               <code className="bg-orange-100 text-orange-700 px-2 py-1 rounded font-bold">
-                {inst.condoId || 'SIN ID'}
+                {inst.InstitutoId || 'SIN ID'}
               </code>
             </TableCell>
             <TableCell>
@@ -108,9 +108,9 @@ export function InstitutionList() {
               <Button 
                 variant="outline" 
                 size="sm" 
-                onClick={() => gestionarInstitucion(inst.condoId)}
+                onClick={() => gestionarInstitucion(inst.InstitutoId)}
                 className="border-orange-500 text-orange-600 hover:bg-orange-500 hover:text-white"
-                disabled={!inst.condoId}
+                disabled={!inst.InstitutoId}
               >
                 <ExternalLink className="w-4 h-4 mr-1" /> GESTIONAR
               </Button>
