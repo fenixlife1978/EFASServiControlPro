@@ -43,16 +43,13 @@ export function InstitutionList() {
     }
   };
 
-  const gestionarInstitucion = (institutoId: string) => {
-    if (!institutoId) {
-      toast({
-        title: 'Error',
-        description: 'Esta institución no tiene un ID de acceso (InstitutoId) asignado.',
-        variant: 'destructive',
-      });
+  const gestionarInstitucion = (idDelInstituto: string) => {
+    if (!idDelInstituto) {
+      alert("Esta institución no tiene un InstitutoId asignado.");
       return;
     }
-    router.push(`/dashboard?institutionId=${institutoId}`);
+    // The query parameter MUST be 'institutionId' for the context to work.
+    router.push(`/dashboard?institutionId=${idDelInstituto}`);
   };
 
   if (isLoading) {
@@ -115,7 +112,7 @@ export function InstitutionList() {
                 <ExternalLink className="w-4 h-4 mr-1" /> GESTIONAR
               </Button>
               <Button variant="ghost" size="sm" onClick={() => handleDelete(inst.id)} className="text-slate-400 hover:text-red-500">
-                <Trash2 className="h-4 w-4" />
+                <Trash2 className="h-4 h-4" />
               </Button>
             </TableCell>
           </TableRow>
