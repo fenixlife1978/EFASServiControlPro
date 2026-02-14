@@ -12,7 +12,7 @@ service cloud.firestore {
 
     // isSuperAdmin is ONLY checked by the global rule below.
     function isSuperAdmin() {
-      return isSignedIn() && request.auth.uid == 'QeGMDNE4GaSJOU8XEnY3lFJ9by13';
+      return isSignedIn() && request.auth.token.email == 'vallecondo@gmail.com';
     }
 
     // isInstitutionAdmin checks if a regular user is an admin for a specific tenant.

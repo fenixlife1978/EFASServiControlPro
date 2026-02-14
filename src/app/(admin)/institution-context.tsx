@@ -41,7 +41,7 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
 
-      const isSuperAdmin = user.uid === 'QeGMDNE4GaSJOU8XEnY3lFJ9by13';
+      const isSuperAdmin = user.email === 'vallecondo@gmail.com';
 
       // Case 1: Super admin can view any institution specified in the URL.
       if (isSuperAdmin) {
@@ -105,7 +105,7 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
               <AlertTitle>Acceso Denegado</AlertTitle>
               <AlertDescription>
                 {error || 'No se pudo determinar la institución a gestionar.'}
-                {user?.uid === 'QeGMDNE4GaSJOU8XEnY3lFJ9by13' && (
+                {user?.email === 'vallecondo@gmail.com' && (
                     <div className="mt-4">
                         <Button asChild>
                             <Link href="/super-admin">

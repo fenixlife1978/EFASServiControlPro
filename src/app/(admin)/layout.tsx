@@ -109,7 +109,7 @@ const AdminSidebar = () => {
             </SidebarContent>
 
             <SidebarFooter className='border-t border-sidebar-border/50 p-4'>
-                 {user?.uid === 'QeGMDNE4GaSJOU8XEnY3lFJ9by13' && (
+                 {user?.email === 'vallecondo@gmail.com' && (
                      <div className="bg-sidebar-accent rounded-2xl p-4">
                         <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">Super Admin</p>
                         <p className="text-[11px] font-bold text-slate-300 mt-1 truncate">{user.email}</p>

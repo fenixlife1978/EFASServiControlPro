@@ -38,7 +38,7 @@ export default function LoginForm() {
     const handleRedirect = async () => {
       if (!userLoading && user && firestore) {
         setLoading(true); // Show loader during async redirect logic
-        const isSuperAdmin = user.uid === 'QeGMDNE4GaSJOU8XEnY3lFJ9by13';
+        const isSuperAdmin = user.email === 'vallecondo@gmail.com';
         const redirectUrl = searchParams.get('redirect');
 
         if (isSuperAdmin) {
@@ -82,7 +82,7 @@ export default function LoginForm() {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      const isSuperAdmin = user.uid === 'QeGMDNE4GaSJOU8XEnY3lFJ9by13';
+      const isSuperAdmin = user.email === 'vallecondo@gmail.com';
       
       toast({
         title: 'Inicio de Sesión Exitoso',

@@ -18,7 +18,7 @@ export default function SuperAdminDashboard() {
     if (!loading) {
       if (!user) {
         router.push('/login?redirect=/super-admin');
-      } else if (user.uid !== 'QeGMDNE4GaSJOU8XEnY3lFJ9by13') {
+      } else if (user.email !== 'vallecondo@gmail.com') {
         // Not a super admin, redirect to regular dashboard
         router.push('/dashboard');
       }
@@ -33,7 +33,7 @@ export default function SuperAdminDashboard() {
   };
 
 
-  if (loading || !user || user.uid !== 'QeGMDNE4GaSJOU8XEnY3lFJ9by13') {
+  if (loading || !user || user.email !== 'vallecondo@gmail.com') {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-[#050510]">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
