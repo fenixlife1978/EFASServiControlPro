@@ -1,7 +1,7 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  /* Configuración de EFAS GuardianPro */
+  /* Configuración de EFAS ServiControlPro */
   
   // Mantenemos estos en true para permitir el despliegue si hay errores menores de tipos
   typescript: {

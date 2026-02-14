@@ -201,8 +201,14 @@ export default function LoginForm() {
           <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Accediendo..." : "Acceder"}
           </Button>
+          <div className="mt-4 text-center text-sm text-slate-400">
+            ¿No tienes una cuenta?{' '}
+            <Link href="/signup" className="underline hover:text-orange-500 transition-colors">
+              Crear una
+            </Link>
+          </div>
         </form>
-        <div className="mt-4 text-center text-sm">
-          ¿No tienes una cuenta?{' '}
-          <Link href="/signup" className="underline">
-            Crear una
+      </CardContent>
+    </Card>
+  );
+}

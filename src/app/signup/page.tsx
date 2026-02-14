@@ -112,9 +112,9 @@ export default function SignUpPage() {
             <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? "Creando cuenta..." : "Crear cuenta"}
             </Button>
-            <div className="mt-4 text-center text-sm">
+            <div className="mt-4 text-center text-sm text-slate-400">
               ¿Ya tienes una cuenta?{' '}
-              <Link href="/login" className="underline">
+              <Link href="/login" className="underline hover:text-orange-500 transition-colors">
                 Iniciar sesión
               </Link>
             </div>
