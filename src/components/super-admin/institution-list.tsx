@@ -1,23 +1,23 @@
 'use client';
 
-import Link from 'next/link';
 import { useCollection, useFirestore, useMemoFirebase, updateDocumentNonBlocking, deleteDocumentNonBlocking } from '@/firebase';
 import { collection, doc, query, orderBy } from 'firebase/firestore';
-import { Skeleton } from '../ui/skeleton';
+import { useRouter } from 'next/navigation';
 import type { Institution } from '@/lib/firestore-types';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Switch } from '../ui/switch';
 import { useToast } from '@/hooks/use-toast';
-import { Globe, Lock, Trash2, Loader2, Building } from 'lucide-react';
+import { Globe, Lock, Trash2, Loader2, ExternalLink } from 'lucide-react';
 import { Button } from '../ui/button';
 
 const InstitutionTableSkeleton = () => (
-    <div className="p-10 flex justify-center"><Loader2 className="animate-spin" /></div>
+    <div className="p-10 flex justify-center"><Loader2 className="animate-spin text-orange-500" /></div>
 );
 
 export function InstitutionList() {
   const firestore = useFirestore();
   const { toast } = useToast();
+  const router = useRouter();
 
   const institutionsRef = useMemoFirebase(() => {
     if (!firestore) return null;
@@ -43,6 +43,18 @@ export function InstitutionList() {
     }
   };
 
+  const handleManage = (condoId: string) => {
+    if (!condoId) {
+      toast({
+        title: 'Error',
+        description: 'Esta institución no tiene un ID de acceso (condoId) asignado.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    router.push(`/dashboard/classrooms?institutionId=${condoId}`);
+  };
+
   if (isLoading) {
       return <InstitutionTableSkeleton />;
   }
@@ -61,21 +73,19 @@ export function InstitutionList() {
       <TableHeader>
         <TableRow className="bg-slate-100 hover:bg-slate-100">
           <TableHead className="font-bold text-slate-900">Institución</TableHead>
-          <TableHead className="font-bold text-slate-900">condoId (ID de acceso)</TableHead>
-          <TableHead className="font-bold text-slate-900">Estado de Publicación</TableHead>
+          <TableHead className="font-bold text-slate-900">condoId</TableHead>
+          <TableHead className="font-bold text-slate-900">Estado</TableHead>
           <TableHead className="text-right font-bold text-slate-900">Acciones</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {institutions.map((inst) => (
           <TableRow key={inst.id}>
-            <TableCell className="font-medium">{inst.nombre}</TableCell>
+            <TableCell className="font-medium text-slate-900">{inst.nombre}</TableCell>
             <TableCell>
-              <Link href={`/dashboard?institutionId=${inst.condoId}`}>
-                <code className="bg-slate-100 px-2 py-1 rounded text-orange-600 font-bold hover:bg-orange-100 transition-colors cursor-pointer">
-                  {inst.condoId}
-                </code>
-              </Link>
+              <code className="bg-orange-100 text-orange-700 px-2 py-1 rounded font-bold">
+                {inst.condoId || 'SIN ID'}
+              </code>
             </TableCell>
             <TableCell>
               <div className="flex items-center gap-3">
@@ -94,8 +104,17 @@ export function InstitutionList() {
                 )}
               </div>
             </TableCell>
-            <TableCell className="text-right">
-              <Button variant="ghost" size="sm" onClick={() => handleDelete(inst.id)} className="hover:text-red-500">
+            <TableCell className="text-right flex justify-end gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => handleManage(inst.condoId)}
+                className="border-orange-500 text-orange-600 hover:bg-orange-500 hover:text-white"
+                disabled={!inst.condoId}
+              >
+                <ExternalLink className="w-4 h-4 mr-1" /> GESTIONAR
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => handleDelete(inst.id)} className="text-slate-400 hover:text-red-500">
                 <Trash2 className="h-4 w-4" />
               </Button>
             </TableCell>

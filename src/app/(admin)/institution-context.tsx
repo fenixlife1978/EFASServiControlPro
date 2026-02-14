@@ -69,9 +69,9 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
           return;
         }
 
-        // 3. Validación en la colección 'instituciones' (Buscamos por condoId)
+        // 3. Validación en la colección 'institutions' (Buscamos por condoId)
         const instQuery = query(
-          collection(firestore, 'instituciones'), 
+          collection(firestore, 'institutions'), 
           where('condoId', '==', targetId)
         );
         
@@ -152,4 +152,3 @@ export const useInstitution = () => {
   }
   return context;
 };
-
