@@ -3,6 +3,8 @@ import { Timestamp } from 'firebase/firestore';
 export interface Institution {
   id: string;
   nombre: string;
+  condoId: string;
+  status: 'published' | 'unpublished';
   direccion?: string;
   logoUrl?: string;
   modoFiltro: 'Blacklist' | 'Whitelist';

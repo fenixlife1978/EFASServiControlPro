@@ -56,7 +56,7 @@ export default function SuperAdminDashboard() {
         </Button>
       </div>
 
-      <div className="bg-slate-900/50 border border-slate-800 p-4 rounded-xl mb-8">
+      <div className="bg-slate-900/50 border border-slate-800 p-6 rounded-xl mb-8">
         <CreateInstitutionForm />
       </div>
     
