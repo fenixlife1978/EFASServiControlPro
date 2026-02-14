@@ -2,9 +2,17 @@
 import { useInstitution } from "@/app/(admin)/institution-context";
 import { AdminUserNav } from "../common/admin-user-nav";
 import { SidebarTrigger } from "../ui/sidebar";
+import { useUser } from "@/firebase";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { LayoutDashboard } from "lucide-react";
 
 export function DashboardHeader() {
   const { institutionData, institutionId } = useInstitution();
+  const { user } = useUser();
+  const router = useRouter();
+
+  const isSuperAdmin = user?.email === 'vallecondo@gmail.com';
 
   return (
     <header className="flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8 border-b">
@@ -31,6 +39,16 @@ export function DashboardHeader() {
         </div>
       </div>
       <div className="flex items-center gap-2">
+        {isSuperAdmin && (
+          <Button 
+            variant="ghost" 
+            onClick={() => router.push('/super-admin')}
+            className="text-orange-500 hover:text-orange-400 hover:bg-orange-500/10 flex items-center gap-2"
+          >
+            <LayoutDashboard className="w-4 h-4" />
+            <span className="text-xs font-bold uppercase">Panel Maestro</span>
+          </Button>
+        )}
         <AdminUserNav />
       </div>
     </header>
