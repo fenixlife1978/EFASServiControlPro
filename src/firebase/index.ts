@@ -14,13 +14,20 @@ export function initializeFirebase() {
     return getSdks(getApp());
   }
 
-  // Validate that the config is populated, providing a clear error if not.
-  if (!firebaseConfig.apiKey) {
-    throw new Error('Firebase API Key is missing. Check your environment variables (e.g., .env.local).');
+  // VALIDACIÓN CRÍTICA: Si no hay API Key, devolvemos un objeto vacío 
+  // para que el Provider no intente inicializar Auth/Firestore todavía.
+  if (!firebaseConfig.apiKey || firebaseConfig.apiKey === "undefined") {
+    console.warn("⚠ Firebase: Esperando configuración válida de API Key...");
+    return { firebaseApp: null, auth: null, firestore: null } as any;
   }
 
-  const firebaseApp = initializeApp(firebaseConfig);
-  return getSdks(firebaseApp);
+  try {
+    const firebaseApp = initializeApp(firebaseConfig);
+    return getSdks(firebaseApp);
+  } catch (e) {
+    console.error("Error al inicializar Firebase:", e);
+    return { firebaseApp: null, auth: null, firestore: null } as any;
+  }
 }
 
 // Helper to get SDK instances from a FirebaseApp instance.
