@@ -35,9 +35,8 @@ export default function SignupForm() {
     e.preventDefault();
     if (!auth) return;
 
-    // Validación de Protocolo: Coincidencia de Claves [cite: 2026-02-14]
     if (password !== confirmPassword) {
-      setError('Las claves de acceso no coinciden en el sistema.');
+      setError('Las claves de acceso no coinciden.');
       return;
     }
 
@@ -46,23 +45,13 @@ export default function SignupForm() {
 
     try {
       await createUserWithEmailAndPassword(auth, email, password);
-      
       toast({
         title: 'PROTOCOLO EXITOSO',
-        description: 'Identidad creada. Redirigiendo al centro de control...',
+        description: 'Cuenta administrativa creada correctamente.',
       });
-      
       router.push('/dashboard');
     } catch (err: any) {
-      const errorCode = err.code;
-      let friendlyMessage = 'Fallo en la verificación del protocolo.';
-      
-      if (errorCode === 'auth/email-already-in-use') {
-        friendlyMessage = 'Este identificador ya está registrado.';
-      } else if (errorCode === 'auth/weak-password') {
-        friendlyMessage = 'La clave debe ser de alta seguridad (mín. 6 caracteres).';
-      }
-      setError(friendlyMessage);
+      setError('Fallo en el registro de seguridad.');
     } finally {
       setLoading(false);
     }
@@ -71,16 +60,13 @@ export default function SignupForm() {
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center gap-6 text-center py-10">
-        <div className="relative flex items-center justify-center">
-          <Loader2 className="h-12 w-12 animate-spin text-[#f97316]" strokeWidth={2.5} />
-          <div className="absolute h-16 w-16 rounded-full border-4 border-[#f97316]/10 border-t-[#f97316]/40 animate-pulse" />
-        </div>
+        <Loader2 className="h-12 w-12 animate-spin text-[#f97316]" />
         <div className="space-y-1">
           <h2 className="text-2xl font-black italic tracking-tighter text-white uppercase">
             EFAS <span className="text-[#f97316]">ServiControlPro</span>
           </h2>
           <p className="text-[10px] font-bold tracking-[0.3em] text-slate-500 uppercase">
-            Sincronizando Base de Datos
+            Sincronizando Identidad
           </p>
         </div>
       </div>
@@ -90,20 +76,18 @@ export default function SignupForm() {
   return (
     <Card className="mx-auto w-full max-w-sm border-slate-800 bg-[#1e293b]/50 backdrop-blur-sm text-white shadow-2xl">
       <CardHeader className="text-center">
-        <div className="mb-4 flex justify-center">
-          <Logo />
-        </div>
+        <div className="mb-4 flex justify-center"><Logo /></div>
         <CardTitle className="text-2xl font-black italic tracking-tighter uppercase">
           REGISTRO <span className="text-[#f97316]">ADMIN</span>
         </CardTitle>
         <CardDescription className="text-slate-400">
-          EFAS ServiControlPro: Alta de Seguridad. [cite: 2026-02-14]
+          EFAS ServiControlPro: Alta de Seguridad.
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form className="grid gap-4" onSubmit={handleSignUp}>
           <div className="grid gap-2">
-            <Label htmlFor="email">Email de Identidad</Label>
+            <Label htmlFor="email">Email</Label>
             <Input
               id="email"
               type="email"
@@ -116,49 +100,24 @@ export default function SignupForm() {
           </div>
           <div className="grid gap-2">
             <Label htmlFor="password">Clave de Acceso</Label>
-            <Input 
-              id="password" 
-              type="password" 
-              required 
-              className="bg-slate-900 border-slate-700 focus:border-[#f97316]"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
+            <Input id="password" type="password" required className="bg-slate-900 border-slate-700" value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="confirmPassword">Confirmar Clave</Label>
-            <Input 
-              id="confirmPassword" 
-              type="password" 
-              required 
-              className="bg-slate-900 border-slate-700 focus:border-[#f97316]"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-            />
+            <Input id="confirmPassword" type="password" required className="bg-slate-900 border-slate-700" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
           </div>
 
           {error && (
-            <Alert variant="destructive" className="bg-red-900/40 border-red-600 text-red-100">
+            <Alert variant="destructive" className="bg-red-900/40 border-red-600">
               <AlertCircle className="h-4 w-4" />
-              <AlertTitle className="font-bold">Error de Validación</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
 
-          <Button 
-            type="submit" 
-            className="w-full bg-[#f97316] hover:bg-[#ea580c] text-white font-black italic transition-all"
-          >
+          <Button type="submit" className="w-full bg-[#f97316] hover:bg-[#ea580c] text-white font-black italic">
             <ShieldCheck className="mr-2 h-4 w-4" />
-            ACTIVAR CUENTA ADMIN
+            ACTIVAR CUENTA
           </Button>
-          
-          <div className="mt-4 text-center text-sm text-slate-400">
-            ¿Ya eres parte del sistema?{' '}
-            <Link href="/login" className="font-bold text-[#f97316] underline">
-              Acceder al Protocolo
-            </Link>
-          </div>
         </form>
       </CardContent>
     </Card>

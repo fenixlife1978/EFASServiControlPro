@@ -33,12 +33,14 @@ import { DashboardHeader } from '@/components/admin/dashboard-header';
 import { Logo } from '@/components/common/logo';
 import { cn } from '@/lib/utils';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
+import { PlaceHolderImages } from '@/lib/placeholder-images';
 
 const AdminSidebar = () => {
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const { user } = useUser();
     const { installApp, isInstallable, isStandalone } = usePWAInstall();
+    const efasLogo = PlaceHolderImages.find(img => img.id === 'efas-logo');
 
     const createLink = (path: string) => {
         const params = new URLSearchParams(searchParams.toString());
@@ -70,7 +72,11 @@ const AdminSidebar = () => {
                 <div className="relative group">
                   <div className="absolute -inset-1 bg-gradient-to-r from-orange-500 to-blue-950 rounded-full blur opacity-25 group-hover:opacity-40 transition"></div>
                   <div className="relative w-[60px] h-[60px] rounded-full border-2 border-white/10 overflow-hidden">
-                    <Image src="https://picsum.photos/seed/efas-logo/60/60" alt="EFAS Logo" width={60} height={60} data-ai-hint="shield logo" />
+                    {efasLogo ? (
+                      <Image src={efasLogo.imageUrl} alt="EFAS Logo" width={60} height={60} data-ai-hint={efasLogo.imageHint} className="object-cover" />
+                    ) : (
+                      <div className="w-full h-full bg-slate-700"></div>
+                    )}
                   </div>
                 </div>
                 <div className="text-center mt-2">
