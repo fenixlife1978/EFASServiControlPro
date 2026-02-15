@@ -23,14 +23,21 @@ export function FirebaseClientProvider({ children }: FirebaseClientProviderProps
 
   useEffect(() => {
     // This effect runs only on the client, after the component has mounted.
-    // This is the correct and safe place to initialize Firebase.
     const firebaseServices = initializeFirebase();
-    setServices(firebaseServices);
+    
+    // CRITICAL: Only set the state if initialization was successful.
+    // A successful initialization means firebaseApp is not null.
+    if (firebaseServices && firebaseServices.firebaseApp) {
+        setServices(firebaseServices);
+    }
+    // If initialization fails (e.g., missing API key), 'services' remains null,
+    // and the loader will continue to be displayed. The console will show
+    // the warning from 'initializeFirebase'.
   }, []); // Empty dependency array ensures this runs only once
 
   if (!services) {
-    // While services are being initialized on the client, show a full-page loader.
-    // This prevents any child components from trying to access Firebase before it's ready.
+    // This loader is now correctly shown if services are null (i.e., not yet initialized
+    // OR initialization failed due to missing config).
     return (
       <div className="flex h-screen w-full flex-col items-center justify-center bg-slate-950 text-white">
         <Loader2 className="h-10 w-10 animate-spin text-orange-600" />
@@ -39,6 +46,7 @@ export function FirebaseClientProvider({ children }: FirebaseClientProviderProps
     );
   }
 
+  // This part is only reached if 'services' is not null, meaning all services are available.
   return (
     <FirebaseProvider
       firebaseApp={services.firebaseApp}
