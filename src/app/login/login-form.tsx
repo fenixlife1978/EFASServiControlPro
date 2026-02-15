@@ -37,7 +37,6 @@ export default function LoginForm() {
   useEffect(() => {
     const handleRedirect = async () => {
       if (!userLoading && user && firestore) {
-        setLoading(true);
         const isSuperAdmin = user.email === 'vallecondo@gmail.com';
         const redirectUrl = searchParams.get('redirect');
 
