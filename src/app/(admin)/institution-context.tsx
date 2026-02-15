@@ -24,8 +24,7 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
 
   const searchParams = useSearchParams();
   
-  // Usamos 'as any' para evitar el error de tipado en 'loading' o 'isLoading'
-  const { user, loading: userLoading } = useUser() as any; 
+  const { user, loading: userLoading } = useUser();
   const firestore = useFirestore();
 
   useEffect(() => {
