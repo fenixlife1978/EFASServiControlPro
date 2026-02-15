@@ -163,40 +163,42 @@ function AdminLayoutComponent({
 }: {
   children: React.ReactNode;
 }) {
-    const { user, loading, error } = useUser();
-    const pathname = usePathname();
-    const searchParams = useSearchParams();
+  // CORRECCIÓN: Eliminamos 'error' de la desestructuración
+  const { user, loading } = useUser(); 
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
-    useEffect(() => {
-        if (!loading && !user && !error) {
-            const redirectUrl = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}`: ''}`;
-            redirect(`/login?redirect=${encodeURIComponent(redirectUrl)}`);
-        }
-    }, [user, loading, error, pathname, searchParams]);
-
-    if (loading) {
-        return <AdminLayoutLoading />;
+  useEffect(() => {
+    // Si terminó de cargar y no hay usuario, redirigimos
+    if (!loading && !user) {
+      const redirectUrl = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
+      redirect(`/login?redirect=${encodeURIComponent(redirectUrl)}`);
     }
+  }, [user, loading, pathname, searchParams]);
 
-    if (!user) {
-        return null;
-    }
+  if (loading) {
+    return <AdminLayoutLoading />;
+  }
 
-    return (
-        <InstitutionProvider>
-            <SidebarProvider>
-                <AdminSidebar/>
-                <SidebarInset>
-                    <header className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b">
-                      <DashboardHeader />
-                    </header>
-                    <main className="flex-1 p-8 overflow-y-auto">
-                        {children}
-                    </main>
-                </SidebarInset>
-            </SidebarProvider>
-        </InstitutionProvider>
-    );
+  if (!user) {
+    return null;
+  }
+
+  return (
+    <InstitutionProvider>
+      <SidebarProvider>
+        <AdminSidebar />
+        <SidebarInset>
+          <header className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b">
+            <DashboardHeader />
+          </header>
+          <main className="flex-1 p-8 overflow-y-auto">
+            {children}
+          </main>
+        </SidebarInset>
+      </SidebarProvider>
+    </InstitutionProvider>
+  );
 }
 
 export default function AdminLayout({
