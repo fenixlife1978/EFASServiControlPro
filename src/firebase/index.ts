@@ -1,35 +1,51 @@
-import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { auth, db, storage } from './config';
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { useCollectionData } from 'react-firebase-hooks/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 
-const directConfig = {
-  apiKey: "AIzaSyACK79dDRclgjFMEUokqpskC1ezyvmO11k",
-  authDomain: "studio-7637044995-2342d.firebaseapp.com",
-  projectId: "studio-7637044995-2342d",
-  storageBucket: "studio-7637044995-2342d.firebasestorage.app",
-  messagingSenderId: "7637044995",
-  appId: "1:7637044995:web:2c6b412952864386927958"
+// Exportamos auth directamente para asegurar que mantenga sus prototipos
+export { auth, db, storage };
+
+// 1. Hooks de Autenticación
+export const useAuth = () => {
+    const [user, loading, error] = useAuthState(auth);
+    return { user, loading, error, auth };
 };
 
-// Inicialización única
-const app = getApps().length > 0 ? getApp() : initializeApp(directConfig);
-export const auth = getAuth(app);
-export const db = getFirestore(app);
+export const useUser = () => {
+    const [user, loading, error] = useAuthState(auth);
+    return { user, loading, error };
+};
 
-export function initializeFirebase() {
-  return {
-    firebaseApp: app,
-    auth: auth,
-    firestore: db
-  };
-}
+// 2. Hook para obtener la instancia de Firestore
+export const useFirestore = () => db;
 
-// Re-exportamos los hooks y el provider
-export * from './config';
-export * from './client-provider';
-export * from './firestore/use-collection';
-export * from './firestore/use-doc';
-export * from './non-blocking-updates';
-export * from './non-blocking-login';
-export * from './errors';
-export * from './error-emitter';
+// 3. Hook para Colecciones
+export const useCollection = (pathOrQuery: any) => {
+    const [value, loading, error] = useCollectionData(pathOrQuery, {
+        idField: 'id'
+    });
+    return { value: value || [], loading, error };
+};
+
+// 4. Funciones de Utilidad Operativas
+export const addDocumentNonBlocking = async (collectionName: string, data: any) => {
+  try {
+    const docRef = await addDoc(collection(db, collectionName), data);
+    return { success: true, id: docRef.id };
+  } catch (error) { return { success: false, error }; }
+};
+
+export const updateDocumentNonBlocking = async (collectionName: string, id: string, data: any) => {
+  try {
+    await updateDoc(doc(db, collectionName, id), data);
+    return { success: true };
+  } catch (error) { return { success: false, error }; }
+};
+
+export const deleteDocumentNonBlocking = async (collectionName: string, id: string) => {
+  try {
+    await deleteDoc(doc(db, collectionName, id));
+    return { success: true };
+  } catch (error) { return { success: false, error }; }
+};

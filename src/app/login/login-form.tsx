@@ -14,7 +14,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Logo } from '@/components/common/logo';
-import { useAuth, useFirestore, useUser } from '@/firebase';
+import { useFirestore, useUser } from '@/firebase';
+import { auth } from '@/firebase/config';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
@@ -26,7 +27,6 @@ export default function LoginForm() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const auth = useAuth();
   const firestore = useFirestore();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -36,7 +36,6 @@ export default function LoginForm() {
   useEffect(() => {
     const handleRedirect = async () => {
       if (!userLoading && user && firestore) {
-        setLoading(true);
         const isSuperAdmin = user.email === 'vallecondo@gmail.com';
         const redirectUrl = searchParams.get('redirect');
 
@@ -62,7 +61,7 @@ export default function LoginForm() {
       }
     };
     handleRedirect();
-  }, [user, userLoading, firestore, auth, router, searchParams]);
+  }, [user, userLoading, firestore, router, searchParams]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

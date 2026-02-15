@@ -1,30 +1,22 @@
-import { useState, useEffect } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth, db } from './index';
+import { initializeApp, getApps, getApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 
-export const firebaseConfig = {
-  apiKey: "AIzaSyACK79dDRclgjFMEUokqpskC1ezyvmO11k",
-  authDomain: "studio-7637044995-2342d.firebaseapp.com",
-  projectId: "studio-7637044995-2342d",
-  storageBucket: "studio-7637044995-2342d.firebasestorage.app",
-  messagingSenderId: "7637044995",
-  appId: "1:7637044995:web:2c6b412952864386927958"
+const firebaseConfig = {
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
 };
 
-export const useAuth = () => auth;
-export const useFirestore = () => db;
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-export function useUser() {
-    const [user, setUser] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
+// Exportaciones directas y constantes
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+export const storage = getStorage(app);
 
-    useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (u) => {
-            setUser(u);
-            setLoading(false);
-        });
-        return () => unsubscribe();
-    }, []);
-
-    return { user, loading };
-}
+export default app;
