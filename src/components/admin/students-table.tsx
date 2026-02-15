@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
+import { useState, useMemo } from 'react';
+import { useFirestore, useCollection } from '@/firebase';
 import { collection } from 'firebase/firestore';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -36,7 +36,7 @@ export function StudentsTable({ institutionId, classroomId }: StudentsTableProps
     const [viewingLogsFor, setViewingLogsFor] = useState<Alumno | null>(null);
     const firestore = useFirestore();
 
-    const studentsRef = useMemoFirebase(() => {
+    const studentsRef = useMemo(() => {
         if (!firestore || !institutionId || !classroomId) return null;
         return collection(firestore, 'institutions', institutionId, 'Aulas', classroomId, 'Alumnos');
     }, [firestore, institutionId, classroomId]);

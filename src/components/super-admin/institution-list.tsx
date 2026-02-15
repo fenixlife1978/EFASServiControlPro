@@ -1,6 +1,7 @@
 'use client';
 
-import { useCollection, useFirestore, useMemoFirebase, updateDocumentNonBlocking, deleteDocumentNonBlocking } from '@/firebase';
+import { useMemo } from 'react';
+import { useCollection, useFirestore, updateDocumentNonBlocking, deleteDocumentNonBlocking } from '@/firebase';
 import { collection, doc, query, orderBy } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 import type { Institution } from '@/lib/firestore-types';
@@ -19,7 +20,7 @@ export function InstitutionList() {
   const { toast } = useToast();
   const router = useRouter();
 
-  const institutionsRef = useMemoFirebase(() => {
+  const institutionsRef = useMemo(() => {
     if (!firestore) return null;
     return query(collection(firestore, 'institutions'), orderBy("nombre", "asc"));
   }, [firestore]);

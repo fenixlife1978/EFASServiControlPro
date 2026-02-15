@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { useInstitution } from '@/app/(admin)/institution-context';
 import { StudentsTable } from '@/components/admin/students-table';
 import { useParams } from 'next/navigation';
-import { useDoc, useFirestore, useMemoFirebase } from '@/firebase';
+import { useDoc, useFirestore } from '@/firebase';
 import { doc, collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
 import type { Classroom, PendingEnrollment } from '@/lib/firestore-types';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -26,7 +26,7 @@ export default function ClassroomDetailPage() {
         modalOpenRef.current = !!pendingDevice;
     }, [pendingDevice]);
 
-    const classroomRef = useMemoFirebase(() => {
+    const classroomRef = useMemo(() => {
         if (!firestore || !institutionId || !classroomId) return null;
         return doc(firestore, 'institutions', institutionId, 'Aulas', classroomId);
     }, [firestore, institutionId, classroomId]);

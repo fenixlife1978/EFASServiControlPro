@@ -9,7 +9,7 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from '@/components/ui/label';
 import QRCode from 'react-qr-code';
-import { useFirestore, useDoc, useCollection, useMemoFirebase } from '@/firebase';
+import { useFirestore, useDoc, useCollection } from '@/firebase';
 import { collection, doc } from 'firebase/firestore';
 import { EnrollmentModal } from '@/components/admin/enrollment-modal';
 import type { PendingEnrollment, Classroom } from '@/lib/firestore-types';
@@ -26,14 +26,14 @@ export default function EnrollmentPage() {
     const { institutionId } = useInstitution();
 
     // Fetch classrooms
-    const classroomsRef = useMemoFirebase(() => {
+    const classroomsRef = useMemo(() => {
         if (!firestore || !institutionId) return null;
         return collection(firestore, 'institutions', institutionId, 'Aulas');
     }, [firestore, institutionId]);
     const { data: classrooms, isLoading: classroomsLoading } = useCollection<Classroom>(classroomsRef);
 
     // Listen for pending enrollment
-    const enrollmentDocRef = useMemoFirebase(() => {
+    const enrollmentDocRef = useMemo(() => {
         if (!firestore || !enrollmentId) return null;
         return doc(firestore, 'pending_enrollments', enrollmentId);
     }, [firestore, enrollmentId]);

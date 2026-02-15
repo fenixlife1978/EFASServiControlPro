@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useInstitution } from '@/app/(admin)/institution-context';
-import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
+import { useFirestore, useCollection } from '@/firebase';
 import { collection, query, orderBy, getDocs } from 'firebase/firestore';
 import type { Classroom } from '@/lib/firestore-types';
 import { Button } from '@/components/ui/button';
@@ -39,7 +39,7 @@ export default function ClassroomsPage() {
   const firestore = useFirestore();
   const searchParams = useSearchParams();
 
-  const classroomsRef = useMemoFirebase(() => {
+  const classroomsRef = useMemo(() => {
     if (!firestore || !institutionId) return null;
     return query(
         collection(firestore, 'institutions', institutionId, 'Aulas'),
