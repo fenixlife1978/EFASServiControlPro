@@ -17,7 +17,24 @@ import {
 import { signOut as firebaseSignOut } from 'firebase/auth';
 
 export { auth, db, storage };
-export const logout = () => firebaseSignOut(auth);
+
+/**
+ * Función Logout optimizada para EFAS ServiControlPro
+ * Limpia el estado local y cierra la sesión en Firebase.
+ */
+export const logout = async () => {
+  try {
+    await firebaseSignOut(auth);
+    // Limpiamos el ID de institución seleccionada y cualquier otra basura del storage
+    localStorage.removeItem('selectedInstitutionId');
+    // Forzamos redirección al login
+    window.location.href = '/login';
+  } catch (error) {
+    console.error("Error al cerrar sesión:", error);
+  }
+};
+
+export { firebaseSignOut as signOut };
 
 // Hooks de Autenticación
 export const useUser = () => {
@@ -32,13 +49,12 @@ export const useAuth = () => {
 
 export const useFirestore = () => db;
 
-// Hook para documentos individuales (Utilizado en ClassroomDetailPage)
+// Hook para documentos individuales
 export const useDocument = useFBDocument;
-export const useDoc = useFBDocument; // Alias para compatibilidad
+export const useDoc = useFBDocument; 
 
-// Hook de Colección Flexible (Soporta Queries de Ordenamiento)
+// Hook de Colección Flexible (Corregido para evitar Error 2353 de TypeScript)
 export const useCollection = (pathOrQuery: string | Query | CollectionReference) => {
-    // Protección contra rutas nulas o indefinidas (Evita error n.indexOf)
     const isInvalidPath = typeof pathOrQuery === 'string' && 
         (!pathOrQuery || pathOrQuery.includes('undefined') || pathOrQuery.includes('null'));
 
@@ -48,13 +64,13 @@ export const useCollection = (pathOrQuery: string | Query | CollectionReference)
 
     const ref = typeof pathOrQuery === 'string' ? collection(db, pathOrQuery) : pathOrQuery;
     
-    // CORRECCIÓN TS: Eliminamos idField de las opciones para evitar el Error 2353
+    // Eliminamos idField para cumplir con los tipos de la librería
     const [snapshot, loading, error] = useCollectionData(ref as any);
     
-    // Mapeo manual para asegurar que cada objeto tenga su propiedad 'id'
+    // Mapeo manual para inyectar el ID en cada objeto
     const value = snapshot ? snapshot.map((data: any) => ({
         ...data,
-        id: data.id || '' // Mantiene compatibilidad con el resto de la app
+        id: data.id || '' 
     })) : [];
 
     return { value, loading, error };
@@ -62,15 +78,10 @@ export const useCollection = (pathOrQuery: string | Query | CollectionReference)
 
 // --- Funciones CRUD Estándar para EFAS ServiControlPro ---
 
-/**
- * Agrega un documento validando que el path sea una cadena válida.
- * Evita el error "n.indexOf is not a function" de Firebase.
- */
 export const addDocumentNonBlocking = async (path: string, data: any) => {
   try {
-    // Validación crítica de ruta antes de llamar a Firebase
     if (!path || typeof path !== 'string' || path.includes('undefined') || path.includes('null')) {
-        console.error("Path inválido detectado en addDocumentNonBlocking:", path);
+        console.error("Path inválido detectado:", path);
         return { success: false, error: "Ruta de base de datos no válida" };
     }
 
@@ -93,7 +104,7 @@ export const updateDocumentNonBlocking = async (collectionName: string, id: stri
     await updateDoc(doc(db, collectionName, id), {
         ...data,
         updatedAt: serverTimestamp()
-    });
+      });
     return { success: true };
   } catch (error: any) {
     console.error("Error updateDocument:", error);
@@ -113,4 +124,3 @@ export const deleteDocumentNonBlocking = async (collectionName: string, id: stri
   }
 };
 
-export { firebaseSignOut as signOut };

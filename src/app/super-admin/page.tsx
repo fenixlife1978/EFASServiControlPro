@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { db, logout } from '@/firebase';
+import { db, logout } from '@/firebase'; // Importamos el logout optimizado de index.ts
 import { collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc, serverTimestamp, query } from 'firebase/firestore';
-import { Building2, Plus, Trash2, LogOut, ExternalLink, Globe } from 'lucide-react';
+import { Building2, Plus, Trash2, LogOut, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from "@/hooks/use-toast";
@@ -24,7 +24,6 @@ export default function SuperAdminDashboard() {
         const data = doc.data();
         return {
           id: doc.id,
-          // Mapeo exacto a tus campos de Firestore
           nombre: data.nombre || "Sin nombre", 
           institutoId: data.InstitutoId || doc.id, 
           status: data.status || 'published',
@@ -38,18 +37,32 @@ export default function SuperAdminDashboard() {
     return () => unsubscribe();
   }, []);
 
+  // Función de cierre de sesión corregida
+  const handleLogout = async () => {
+    try {
+      // El logout de nuestro index.ts ya limpia localStorage y redirige
+      await logout();
+    } catch (error) {
+      console.error("Error al salir:", error);
+      toast({ 
+        variant: "destructive", 
+        title: "Error", 
+        description: "No se pudo cerrar la sesión correctamente." 
+      });
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.institutoId) return;
     
     try {
-      // Usamos el InstitutoId manual como ID del documento para que coincida con tu ruta /institutions/CMG-002
       const customId = formData.institutoId.trim().toUpperCase();
       const docRef = doc(db, "institutions", customId);
       
       await setDoc(docRef, {
         nombre: formData.nombre,
-        InstitutoId: customId, // Se guarda con I mayúscula como indicaste
+        InstitutoId: customId,
         logoUrl: formData.logoUrl,
         status: 'published',
         createdAt: serverTimestamp(),
@@ -72,20 +85,12 @@ export default function SuperAdminDashboard() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("¿Estás seguro que deseas eliminar esta institución? Esta acción es irreversible.")) return;
+    if (!confirm("¿Estás seguro que deseas eliminar esta institución?")) return;
     try {
       await deleteDoc(doc(db, "institutions", id));
-      toast({
-        title: "Institución Eliminada",
-        description: "El registro ha sido borrado permanentemente.",
-      });
+      toast({ title: "Eliminada", description: "Registro borrado permanentemente." });
     } catch (error) {
-      console.error("Error deleting institution: ", error);
-      toast({
-        title: "Error",
-        description: "No se pudo eliminar la institución.",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: "No se pudo eliminar.", variant: "destructive" });
     }
   };
 
@@ -97,21 +102,27 @@ export default function SuperAdminDashboard() {
             EFAS <span className="text-orange-500">ServiControlPro</span>
           </h1>
         </div>
-        <Button onClick={() => logout()} variant="destructive" size="sm" className="bg-red-900/20 text-red-500 border border-red-900/50 italic font-black">
+        
+        {/* Botón de SALIR Actualizado */}
+        <Button 
+          onClick={handleLogout} 
+          variant="destructive" 
+          size="sm" 
+          className="bg-red-900/20 hover:bg-red-900/40 text-red-500 border border-red-900/50 italic font-black rounded-lg px-6 transition-all"
+        >
           <LogOut className="w-4 h-4 mr-2" /> SALIR
         </Button>
       </header>
 
       <main className="max-w-7xl mx-auto space-y-6">
-        {/* Registro Estilo Imagen */}
-        <section className="bg-[#11141d] border border-white/5 rounded-3xl p-8">
+        <section className="bg-[#11141d] border border-white/5 rounded-3xl p-8 shadow-xl">
           <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-6 items-end">
             <div className="space-y-2">
               <label className="text-[10px] font-black text-slate-500 uppercase">Nombre</label>
               <input 
                 value={formData.nombre}
                 onChange={e => setFormData({...formData, nombre: e.target.value})}
-                className="w-full bg-[#1c212c] rounded-xl py-4 px-4 text-sm outline-none focus:ring-2 focus:ring-orange-500"
+                className="w-full bg-[#1c212c] rounded-xl py-4 px-4 text-sm outline-none focus:ring-2 focus:ring-orange-500 text-slate-200"
                 placeholder="Nombre de la Institución"
                 required
               />
@@ -134,14 +145,13 @@ export default function SuperAdminDashboard() {
                 className="w-full bg-[#1c212c] rounded-xl py-4 px-4 text-sm outline-none focus:ring-2 focus:ring-orange-500"
               />
             </div>
-            <Button type="submit" className="bg-orange-600 hover:bg-orange-700 text-white font-black italic rounded-2xl py-7 uppercase">
+            <Button type="submit" className="bg-orange-600 hover:bg-orange-700 text-white font-black italic rounded-2xl py-7 uppercase shadow-lg shadow-orange-900/20">
               <Plus className="w-5 h-5 mr-2" /> REGISTRAR
             </Button>
           </form>
         </section>
 
-        {/* Tabla */}
-        <section className="bg-white rounded-3xl overflow-hidden shadow-2xl">
+        <section className="bg-white rounded-3xl overflow-hidden shadow-2xl border border-slate-200">
           <table className="w-full text-left">
             <thead>
               <tr className="bg-slate-50 border-b text-slate-800 text-[11px] font-black uppercase">
@@ -153,7 +163,7 @@ export default function SuperAdminDashboard() {
             </thead>
             <tbody className="text-slate-600 font-bold">
               {institutions.map((inst) => (
-                <tr key={inst.id} className="border-b border-slate-50 hover:bg-slate-50">
+                <tr key={inst.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
                   <td className="px-8 py-6 text-slate-900">{inst.nombre}</td>
                   <td className="px-8 py-6">
                     <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-md text-xs font-black">
@@ -179,7 +189,7 @@ export default function SuperAdminDashboard() {
                                 router.push('/dashboard');
                             }}
                             variant="outline" 
-                            className="border-orange-200 text-orange-600 font-black italic text-xs rounded-xl uppercase"
+                            className="border-orange-200 text-orange-600 font-black italic text-xs rounded-xl uppercase hover:bg-orange-50"
                         >
                             <ExternalLink className="w-3 h-3 mr-2" /> GESTIONAR
                         </Button>
