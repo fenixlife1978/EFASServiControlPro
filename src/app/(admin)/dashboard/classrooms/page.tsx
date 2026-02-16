@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useInstitution } from '@/app/(admin)/institution-context';
-import { useFirestore, useCollection } from '@/firebase';
-import { collection, query, orderBy, getDocs } from 'firebase/firestore';
+import { db, useCollection } from '@/firebase';
+import { collection, query, orderBy, getDocs, CollectionReference, Query } from 'firebase/firestore';
 import type { Classroom } from '@/lib/firestore-types';
 import { Button } from '@/components/ui/button';
 import { Building, Loader2, School } from 'lucide-react';
@@ -13,20 +13,18 @@ import { useSearchParams } from 'next/navigation';
 import { Card, CardHeader, CardFooter } from '@/components/ui/card';
 import React from 'react';
 
-// Componente para contar alumnos con la ruta corregida [cite: 2026-01-27]
 const StudentCount = ({ institutionId, classroomId }: { institutionId: string; classroomId: string }) => {
     const [count, setCount] = useState(0);
-    const firestore = useFirestore();
 
     useEffect(() => {
         const fetchCount = async () => {
-            if (!firestore || !institutionId || !classroomId) return;
-            const studentsRef = collection(firestore, 'institutions', institutionId, 'Aulas', classroomId, 'Alumnos');
+            if (!db || !institutionId || !classroomId) return;
+            const studentsRef = collection(db, 'institutions', institutionId, 'Aulas', classroomId, 'Alumnos');
             const snapshot = await getDocs(studentsRef);
             setCount(snapshot.size);
         };
         fetchCount();
-    }, [firestore, institutionId, classroomId]);
+    }, [institutionId, classroomId]);
 
     return (
         <span className="text-xs font-bold text-slate-400">{count} Alumnos Registrados</span>
@@ -36,18 +34,32 @@ const StudentCount = ({ institutionId, classroomId }: { institutionId: string; c
 export default function ClassroomsPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const { institutionId } = useInstitution();
-  const firestore = useFirestore();
   const searchParams = useSearchParams();
 
+  // Definimos la referencia con un fallback de colección vacía para evitar el error de 'undefined'
   const classroomsRef = useMemo(() => {
-    if (!firestore || !institutionId) return null;
+    if (!db || !institutionId) {
+        // Retornamos una referencia temporal para que el hook no reciba null/undefined
+        return query(collection(db, 'temp')); 
+    }
     return query(
-        collection(firestore, 'institutions', institutionId, 'Aulas'),
+        collection(db, 'institutions', institutionId, 'Aulas'),
         orderBy('nombre_completo')
     );
-  }, [firestore, institutionId]);
+  }, [institutionId]);
 
-  const { data: classrooms, isLoading } = useCollection<Classroom>(classroomsRef);
+  // Usamos la desestructuración de objeto que pedía el error anterior
+  const { value, loading } = useCollection(classroomsRef);
+
+  // Si value es DocumentData[], lo mapeamos directamente
+  const classrooms = useMemo(() => {
+    if (!value || !institutionId) return [];
+    // Si el error dice que .docs no existe, es porque value es directamente el array
+    return (value as any[]).map((docData: any) => ({
+        id: docData.id, 
+        ...docData
+    })) as Classroom[];
+  }, [value, institutionId]);
 
   const createLink = (path: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -77,14 +89,14 @@ export default function ClassroomsPage() {
             </Button>
         </header>
 
-        {isLoading && (
+        {loading && (
             <div className="flex h-64 w-full items-center justify-center">
                 <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
             </div>
         )}
         
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {!isLoading && classrooms?.map(room => (
+            {!loading && classrooms.map((room) => (
                 <Card key={room.id} className="rounded-2xl border-slate-200 hover:shadow-xl hover:border-blue-300 transition-all group overflow-hidden bg-white">
                     <CardHeader className="pb-4">
                         <div className="flex justify-between items-start mb-4">
@@ -110,7 +122,7 @@ export default function ClassroomsPage() {
             ))}
         </div>
 
-        {!isLoading && (!classrooms || classrooms.length === 0) && (
+        {!loading && classrooms.length === 0 && (
             <div className="col-span-full flex flex-col items-center justify-center h-full text-center p-12 border-4 border-dashed border-slate-100 rounded-3xl mt-12 bg-white">
                 <Building className="h-20 w-20 mb-4 text-slate-200" />
                 <h2 className="text-2xl font-black text-slate-800 uppercase italic tracking-tighter">Sin salones/aulas configurados</h2>

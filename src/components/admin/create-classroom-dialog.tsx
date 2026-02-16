@@ -22,8 +22,7 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { useFirestore, addDocumentNonBlocking } from '@/firebase';
-import { collection, serverTimestamp } from 'firebase/firestore';
+import { addDocumentNonBlocking } from '@/firebase'; // Eliminamos useFirestore si no se usa directamente
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
 
@@ -45,7 +44,6 @@ export function CreateClassroomDialog({
   institutionId,
 }: CreateClassroomDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const firestore = useFirestore();
   const { toast } = useToast();
 
   const form = useForm<z.infer<typeof formSchema>>({
@@ -58,32 +56,41 @@ export function CreateClassroomDialog({
   });
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
-    if (!firestore) {
-      toast({ variant: 'destructive', title: 'Error', description: 'Firestore no está disponible.' });
+    // Validación de seguridad para la ruta
+    if (!institutionId) {
+      toast({ variant: 'destructive', title: 'Error', description: 'No hay un InstitutoId activo.' });
       return;
     }
+
     setIsSubmitting(true);
     
     try {
-        const classroomsRef = collection(firestore, 'institutions', institutionId, 'Aulas');
+        // CORRECCIÓN: Pasamos el path como STRING para evitar el error n.indexOf
+        const path = `institutions/${institutionId}/Aulas`;
         const nombre_completo = `${values.grado} - Sección ${values.seccion}`;
         
-        await addDocumentNonBlocking(classroomsRef, {
-            institutionId,
+        const result = await addDocumentNonBlocking(path, {
             grado: values.grado,
             seccion: values.seccion,
             capacidad: values.capacidad || null,
             nombre_completo,
-            status: 'published', // Default to published
-            createdAt: serverTimestamp(),
+            status: 'published',
         });
 
-        toast({ title: 'Éxito', description: `El salon/aula "${nombre_completo}" ha sido creado.` });
-        form.reset();
-        onOpenChange(false);
-    } catch (error) {
+        if (result.success) {
+            toast({ title: 'Éxito', description: `El salon/aula "${nombre_completo}" ha sido creado.` });
+            form.reset();
+            onOpenChange(false);
+        } else {
+            throw new Error(result.error);
+        }
+    } catch (error: any) {
         console.error('Error creating classroom: ', error);
-        toast({ variant: 'destructive', title: 'Error en Firestore', description: 'No se pudo crear el salon/aula.' });
+        toast({ 
+          variant: 'destructive', 
+          title: 'Error en Firestore', 
+          description: error.message || 'No se pudo crear el salon/aula.' 
+        });
     } finally {
         setIsSubmitting(false);
     }
@@ -107,7 +114,7 @@ export function CreateClassroomDialog({
                 <FormItem>
                   <FormLabel className="block text-xs font-black text-slate-400 uppercase mb-2">Grado (Ej: 1er Grado, Nivel Inicial)</FormLabel>
                   <FormControl>
-                    <Input className="bg-slate-50 border-slate-200 p-4 h-auto rounded-xl" placeholder="Grado al que pertenece el salon/aula" {...field} />
+                    <Input className="bg-slate-50 border-slate-200 p-4 h-auto rounded-xl" placeholder="Grado al que pertenece el salon" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -118,9 +125,9 @@ export function CreateClassroomDialog({
               name="seccion"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel className="block text-xs font-black text-slate-400 uppercase mb-2">Identificación del Salon/Aula (Ej: "A")</FormLabel>
+                  <FormLabel className="block text-xs font-black text-slate-400 uppercase mb-2">Sección / Identificación (Ej: "A")</FormLabel>
                   <FormControl>
-                    <Input className="bg-slate-50 border-slate-200 p-4 h-auto rounded-xl" placeholder="Nombre o Letra del Salon/Aula" {...field} />
+                    <Input className="bg-slate-50 border-slate-200 p-4 h-auto rounded-xl" placeholder="Nombre o Letra de la sección" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -149,7 +156,7 @@ export function CreateClassroomDialog({
                 <Button type="button" variant="ghost" className="flex-1 h-auto py-4 font-bold text-slate-400 hover:bg-slate-100 rounded-xl" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
                     Cancelar
                 </Button>
-                <Button type="submit" className="flex-1 h-auto py-4 font-bold rounded-xl shadow-lg shadow-blue-200" disabled={isSubmitting}>
+                <Button type="submit" className="flex-1 h-auto py-4 font-bold rounded-xl bg-orange-500 hover:bg-orange-600 shadow-lg shadow-orange-200" disabled={isSubmitting}>
                     {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                     {isSubmitting ? 'Creando...' : 'Crear Salon/Aula'}
                 </Button>

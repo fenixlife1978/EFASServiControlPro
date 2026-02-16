@@ -4,9 +4,11 @@ import { useEffect, useState, useRef, useMemo } from 'react';
 import { useInstitution } from '@/app/(admin)/institution-context';
 import { StudentsTable } from '@/components/admin/students-table';
 import { useParams } from 'next/navigation';
-import { useDoc, useFirestore } from '@/firebase';
+// Importamos la base de datos de tu config, pero los hooks directamente de la librería
+import { db } from '@/firebase'; 
+import { useDocument } from 'react-firebase-hooks/firestore';
 import { doc, collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
-import type { Classroom, PendingEnrollment } from '@/lib/firestore-types';
+import type { Classroom } from '@/lib/firestore-types';
 import { Skeleton } from '@/components/ui/skeleton';
 import EnrollmentQR from '@/components/admin/EnrollmentQR'; 
 import { useToast } from '@/hooks/use-toast';
@@ -16,7 +18,6 @@ export default function ClassroomDetailPage() {
     const params = useParams();
     const classroomId = params.classroomId as string;
     const { institutionId } = useInstitution();
-    const firestore = useFirestore();
     const { toast } = useToast();
 
     const [pendingDevice, setPendingDevice] = useState<any>(null);
@@ -27,19 +28,19 @@ export default function ClassroomDetailPage() {
     }, [pendingDevice]);
 
     const classroomRef = useMemo(() => {
-        if (!firestore || !institutionId || !classroomId) return null;
-        return doc(firestore, 'institutions', institutionId, 'Aulas', classroomId);
-    }, [firestore, institutionId, classroomId]);
+        if (!db || !institutionId || !classroomId) return null;
+        // Referencia a la subcolección Aulas usando InstitutoId (institutionId)
+        return doc(db, 'institutions', institutionId, 'Aulas', classroomId);
+    }, [institutionId, classroomId]);
     
-    const { data: classroom, isLoading } = useDoc<Classroom>(classroomRef);
+    // Usamos el hook directamente
+    const [value, loading] = useDocument(classroomRef);
 
-    // Listener para detectar nuevas tablets intentando inscribirse [cite: 2026-01-27]
     useEffect(() => {
-        if (!firestore || !institutionId || !classroomId) return;
+        if (!db || !institutionId || !classroomId) return;
 
-        // Escuchamos la colección de inscripciones pendientes
         const q = query(
-            collection(firestore, 'pending_enrollments'),
+            collection(db, 'pending_enrollments'),
             where('institutionId', '==', institutionId),
             where('classroomId', '==', classroomId),
             orderBy('timestamp', 'desc')
@@ -59,7 +60,7 @@ export default function ClassroomDetailPage() {
         });
 
         return () => unsubscribe();
-    }, [firestore, institutionId, classroomId, toast]);
+    }, [institutionId, classroomId, toast]);
 
     return (
         <>
@@ -68,21 +69,23 @@ export default function ClassroomDetailPage() {
                 enrollmentId={pendingDevice.id}
                 deviceId={pendingDevice.deviceInfo.macAddress}
                 activeId={institutionId!}
-                workingCondoId={classroomId}
+                workingCondoId={classroomId} 
                 onClose={() => setPendingDevice(null)}
               />
             )}
             <div className="space-y-8">
                 <header className="flex justify-between items-center">
                     <div>
-                        {isLoading ? (
+                        {loading ? (
                             <>
                                 <Skeleton className="h-8 w-48 mb-2" />
                                 <Skeleton className="h-4 w-72" />
                             </>
                         ) : (
                             <>
-                                <h1 className="text-2xl font-black text-slate-800">{classroom?.nombre_completo || 'Salon/Aula'}</h1>
+                                <h1 className="text-2xl font-black text-slate-800">
+                                    {(value?.data() as Classroom)?.nombre_completo || 'Salon/Aula'}
+                                </h1>
                                 <p className="text-slate-500 text-sm">Gestiona los alumnos y dispositivos de este salon/aula.</p>
                             </>
                         )}
