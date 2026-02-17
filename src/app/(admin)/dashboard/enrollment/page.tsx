@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from '@/components/ui/label';
 import QRCode from 'react-qr-code';
 import { useFirestore, useDoc, useCollection } from '@/firebase';
-import { collection, doc } from 'firebase/firestore';
+import { collection, doc, DocumentReference, CollectionReference, Query } from 'firebase/firestore';
 import { EnrollmentModal } from '@/components/admin/enrollment-modal';
 import type { PendingEnrollment, Classroom } from '@/lib/firestore-types';
 import { useInstitution } from '../../institution-context';
@@ -25,20 +25,26 @@ export default function EnrollmentPage() {
     const { toast } = useToast();
     const { institutionId } = useInstitution();
 
-    // Fetch classrooms
+    // Corrección Error 2345: Casting a Query para que acepte la referencia o null
     const classroomsRef = useMemo(() => {
         if (!firestore || !institutionId) return null;
-        return collection(firestore, 'institutions', institutionId, 'Aulas');
+        return collection(firestore, 'institutions', institutionId, 'Aulas') as unknown as Query<Classroom>;
     }, [firestore, institutionId]);
-    const { data: classrooms, isLoading: classroomsLoading } = useCollection<Classroom>(classroomsRef);
 
-    // Listen for pending enrollment
+    // Usamos 'any' en el hook solo si el null da problemas, o pasamos la ref directamente
+    const classroomsResult = useCollection(classroomsRef as any);
+    const classrooms = classroomsResult?.value;
+    const classroomsLoading = classroomsResult?.loading;
+
     const enrollmentDocRef = useMemo(() => {
         if (!firestore || !enrollmentId) return null;
-        return doc(firestore, 'pending_enrollments', enrollmentId);
+        return doc(firestore, 'pending_enrollments', enrollmentId) as DocumentReference<PendingEnrollment>;
     }, [firestore, enrollmentId]);
 
-    const { data: pendingEnrollment } = useDoc<PendingEnrollment>(enrollmentDocRef);
+    // Corrección Error 2339: Accedemos al valor según la estructura real de tu DocumentHook
+    // Si 'data' no existe, usualmente en estos hooks es 'value'
+    const enrollmentResult = useDoc<PendingEnrollment>(enrollmentDocRef as any);
+    const pendingEnrollment = (enrollmentResult as any)?.value || (enrollmentResult as any)?.data;
 
     useEffect(() => {
         if (pendingEnrollment) {
@@ -102,56 +108,54 @@ export default function EnrollmentPage() {
 
             <header className="flex justify-between items-center">
                 <div>
-                    <h2 className="text-2xl font-black text-slate-800">Inscripción de Dispositivos</h2>
-                    <p className="text-slate-500 text-sm">Genera un código QR para que un nuevo dispositivo se una a un aula.</p>
+                    <h2 className="text-2xl font-black text-slate-800 italic uppercase">Inscripción de Dispositivos</h2>
+                    <p className="text-slate-500 text-sm font-medium">EFAS ServiControlPro • Gestión de Acceso</p>
                 </div>
                 <AdminUserNav />
             </header>
 
-            <Card className="max-w-md mx-auto">
-                <CardHeader>
-                    <CardTitle>Generador de Código QR</CardTitle>
-                    <CardDescription>
-                        Selecciona un aula para generar un código QR único de inscripción.
-                    </CardDescription>
+            <Card className="max-w-md mx-auto border-2 border-slate-100 shadow-xl rounded-3xl">
+                <CardHeader className="bg-slate-50/50 border-b">
+                    <CardTitle className="text-xl font-bold uppercase tracking-tight text-slate-700">Generador de Código QR</CardTitle>
+                    <CardDescription>Selecciona un aula para vincular la tablet.</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-6">
+                <CardContent className="p-8 space-y-6">
                     {!qrValue ? (
                          <div className="space-y-4">
                             <div className="grid gap-2">
-                                <Label htmlFor="classroom-select">Seleccionar Aula</Label>
+                                <Label htmlFor="classroom-select" className="font-bold text-[10px] uppercase text-slate-400 tracking-[0.2em]">Configurar Aula</Label>
                                 <Select onValueChange={setSelectedClassroom} value={selectedClassroom || ''} disabled={classroomsLoading}>
-                                    <SelectTrigger id="classroom-select">
-                                        <SelectValue placeholder={classroomsLoading ? "Cargando aulas..." : "Selecciona un aula..."} />
+                                    <SelectTrigger id="classroom-select" className="h-12 rounded-xl border-slate-200">
+                                        <SelectValue placeholder={classroomsLoading ? "Cargando..." : "Seleccionar..."} />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {classrooms?.map(c => (
+                                        {(classrooms as any[])?.map((c: Classroom) => (
                                             <SelectItem key={c.id} value={c.id}>{c.nombre_completo}</SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>
                             </div>
-                            <Button onClick={handleGenerateQR} disabled={!selectedClassroom || classroomsLoading} className="w-full">
+                            <Button onClick={handleGenerateQR} disabled={!selectedClassroom || classroomsLoading} className="w-full h-12 bg-orange-600 hover:bg-orange-500 font-black rounded-xl shadow-lg shadow-orange-600/20 transition-all">
                                 {classroomsLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <QrCode className="mr-2 h-4 w-4" />}
-                                Generar Código QR
+                                GENERAR QR DE ACCESO
                             </Button>
                         </div>
                     ) : (
-                        <div className="flex flex-col items-center text-center text-muted-foreground space-y-4">
-                            <div className='p-4 bg-white rounded-lg'>
-                                <QRCode value={qrValue} size={256} />
+                        <div className="flex flex-col items-center text-center space-y-6">
+                            <div className='p-6 bg-white rounded-[2rem] shadow-inner border border-slate-100'>
+                                <QRCode value={qrValue} size={250} level="H" />
                             </div>
                            
-                            <Alert>
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                <AlertTitle>Esperando Escaneo...</AlertTitle>
-                                <AlertDescription>
-                                    Pídele al usuario de la tablet que escanee este código para iniciar el proceso de inscripción.
+                            <Alert className="bg-orange-50 border-orange-200 rounded-2xl">
+                                <Loader2 className="h-4 w-4 animate-spin text-orange-600" />
+                                <AlertTitle className="font-black italic uppercase text-orange-800 text-xs">Vínculo Pendiente</AlertTitle>
+                                <AlertDescription className="text-orange-700 font-medium text-[10px] uppercase tracking-wider">
+                                    Escanea desde la tablet para enrolar.
                                 </AlertDescription>
                             </Alert>
 
-                            <Button onClick={resetFlow} variant="outline">
-                                Cancelar / Generar Otro
+                            <Button onClick={resetFlow} variant="ghost" className="text-slate-400 hover:text-red-500 font-bold text-[10px] uppercase tracking-widest">
+                                Cancelar Proceso
                             </Button>
                         </div>
                     )}

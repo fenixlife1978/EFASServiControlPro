@@ -1,56 +1,77 @@
 'use client';
 
-import React from 'react';
-import { SecurityAlertListener } from '@/components/student/SecurityAlertListener';
-import { ShieldAlert, Lock, Home } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import React, { useEffect, useState } from 'react';
+import { db } from '@/firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { ShieldAlert, Globe, ArrowLeft, AlertTriangle } from 'lucide-react';
+import Link from 'next/link';
 
 export default function BlockedPage() {
-  // Estos datos vendrían de la sesión del alumno en el dispositivo
-  const institutionId = typeof window !== 'undefined' ? localStorage.getItem('activeInstitutoId') : '';
-  const studentId = typeof window !== 'undefined' ? localStorage.getItem('activeStudentId') : '';
+  const [institutionId, setInstitutionId] = useState<string | null>(null);
+  const [institutionData, setInstitutionData] = useState<{nombre?: string} | null>(null);
+  const [studentId, setStudentId] = useState<string>('CARGANDO...');
+
+  useEffect(() => {
+    // Verificamos que estamos en el cliente antes de usar localStorage
+    if (typeof window !== 'undefined') {
+      const savedId = localStorage.getItem('selectedInstitutionId');
+      const savedStudent = localStorage.getItem('activeStudentId') || 'SIN ID';
+      setInstitutionId(savedId);
+      setStudentId(savedStudent);
+
+      if (savedId) {
+        const unsub = onSnapshot(doc(db, 'institutions', savedId), (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data();
+            setInstitutionData({ nombre: data.nombre });
+          }
+        });
+        return () => unsub();
+      }
+    }
+  }, []);
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center p-6 font-sans">
-      {/* El "Oído" de seguridad: Si el director manda mensaje, se activa sobre esta pantalla */}
-      <SecurityAlertListener institutionId={institutionId || ''} studentId={studentId || ''} />
+    <div className="min-h-screen bg-[#0a0c10] text-white font-sans p-6 flex flex-col items-center justify-center relative overflow-hidden">
+      <div className="absolute inset-0 opacity-5">
+        <div className="absolute -top-20 -left-20 w-96 h-96 bg-red-600 rounded-full blur-3xl"></div>
+        <div className="absolute -bottom-20 -right-20 w-96 h-96 bg-orange-600 rounded-full blur-3xl"></div>
+      </div>
 
-      <div className="max-w-2xl w-full text-center space-y-8">
-        <div className="flex justify-center relative">
-          <div className="absolute inset-0 bg-red-600/20 blur-[100px] rounded-full" />
-          <div className="relative bg-red-600/10 border border-red-600/20 p-8 rounded-[3rem]">
-            <ShieldAlert className="w-24 h-24 text-red-600 animate-pulse" />
-          </div>
+      <main className="max-w-xl w-full text-center space-y-10 relative z-10">
+        <div className="mx-auto w-32 h-32 bg-red-500/10 rounded-full flex items-center justify-center border-4 border-red-500/20 shadow-[0_0_30px_rgba(239,68,68,0.2)]">
+          <ShieldAlert className="w-20 h-20 text-red-500 animate-pulse" />
         </div>
 
         <div className="space-y-4">
-          <h1 className="text-5xl font-black italic tracking-tighter uppercase">
-            CONTENIDO <span className="text-red-600">RESTRINGIDO</span>
-          </h1>
-          <div className="flex items-center justify-center gap-2 text-slate-500 font-bold uppercase tracking-widest text-xs">
-            <Lock className="w-4 h-4" /> Filtro de Seguridad EFAS ServiControlPro Activo
+          <div className="flex items-center justify-center gap-3">
+            <AlertTriangle className="text-orange-500 w-5 h-5" />
+            <span className="text-[10px] font-black text-orange-500 uppercase tracking-[0.3em] bg-orange-500/10 px-3 py-1 rounded-full">
+              Protocolo de Seguridad
+            </span>
           </div>
-        </div>
-
-        <div className="bg-[#11141d] border border-white/5 rounded-3xl p-8 shadow-2xl">
-          <p className="text-slate-400 text-lg leading-relaxed">
-            Has intentado acceder a una dirección web no autorizada por la institución. 
-            Esta actividad ha sido <span className="text-white font-bold">reportada automáticamente</span> al panel del Director.
+          <h1 className="text-6xl font-black italic uppercase tracking-tighter leading-none text-white">
+            ACCESO <br /> <span className="text-red-500">DENEGADO</span>
+          </h1>
+          <p className="text-slate-400 text-sm max-w-sm mx-auto font-medium">
+            Este sitio web ha sido restringido por <span className="text-white font-bold">{institutionData?.nombre || 'la institución'}</span> bajo el sistema <span className="font-bold text-white uppercase">EFAS ServControlPro</span>.
           </p>
         </div>
 
-        <div className="pt-4 flex flex-col gap-4 items-center">
-            <p className="text-[10px] text-slate-600 font-black uppercase tracking-[0.3em]">
-                Su IP y Usuario han sido registrados
-            </p>
-            <Button 
-                onClick={() => window.location.href = '/'}
-                className="bg-white hover:bg-slate-200 text-black font-black italic rounded-2xl px-10 py-6 uppercase transition-all"
-            >
-                <Home className="w-5 h-5 mr-2" /> Volver al Inicio
-            </Button>
+        <div className="bg-[#11141d] border border-white/5 p-6 rounded-3xl flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <Globe className="text-slate-600 w-6 h-6" />
+            <div className="text-left">
+              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">ID ESTACIÓN</p>
+              <p className="text-xs font-mono font-bold text-slate-300">{studentId}</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">ESTADO</p>
+            <p className="text-xs font-bold text-red-500 uppercase italic">RESTRINGIDO</p>
+          </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

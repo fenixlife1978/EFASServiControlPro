@@ -1,211 +1,155 @@
 'use client';
 
-import {
-  Users,
-  ShieldCheck,
-  Building,
-  Home,
-  ShieldX,
-  School,
-  Settings,
+import React, { useEffect, Suspense } from 'react';
+import { 
+  ShieldCheck, 
+  LogOut, 
+  LayoutDashboard, 
+  Settings, 
   Download,
+  School
 } from 'lucide-react';
 import Image from 'next/image';
-import {
-  SidebarProvider,
-  Sidebar,
-  SidebarHeader,
-  SidebarContent,
-  SidebarMenu,
-  SidebarMenuItem,
-  SidebarMenuButton,
-  SidebarFooter,
-  SidebarTrigger,
-  SidebarInset,
-} from '@/components/ui/sidebar';
 import Link from 'next/link';
-import { usePathname, redirect, useSearchParams } from 'next/navigation';
+import { usePathname, redirect, useSearchParams, useRouter } from 'next/navigation';
 import { useUser } from '@/firebase';
-import { useEffect, Suspense } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { InstitutionProvider } from './institution-context';
-import { DashboardHeader } from '@/components/admin/dashboard-header';
-import { Logo } from '@/components/common/logo';
-import { cn } from '@/lib/utils';
-import { usePWAInstall } from '@/hooks/usePWAInstall';
 import { PlaceHolderImages } from '@/lib/placeholder-images';
+import { usePWAInstall } from '@/hooks/usePWAInstall';
 
-const AdminSidebar = () => {
-    const pathname = usePathname();
-    const searchParams = useSearchParams();
-    const { user } = useUser();
-    const { installApp, isInstallable, isStandalone } = usePWAInstall();
-    const efasLogo = PlaceHolderImages.find(img => img.id === 'efas-logo');
+// --- COMPONENTE DE NAVEGACIÓN SUPERIOR ---
+const AdminNavbar = () => {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { user } = useUser();
+  const { installApp, isInstallable, isStandalone } = usePWAInstall();
+  const efasLogo = PlaceHolderImages.find(img => img.id === 'efas-logo');
 
-    const createLink = (path: string) => {
-        const params = new URLSearchParams(searchParams.toString());
-        return `${path}?${params.toString()}`;
-    }
+  const handleLogout = () => {
+    localStorage.clear();
+    router.push('/login');
+  };
 
-    const menuItems = [
-      { 
-        label: "Salones/Aulas", 
-        href: "/dashboard/classrooms", 
-        icon: <School className="w-5 h-5" /> 
-      },
-      { 
-        label: "Filtros URL", 
-        href: `/dashboard/seguridad`, 
-        icon: <ShieldCheck className="w-5 h-5" /> 
-      },
-      { 
-        label: "Configuración", 
-        href: "/dashboard/settings", 
-        icon: <Settings className="w-5 h-5" /> 
-      },
-    ];
+  return (
+    <nav className="border-b border-white/5 bg-[#0a0c10]/80 backdrop-blur-md sticky top-0 z-[50]">
+      <div className="max-w-[1600px] mx-auto px-6 h-20 flex items-center justify-between">
+        
+        {/* Logo y Branding */}
+        <Link href="/dashboard" className="flex items-center gap-3 group">
+          <div className="bg-orange-600 p-2 rounded-xl shadow-[0_0_15px_rgba(234,88,12,0.3)] group-hover:scale-105 transition-transform">
+            <ShieldCheck className="text-white w-6 h-6" />
+          </div>
+          <div className="hidden sm:block">
+            <h1 className="text-white font-black italic uppercase tracking-tighter text-lg leading-none">
+              EFAS <span className="text-orange-500">ServiControlPro</span>
+            </h1>
+            <p className="text-[8px] text-slate-500 font-bold uppercase tracking-[0.3em]">Institutional Security</p>
+          </div>
+        </Link>
 
-    return (
-        <Sidebar>
-            <SidebarHeader className="border-b border-sidebar-border/50">
-              <div className="flex flex-col items-center gap-2 px-6 py-10">
-                <div className="relative group">
-                  <div className="absolute -inset-1 bg-gradient-to-r from-orange-500 to-blue-950 rounded-full blur opacity-25 group-hover:opacity-40 transition"></div>
-                  <div className="relative w-[60px] h-[60px] rounded-full border-2 border-white/10 overflow-hidden">
-                    {efasLogo ? (
-                      <Image src={efasLogo.imageUrl} alt="EFAS Logo" width={60} height={60} data-ai-hint={efasLogo.imageHint} className="object-cover" />
-                    ) : (
-                      <div className="w-full h-full bg-slate-700"></div>
-                    )}
-                  </div>
-                </div>
-                <div className="text-center mt-2">
-                  <h1 className="text-xl font-black italic tracking-tighter leading-none text-white">
-                    EFAS <span className="text-orange-500">ServiControlPro</span>
-                  </h1>
-                  <p className="text-[8px] text-slate-500 font-bold uppercase tracking-[0.1em] mt-1">
-                    Control Parental Multi-Usuarios
-                  </p>
-                </div>
-              </div>
-            </SidebarHeader>
+        {/* Enlaces de Navegación Centrales */}
+        <div className="hidden lg:flex items-center gap-8">
+          <Link 
+            href="/dashboard" 
+            className={`text-[11px] font-black uppercase italic flex items-center gap-2 transition-colors ${pathname === '/dashboard' ? 'text-orange-500' : 'text-slate-400 hover:text-white'}`}
+          >
+            <LayoutDashboard className="w-4 h-4" /> Dashboard
+          </Link>
+          <Link 
+            href="/dashboard/classrooms" 
+            className={`text-[11px] font-black uppercase italic flex items-center gap-2 transition-colors ${pathname.includes('classrooms') ? 'text-orange-500' : 'text-slate-400 hover:text-white'}`}
+          >
+            <School className="w-4 h-4" /> Aulas
+          </Link>
+          <Link 
+            href="/institutions" 
+            className={`text-[11px] font-black uppercase italic flex items-center gap-2 transition-colors ${pathname.includes('institutions') ? 'text-orange-500' : 'text-slate-400 hover:text-white'}`}
+          >
+            <Settings className="w-4 h-4" /> Instituciones
+          </Link>
+        </div>
 
-            <SidebarContent className='p-4'>
-                <SidebarMenu>
-                    {menuItems.map((item) => (
-                        <SidebarMenuItem key={item.href}>
-                            <SidebarMenuButton 
-                                asChild 
-                                isActive={pathname.startsWith(item.href)} 
-                                className="justify-start gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all group data-[active=true]:bg-orange-500 data-[active=true]:text-white data-[active=true]:shadow-lg data-[active=true]:shadow-orange-500/20 text-slate-400 hover:bg-white/5 hover:text-white"
-                            >
-                                <Link href={createLink(item.href)}>
-                                    <span className={cn(
-                                      "transition-colors text-slate-500 group-hover:text-orange-400",
-                                      pathname.startsWith(item.href) && "text-white"
-                                    )}>
-                                      {item.icon}
-                                    </span>
-                                    <span>{item.label}</span>
-                                </Link>
-                            </SidebarMenuButton>
-                        </SidebarMenuItem>
-                    ))}
-                </SidebarMenu>
-            </SidebarContent>
+        {/* Perfil y Acciones */}
+        <div className="flex items-center gap-6">
+          {/* PWA Install Button (Solo si es instalable) */}
+          {isInstallable && !isStandalone && (
+            <button 
+              onClick={installApp}
+              className="hidden md:flex items-center gap-2 bg-orange-500/10 hover:bg-orange-500 text-orange-500 hover:text-white border border-orange-500/20 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all"
+            >
+              <Download className="w-3 h-3" /> Instalar App
+            </button>
+          )}
 
-            <SidebarFooter className='border-t border-sidebar-border/50 p-4'>
-                 {user?.email === 'vallecondo@gmail.com' && (
-                     <div className="bg-sidebar-accent rounded-2xl p-4">
-                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">Super Admin</p>
-                        <p className="text-[11px] font-bold text-slate-300 mt-1 truncate">{user.email}</p>
-                        <button
-                          onClick={installApp}
-                          disabled={!isInstallable}
-                          className={`w-full mt-4 flex items-center justify-center gap-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-tighter transition-all ${
-                            isInstallable
-                              ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-500/20'
-                              : 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50'
-                          }`}
-                        >
-                          <Download className="w-3 h-3" />
-                          {isStandalone ? 'App Instalada' : isInstallable ? 'Instalar App' : 'No Soportado'}
-                        </button>
-                    </div>
-                 )}
-            </SidebarFooter>
-        </Sidebar>
-    );
-}
+          <div className="flex items-center gap-4 border-l border-white/10 pl-6">
+            <div className="text-right hidden sm:block">
+              <p className="text-[10px] font-black text-white uppercase italic">{user?.email}</p>
+              <p className="text-[8px] font-bold text-orange-500 uppercase tracking-widest">Super Admin</p>
+            </div>
+            <button 
+              onClick={handleLogout}
+              className="bg-white/5 hover:bg-red-500/10 p-3 rounded-xl border border-white/5 hover:border-red-500/20 transition-all group"
+              title="Cerrar Sesión"
+            >
+              <LogOut className="w-4 h-4 text-slate-500 group-hover:text-red-500" />
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </nav>
+  );
+};
 
 function AdminLayoutLoading() {
-    return (
-      <div className="flex h-screen w-full">
-        <div className="hidden md:flex h-full w-64 flex-col border-r bg-sidebar">
-            <div className='p-6'><Skeleton className="h-8 w-32 bg-sidebar-accent" /></div>
-            <div className="p-4 space-y-2">
-                <Skeleton className="h-10 w-full bg-sidebar-accent" />
-                <Skeleton className="h-10 w-full bg-sidebar-accent" />
-                <Skeleton className="h-10 w-full bg-sidebar-accent" />
-            </div>
-        </div>
-        <div className="flex-1 flex flex-col bg-background">
-            <main className="flex-1 p-8">
-                <Skeleton className="h-full w-full" />
-            </main>
-        </div>
+  return (
+    <div className="min-h-screen bg-[#0a0c10] flex flex-col">
+      <div className="h-20 border-b border-white/5 flex items-center px-6">
+        <Skeleton className="h-8 w-48 bg-white/5" />
       </div>
-    )
+      <div className="flex-1 p-8">
+        <Skeleton className="h-full w-full bg-white/5 rounded-3xl" />
+      </div>
+    </div>
+  );
 }
 
-function AdminLayoutComponent({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  // CORRECCIÓN: Eliminamos 'error' de la desestructuración
+function AdminLayoutComponent({ children }: { children: React.ReactNode }) {
   const { user, loading } = useUser(); 
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    // Si terminó de cargar y no hay usuario, redirigimos
     if (!loading && !user) {
       const redirectUrl = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
       redirect(`/login?redirect=${encodeURIComponent(redirectUrl)}`);
     }
   }, [user, loading, pathname, searchParams]);
 
-  if (loading) {
-    return <AdminLayoutLoading />;
-  }
-
-  if (!user) {
-    return null;
-  }
+  if (loading) return <AdminLayoutLoading />;
+  if (!user) return null;
 
   return (
     <InstitutionProvider>
-      <SidebarProvider>
-        <AdminSidebar />
-        <SidebarInset>
-          <header className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b">
-            <DashboardHeader />
-          </header>
-          <main className="flex-1 p-8 overflow-y-auto">
-            {children}
-          </main>
-        </SidebarInset>
-      </SidebarProvider>
+      <div className="min-h-screen bg-[#0a0c10] flex flex-col font-sans">
+        <AdminNavbar />
+        
+        <main className="flex-1 w-full max-w-[1600px] mx-auto p-6 md:p-8 overflow-y-auto">
+          {children}
+        </main>
+
+        <footer className="py-8 border-t border-white/5 text-center bg-[#0a0c10]">
+          <p className="text-[9px] text-slate-600 font-black uppercase tracking-[0.5em]">
+            EFAS ServiControlPro © 2026 • Security Infrastructure
+          </p>
+        </footer>
+      </div>
     </InstitutionProvider>
   );
 }
 
-export default function AdminLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
     <Suspense fallback={<AdminLayoutLoading />}>
       <AdminLayoutComponent>

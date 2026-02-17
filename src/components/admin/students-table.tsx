@@ -41,7 +41,7 @@ export function StudentsTable({ institutionId, classroomId }: StudentsTableProps
         return collection(firestore, 'institutions', institutionId, 'Aulas', classroomId, 'Alumnos');
     }, [firestore, institutionId, classroomId]);
     
-    const { data: students, isLoading } = useCollection<Alumno>(studentsRef);
+    const { value: students, loading: isLoading } = useCollection(studentsRef);
 
     return (
         <>

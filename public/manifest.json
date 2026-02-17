@@ -1,23 +1,24 @@
 {
   "name": "EFAS ServiControlPro",
-  "short_name": "ServiControl",
-  "description": "Servidor Web para Control Parental Multi-Usuarios",
-  "start_url": "/dashboard/admin/classrooms",
+  "short_name": "EFAS Control",
+  "description": "Plataforma de Control Parental e Institucional de Alta Seguridad",
+  "start_url": "/dashboard",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#f97316",
+  "orientation": "portrait",
+  "background_color": "#0a0c10",
+  "theme_color": "#ea580c",
   "icons": [
     {
       "src": "/logo-efas-192.png", 
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "maskable"
     },
     {
       "src": "/logo-efas-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ]
 }

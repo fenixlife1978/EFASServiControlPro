@@ -36,10 +36,8 @@ export default function ClassroomsPage() {
   const { institutionId } = useInstitution();
   const searchParams = useSearchParams();
 
-  // Definimos la referencia con un fallback de colección vacía para evitar el error de 'undefined'
   const classroomsRef = useMemo(() => {
     if (!db || !institutionId) {
-        // Retornamos una referencia temporal para que el hook no reciba null/undefined
         return query(collection(db, 'temp')); 
     }
     return query(
@@ -48,18 +46,7 @@ export default function ClassroomsPage() {
     );
   }, [institutionId]);
 
-  // Usamos la desestructuración de objeto que pedía el error anterior
-  const { value, loading } = useCollection(classroomsRef);
-
-  // Si value es DocumentData[], lo mapeamos directamente
-  const classrooms = useMemo(() => {
-    if (!value || !institutionId) return [];
-    // Si el error dice que .docs no existe, es porque value es directamente el array
-    return (value as any[]).map((docData: any) => ({
-        id: docData.id, 
-        ...docData
-    })) as Classroom[];
-  }, [value, institutionId]);
+  const { value: classrooms, loading } = useCollection(classroomsRef);
 
   const createLink = (path: string) => {
     const params = new URLSearchParams(searchParams.toString());

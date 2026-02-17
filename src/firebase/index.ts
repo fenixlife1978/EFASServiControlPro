@@ -64,16 +64,11 @@ export const useCollection = (pathOrQuery: string | Query | CollectionReference)
 
     const ref = typeof pathOrQuery === 'string' ? collection(db, pathOrQuery) : pathOrQuery;
     
-    // Eliminamos idField para cumplir con los tipos de la librería
-    const [snapshot, loading, error] = useCollectionData(ref as any);
-    
-    // Mapeo manual para inyectar el ID en cada objeto
-    const value = snapshot ? snapshot.map((data: any) => ({
-        ...data,
-        id: data.id || '' 
-    })) : [];
+    // Correctly use useCollectionData with idField option
+    const [value, loading, error] = useCollectionData(ref as any, { idField: 'id' });
 
-    return { value, loading, error };
+    // The value from the hook is now an array of documents with 'id', or undefined. Default to empty array.
+    return { value: value || [], loading, error };
 };
 
 // --- Funciones CRUD Estándar para EFAS ServiControlPro ---
@@ -123,4 +118,3 @@ export const deleteDocumentNonBlocking = async (collectionName: string, id: stri
     return { success: false, error: error.message };
   }
 };
-

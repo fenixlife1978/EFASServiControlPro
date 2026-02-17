@@ -1,4 +1,5 @@
 'use client';
+export const dynamicParams = false;
 
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { useInstitution } from '@/app/(admin)/institution-context';
@@ -13,6 +14,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import EnrollmentQR from '@/components/admin/EnrollmentQR'; 
 import { useToast } from '@/hooks/use-toast';
 import AssignStudentModal from '@/components/admin/AssignStudentModal';
+
+export function generateStaticParams() {
+  return []; 
+}
 
 export default function ClassroomDetailPage() {
     const params = useParams();
