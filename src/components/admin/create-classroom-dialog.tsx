@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogTrigger,
 } from '@/components/ui/dialog';
 import {
   Form,
@@ -22,14 +23,13 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { addDocumentNonBlocking } from '@/firebase'; // Eliminamos useFirestore si no se usa directamente
+import { addDocumentNonBlocking } from '@/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
 
 interface CreateClassroomDialogProps {
-  isOpen: boolean;
-  onOpenChange: (open: boolean) => void;
-  institutionId: string;
+  InstitutoId: string;
+  children: React.ReactNode;
 }
 
 const formSchema = z.object({
@@ -39,10 +39,10 @@ const formSchema = z.object({
 });
 
 export function CreateClassroomDialog({
-  isOpen,
-  onOpenChange,
-  institutionId,
+  InstitutoId,
+  children,
 }: CreateClassroomDialogProps) {
+  const [open, setOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { toast } = useToast();
 
@@ -56,8 +56,7 @@ export function CreateClassroomDialog({
   });
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
-    // Validación de seguridad para la ruta
-    if (!institutionId) {
+    if (!InstitutoId) {
       toast({ variant: 'destructive', title: 'Error', description: 'No hay un InstitutoId activo.' });
       return;
     }
@@ -65,8 +64,7 @@ export function CreateClassroomDialog({
     setIsSubmitting(true);
     
     try {
-        // CORRECCIÓN: Pasamos el path como STRING para evitar el error n.indexOf
-        const path = `institutions/${institutionId}/Aulas`;
+        const path = `institutions/${InstitutoId}/Aulas`;
         const nombre_completo = `${values.grado} - Sección ${values.seccion}`;
         
         const result = await addDocumentNonBlocking(path, {
@@ -80,7 +78,7 @@ export function CreateClassroomDialog({
         if (result.success) {
             toast({ title: 'Éxito', description: `El salon/aula "${nombre_completo}" ha sido creado.` });
             form.reset();
-            onOpenChange(false);
+            setOpen(false);
         } else {
             throw new Error(result.error);
         }
@@ -97,7 +95,10 @@ export function CreateClassroomDialog({
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        {children}
+      </DialogTrigger>
       <DialogContent className="sm:max-w-md rounded-3xl p-8">
         <DialogHeader className="mb-2">
           <DialogTitle className="text-2xl font-black text-slate-800 uppercase italic tracking-tighter">
@@ -153,7 +154,7 @@ export function CreateClassroomDialog({
               )}
             />
             <DialogFooter className="!flex-row gap-3 pt-4">
-                <Button type="button" variant="ghost" className="flex-1 h-auto py-4 font-bold text-slate-400 hover:bg-slate-100 rounded-xl" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
+                <Button type="button" variant="ghost" className="flex-1 h-auto py-4 font-bold text-slate-400 hover:bg-slate-100 rounded-xl" onClick={() => setOpen(false)} disabled={isSubmitting}>
                     Cancelar
                 </Button>
                 <Button type="submit" className="flex-1 h-auto py-4 font-bold rounded-xl bg-orange-500 hover:bg-orange-600 shadow-lg shadow-orange-200" disabled={isSubmitting}>
