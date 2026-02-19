@@ -6,7 +6,7 @@ import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
   ShieldCheck, Users, Zap, QrCode, Play, Tablet, Building2, ShieldAlert, 
-  Plus, X, Smartphone, Lock, Eye, EyeOff, Layout
+  Plus, X, Smartphone, Lock, Eye, EyeOff, Layout, GraduationCap, Briefcase
 } from 'lucide-react';
 
 import CreateInstitutionForm from '@/components/super-admin/create-institution-form';
@@ -25,7 +25,7 @@ export default function SuperAdminView() {
   const [currentAulaData, setCurrentAulaData] = useState<any>(null);
 
   const [isJornadaActive, setIsJornadaActive] = useState(false);
-  const [selectedConfig, setSelectedConfig] = useState({ instId: '', aulaId: '' });
+  const [selectedConfig, setSelectedConfig] = useState({ instId: '', aulaId: '', rol: 'alumno' });
   const [lastLinkedDevice, setLastLinkedDevice] = useState<any>(null);
   const [studentName, setStudentName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -37,12 +37,17 @@ export default function SuperAdminView() {
     });
   }, []);
 
+  // CORRECCIÓN: Este efecto ahora escucha AMBOS selectores (el de dispositivos y el de vinculación)
   useEffect(() => {
-    if (!targetInstId) return;
-    return onSnapshot(collection(db, `institutions/${targetInstId}/Aulas`), (s) => {
+    const instIdToLoad = activeTab === 'vincular' ? selectedConfig.instId : targetInstId;
+    if (!instIdToLoad) {
+      setAvailableAulas([]);
+      return;
+    }
+    return onSnapshot(collection(db, `institutions/${instIdToLoad}/Aulas`), (s) => {
       setAvailableAulas(s.docs.map(d => ({ id: d.id, ...d.data() })));
     });
-  }, [targetInstId]);
+  }, [targetInstId, selectedConfig.instId, activeTab]);
 
   useEffect(() => {
     if (!targetInstId || !targetAulaId) {
@@ -88,6 +93,7 @@ export default function SuperAdminView() {
         alumno_asignado: studentName,
         InstitutoId: selectedConfig.instId,
         aulaId: selectedConfig.aulaId,
+        rol: selectedConfig.rol,
         lastUpdated: serverTimestamp(),
         restrictions: { extremeSecurity: false } 
       });
@@ -120,7 +126,6 @@ export default function SuperAdminView() {
     });
   };
 
-  // GENERADOR DE QR DUAL (Modo Pro + Vinculación)
   const generateDualQR = () => {
     const host = typeof window !== 'undefined' ? window.location.origin : '';
     return JSON.stringify({
@@ -129,7 +134,8 @@ export default function SuperAdminView() {
       "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM": "bcofwtekjwPs7yqTj5kHv1ZqTS/n7JqEkN1b9R1GHZ0=",
       "android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE": {
         "InstitutoId": selectedConfig.instId,
-        "aulaId": selectedConfig.aulaId
+        "aulaId": selectedConfig.aulaId,
+        "rol": selectedConfig.rol
       }
     });
   };
@@ -222,8 +228,8 @@ export default function SuperAdminView() {
                         <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800 text-orange-500">
                           <Smartphone size={20} className={device.restrictions?.extremeSecurity ? 'text-red-500' : ''} />
                         </div>
-                        <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase italic ${device.restrictions?.extremeSecurity ? 'bg-red-500 text-white' : 'bg-green-500/10 text-green-500 border border-green-500/20'}`}>
-                          {device.restrictions?.extremeSecurity ? 'Blindaje Activo' : 'Sistema Libre'}
+                        <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase italic ${device.rol === 'profesor' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-green-500/10 text-green-500 border border-green-500/20'}`}>
+                          {device.rol === 'profesor' ? 'DOCENTE' : 'ESTUDIANTE'}
                         </div>
                       </div>
                       <h3 className="text-white font-black text-2xl italic uppercase truncate leading-none">{device.alumno_asignado || 'DISPOSITIVO LIBRE'}</h3>
@@ -259,24 +265,47 @@ export default function SuperAdminView() {
                         <option value="">Seleccionar Sede</option>
                         {institutions.map(i => <option key={i.id} value={i.id}>{i.nombre}</option>)}
                       </select>
-                      <select className={inputStyle} onChange={e => {
-                        const aula = availableAulas.find(a => a.id === e.target.value);
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <button 
+                          onClick={() => setSelectedConfig({...selectedConfig, rol: 'alumno'})}
+                          className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${selectedConfig.rol === 'alumno' ? 'border-orange-500 bg-orange-500/10' : 'border-slate-800 bg-slate-900/50'}`}
+                        >
+                          <GraduationCap size={20} className={selectedConfig.rol === 'alumno' ? 'text-orange-500' : 'text-slate-600'} />
+                          <span className="text-[8px] font-black uppercase italic">Alumno</span>
+                        </button>
+                        <button 
+                          onClick={() => setSelectedConfig({...selectedConfig, rol: 'profesor'})}
+                          className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${selectedConfig.rol === 'profesor' ? 'border-orange-500 bg-orange-500/10' : 'border-slate-800 bg-slate-900/50'}`}
+                        >
+                          <Briefcase size={20} className={selectedConfig.rol === 'profesor' ? 'text-orange-500' : 'text-slate-600'} />
+                          <span className="text-[8px] font-black uppercase italic">Profesor</span>
+                        </button>
+                      </div>
+
+                      <select className={inputStyle} value={selectedConfig.aulaId} onChange={e => {
                         setSelectedConfig({...selectedConfig, aulaId: e.target.value});
                       }}>
                         <option value="">Seleccionar Aula</option>
                         {availableAulas.map(a => <option key={a.id} value={a.id}>{a.nombre_completo}</option>)}
                       </select>
-                      <button disabled={!selectedConfig.instId || !selectedConfig.aulaId} onClick={() => setIsJornadaActive(true)} className="w-full bg-orange-500 text-white font-black italic uppercase py-5 rounded-2xl transition-all disabled:opacity-30">Activar Estación</button>
+                      <button disabled={!selectedConfig.instId} onClick={() => setIsJornadaActive(true)} className="w-full bg-orange-500 text-white font-black italic uppercase py-5 rounded-2xl transition-all disabled:opacity-30">Activar Estación</button>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center py-4 text-white">
                       <div className="bg-white p-6 rounded-[2rem] mb-8 border-[12px] border-slate-900 shadow-2xl">
                         <QRCodeSVG value={generateDualQR()} size={220} level="L" />
                       </div>
+                      
+                      <div className="text-center mb-6">
+                        <p className="text-[10px] font-black text-orange-500 uppercase italic tracking-widest">{selectedConfig.rol === 'alumno' ? 'Perfil: Estudiante' : 'Perfil: Docente'}</p>
+                      </div>
+
                       {lastLinkedDevice ? (
                         <div className="w-full bg-slate-900 p-6 rounded-3xl border border-orange-500 animate-in zoom-in">
-                          <input autoFocus className={inputStyle} placeholder="NOMBRE DEL ALUMNO" value={studentName} onChange={e => setStudentName(e.target.value)} />
-                          <button onClick={handleSaveStudent} className="w-full bg-green-600 text-white font-black py-4 rounded-xl text-[10px] mt-4 uppercase italic">Vincular Tablet</button>
+                          <p className="text-[8px] font-bold text-orange-500 mb-2 uppercase tracking-widest">ID Detectado: {lastLinkedDevice.id}</p>
+                          <input autoFocus className={inputStyle} placeholder={selectedConfig.rol === 'alumno' ? "NOMBRE DEL ALUMNO" : "NOMBRE DEL PROFESOR"} value={studentName} onChange={e => setStudentName(e.target.value)} />
+                          <button onClick={handleSaveStudent} className="w-full bg-green-600 text-white font-black py-4 rounded-xl text-[10px] mt-4 uppercase italic">Vincular Ahora</button>
                         </div>
                       ) : (
                         <p className="text-[10px] font-bold text-slate-500 uppercase animate-pulse italic tracking-[0.2em]">Esperando escaneo...</p>
