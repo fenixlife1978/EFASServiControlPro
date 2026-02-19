@@ -1,0 +1,5 @@
+{
+  "installCommand": "npm install --no-package-lock --install-links=false --omit=dev || npm install --force",
+  "buildCommand": "next build",
+  "ignoreCommands": ["cp -R android .."]
+}
