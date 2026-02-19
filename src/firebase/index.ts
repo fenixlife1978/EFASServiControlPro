@@ -12,7 +12,9 @@ import {
   doc, 
   serverTimestamp, 
   Query, 
-  CollectionReference 
+  CollectionReference,
+  terminate,
+  clearIndexedDbPersistence
 } from 'firebase/firestore';
 import { signOut as firebaseSignOut } from 'firebase/auth';
 
@@ -20,17 +22,26 @@ export { auth, db, storage };
 
 /**
  * Función Logout optimizada para EFAS ServiControlPro
- * Limpia el estado local y cierra la sesión en Firebase.
+ * Realiza una limpieza profunda para evitar el "doble login" y roles fantasma.
  */
 export const logout = async () => {
   try {
+    // 1. Cerramos sesión en Auth
     await firebaseSignOut(auth);
-    // Limpiamos el ID de institución seleccionada y cualquier otra basura del storage
-    localStorage.removeItem('selectedInstitutionId');
-    // Forzamos redirección al login
-    window.location.href = '/login';
+    
+    // 2. Limpiamos Firestore para que no queden datos en caché de otro rol
+    await terminate(db);
+    await clearIndexedDbPersistence(db);
+    
+    // 3. Limpiamos storage local
+    localStorage.clear();
+    sessionStorage.clear();
+
+    // 4. Redirección limpia
+    window.location.replace('/login');
   } catch (error) {
-    console.error("Error al cerrar sesión:", error);
+    console.error("Error al cerrar sesión profundo:", error);
+    window.location.href = '/login';
   }
 };
 
@@ -53,7 +64,7 @@ export const useFirestore = () => db;
 export const useDocument = useFBDocument;
 export const useDoc = useFBDocument; 
 
-// Hook de Colección Flexible (Corregido para evitar Error 2353 de TypeScript)
+// Hook de Colección Flexible
 export const useCollection = (pathOrQuery: string | Query | CollectionReference) => {
     const isInvalidPath = typeof pathOrQuery === 'string' && 
         (!pathOrQuery || pathOrQuery.includes('undefined') || pathOrQuery.includes('null'));
@@ -63,11 +74,8 @@ export const useCollection = (pathOrQuery: string | Query | CollectionReference)
     }
 
     const ref = typeof pathOrQuery === 'string' ? collection(db, pathOrQuery) : pathOrQuery;
-    
-    // Correctly use useCollectionData with idField option
     const [value, loading, error] = useCollectionData(ref as any);
 
-    // The value from the hook is now an array of documents with 'id', or undefined. Default to empty array.
     return { value: value || [], loading, error };
 };
 
@@ -76,10 +84,8 @@ export const useCollection = (pathOrQuery: string | Query | CollectionReference)
 export const addDocumentNonBlocking = async (path: string, data: any) => {
   try {
     if (!path || typeof path !== 'string' || path.includes('undefined') || path.includes('null')) {
-        console.error("Path inválido detectado:", path);
         return { success: false, error: "Ruta de base de datos no válida" };
     }
-
     const docRef = await addDoc(collection(db, path), {
         ...data,
         createdAt: serverTimestamp(),
@@ -87,34 +93,27 @@ export const addDocumentNonBlocking = async (path: string, data: any) => {
     });
     return { success: true, id: docRef.id };
   } catch (error: any) {
-    console.error("Error addDocument:", error);
     return { success: false, error: error.message };
   }
 };
 
 export const updateDocumentNonBlocking = async (collectionName: string, id: string, data: any) => {
   try {
-    if (!collectionName || !id) throw new Error("Colección o ID faltante");
-
     await updateDoc(doc(db, collectionName, id), {
         ...data,
         updatedAt: serverTimestamp()
       });
     return { success: true };
   } catch (error: any) {
-    console.error("Error updateDocument:", error);
     return { success: false, error: error.message };
   }
 };
 
 export const deleteDocumentNonBlocking = async (collectionName: string, id: string) => {
   try {
-    if (!collectionName || !id) throw new Error("Colección o ID faltante");
-
     await deleteDoc(doc(db, collectionName, id));
     return { success: true };
   } catch (error: any) {
-    console.error("Error deleteDocument:", error);
     return { success: false, error: error.message };
   }
 };

@@ -3,9 +3,10 @@ import { useEffect, useState } from 'react';
 import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
 import InstitutionView from '@/components/dashboard/InstitutionView';
 import SuperAdminView from '@/components/dashboard/SuperAdminView';
+import DirectorView from '@/components/dashboard/DirectorView';
 
 export default function DashboardPage() {
-  const { institutionId } = useInstitution();
+  const { institutionId, setInstitutionId } = useInstitution();
   const [role, setRole] = useState<string | null>(null);
   const [isMounted, setIsMounted] = useState(false);
 
@@ -13,6 +14,12 @@ export default function DashboardPage() {
     const savedRole = localStorage.getItem('userRole');
     setRole(savedRole);
     setIsMounted(true);
+
+    // Si eres Director y por algún motivo el contexto tiene un ID activo,
+    // lo limpiamos al entrar para asegurar que veas tu Panel de Sede primero.
+    if (savedRole === 'director' && institutionId) {
+       // setInstitutionId(null); // Opcional: Descomenta si quieres resetear siempre
+    }
   }, []);
 
   if (!isMounted) {
@@ -23,20 +30,17 @@ export default function DashboardPage() {
     );
   }
 
-  // LÓGICA DE RENDERIZADO EFAS:
-  // 1. Si hay un institutionId activo (seleccionado por SA o asignado a Director), manda la vista de Institución.
-  // 2. Si no hay ID y el rol es super-admin, manda el panel global.
-  // 3. Por defecto, InstitutionView (para directores/profesores).
+  // LÓGICA DE PRIORIDAD EFAS ServiControlPro:
+  // Si soy SA y elegí un instituto -> InstitutionView
+  if (role === 'super-admin' && institutionId) return <main><InstitutionView /></main>;
   
-  return (
-    <main>
-      {institutionId ? (
-        <InstitutionView />
-      ) : role === 'super-admin' ? (
-        <SuperAdminView />
-      ) : (
-        <InstitutionView />
-      )}
-    </main>
-  );
+  // Si soy SA y no elegí nada -> Panel Global
+  if (role === 'super-admin') return <main><SuperAdminView /></main>;
+
+  // Si soy Director -> SIEMPRE al DirectorView (Panel de Sede)
+  // Nota: El Director entrará a InstitutionView solo cuando él lo decida
+  if (role === 'director') return <main><DirectorView /></main>;
+
+  // Por defecto (Profesores, etc)
+  return <main><InstitutionView /></main>;
 }

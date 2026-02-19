@@ -1,69 +1,106 @@
 'use client';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import React, { useState, useEffect } from 'react';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { LogOut, Settings, User as UserIcon } from 'lucide-react';
-import { useAuth, useUser } from '@/firebase';
+import { LogOut, User as UserIcon } from 'lucide-react';
+import { auth, db } from '@/firebase/config';
+import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
 
 export function AdminUserNav() {
-  const { user, loading } = useUser();
-  const auth = useAuth();
   const router = useRouter();
+  const [userData, setUserData] = useState({
+    nombre: 'Usuario',
+    role: 'CARGANDO...',
+    email: ''
+  });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // Escuchamos cambios de auth. Cada vez que el usuario cambie, este efecto se dispara.
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        // IMPORTANTE: Si el email cambió respecto al estado anterior, forzamos carga
+        const email = user.email || '';
+        
+        try {
+          if (email === 'vallecondo@gmail.com') {
+            setUserData({ nombre: "Super Admin", role: "SUPER ADMIN", email });
+          } else {
+            // Buscamos SIEMPRE en la colección usuarios con el email actual
+            const q = query(collection(db, "usuarios"), where("email", "==", email), limit(1));
+            const snap = await getDocs(q);
+            
+            if (!snap.empty) {
+              const d = snap.docs[0].data();
+              setUserData({
+                nombre: d.nombre || "Director",
+                role: d.role === 'director' ? "DIRECTOR" : (d.role?.toUpperCase() || "USUARIO"),
+                email: email
+              });
+            } else {
+              setUserData({ nombre: "Usuario", role: "NO ENCONTRADO", email });
+            }
+          }
+        } catch (error) {
+          console.error("Error Nav:", error);
+        } finally {
+          setLoading(false);
+        }
+      } else {
+        setLoading(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []); // El array vacío es correcto porque onAuthStateChanged es un listener activo
 
   const handleLogout = async () => {
-    if (auth) {
-        await auth.auth.signOut();
-        router.push('/login');
-    }
-  }
+    setLoading(true);
+    await auth.signOut();
+    // Limpieza manual extra para evitar el error del "segundo intento"
+    window.localStorage.clear();
+    router.refresh();
+    router.push('/login');
+  };
 
-  if (loading) {
-    return <Avatar><AvatarFallback>...</AvatarFallback></Avatar>;
-  }
+  if (loading) return <div className="h-10 w-10 rounded-full bg-slate-200 animate-pulse" />;
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="relative h-10 w-10 rounded-full">
-          <Avatar className="h-10 w-10">
-            {user?.photoURL && <AvatarImage src={user.photoURL} alt="Avatar" />}
-            <AvatarFallback>{user?.email?.charAt(0).toUpperCase() || 'A'}</AvatarFallback>
+        <Button variant="ghost" className="relative h-10 w-10 rounded-full border-2 border-orange-500/20 shadow-sm">
+          <Avatar className="h-full w-full">
+            <AvatarFallback className="bg-slate-900 text-orange-500 font-black text-xs">
+              {userData.nombre.charAt(0).toUpperCase()}
+            </AvatarFallback>
           </Avatar>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-56" align="end" forceMount>
+      <DropdownMenuContent className="w-64" align="end" forceMount>
         <DropdownMenuLabel className="font-normal">
-          <div className="flex flex-col space-y-1">
-            <p className="text-sm font-medium leading-none">Admin</p>
-            <p className="text-xs leading-none text-muted-foreground">
-              {user?.email}
-            </p>
+          <div className="flex flex-col space-y-2 p-1">
+            <div className="flex flex-col">
+              <p key={userData.role} className="text-[10px] font-black uppercase tracking-[0.2em] text-orange-500 animate-in fade-in duration-500">
+                {userData.role}
+              </p>
+              <p className="text-sm font-bold text-slate-900">{userData.nombre}</p>
+            </div>
+            <p className="text-xs text-muted-foreground truncate italic">{userData.email}</p>
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuGroup>
-          <DropdownMenuItem>
-            <UserIcon className="mr-2 h-4 w-4" />
-            <span>Perfil</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem>
-            <Settings className="mr-2 h-4 w-4" />
-            <span>Configuración</span>
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={handleLogout}>
-          <LogOut className="mr-2 h-4 w-4" />
-          <span>Cerrar sesión</span>
+        <DropdownMenuItem onClick={handleLogout} className="text-red-600 font-bold uppercase text-[10px] cursor-pointer">
+          <LogOut className="mr-2 h-4 w-4" /> Cerrar sesión
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
