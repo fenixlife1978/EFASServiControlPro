@@ -20,7 +20,6 @@ export default function SuperAdminView() {
   const [availableAulas, setAvailableAulas] = useState<any[]>([]);
   const [devices, setDevices] = useState<any[]>([]);
   
-  // Estados para Filtro de Aula y Gestión Colectiva
   const [targetInstId, setTargetInstId] = useState('');
   const [targetAulaId, setTargetAulaId] = useState('');
   const [currentAulaData, setCurrentAulaData] = useState<any>(null);
@@ -30,20 +29,14 @@ export default function SuperAdminView() {
   const [lastLinkedDevice, setLastLinkedDevice] = useState<any>(null);
   const [studentName, setStudentName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-
-  // Estado para la gestión de Apps Prohibidas
   const [appToBlock, setAppToBlock] = useState('');
 
-  const isManagingInstitution = !!institutionId;
-
-  // 1. Cargar Instituciones
   useEffect(() => {
     return onSnapshot(collection(db, "institutions"), (s) => {
       setInstitutions(s.docs.map(d => ({ id: d.id, ...d.data() })));
     });
   }, []);
 
-  // 2. Cargar Aulas según la Sede seleccionada en el panel de Blindaje
   useEffect(() => {
     if (!targetInstId) return;
     return onSnapshot(collection(db, `institutions/${targetInstId}/Aulas`), (s) => {
@@ -51,7 +44,6 @@ export default function SuperAdminView() {
     });
   }, [targetInstId]);
 
-  // 3. Escuchar datos del Aula seleccionada (para obtener su lista negra colectiva)
   useEffect(() => {
     if (!targetInstId || !targetAulaId) {
       setCurrentAulaData(null);
@@ -62,7 +54,6 @@ export default function SuperAdminView() {
     });
   }, [targetInstId, targetAulaId]);
 
-  // 4. Cargar Dispositivos (filtrados si hay un aula seleccionada)
   useEffect(() => {
     const q = targetAulaId 
       ? query(collection(db, "dispositivos"), where("aulaId", "==", targetAulaId))
@@ -73,7 +64,6 @@ export default function SuperAdminView() {
     });
   }, [targetAulaId]);
 
-  // 5. Escuchar por dispositivos pendientes de vinculación
   useEffect(() => {
     if (!isJornadaActive) return;
     const q = query(
@@ -89,7 +79,6 @@ export default function SuperAdminView() {
     });
   }, [isJornadaActive]);
 
-  // LÓGICA DE VINCULACIÓN
   const handleSaveStudent = async () => {
     if (!studentName || !lastLinkedDevice) return;
     setIsSaving(true);
@@ -107,7 +96,6 @@ export default function SuperAdminView() {
     } catch (e) { console.error(e); } finally { setIsSaving(false); }
   };
 
-  // LÓGICA DE BLINDAJE COLECTIVO (POR AULA)
   const addAppToAulaBlacklist = async () => {
     if (!appToBlock || !targetInstId || !targetAulaId) return;
     const aulaRef = doc(db, `institutions/${targetInstId}/Aulas`, targetAulaId);
@@ -129,6 +117,20 @@ export default function SuperAdminView() {
     await updateDoc(doc(db, "dispositivos", deviceId), {
       "restrictions.extremeSecurity": !currentStatus,
       lastUpdated: serverTimestamp()
+    });
+  };
+
+  // GENERADOR DE QR DUAL (Modo Pro + Vinculación)
+  const generateDualQR = () => {
+    const host = typeof window !== 'undefined' ? window.location.origin : '';
+    return JSON.stringify({
+      "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": "com.efas.servicontrolpro/.DeviceAdminReceiver",
+      "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": `${host}/downloads/efas.apk`,
+      "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM": "bcofwtekjwPs7yqTj5kHv1ZqTS/n7JqEkN1b9R1GHZ0=",
+      "android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE": {
+        "InstitutoId": selectedConfig.instId,
+        "aulaId": selectedConfig.aulaId
+      }
     });
   };
 
@@ -154,22 +156,11 @@ export default function SuperAdminView() {
                 {activeTab === 'dispositivos' ? 'Consola de Blindaje Colectivo' : 'Super Admin Panel'}
              </p>
            </div>
-           {activeTab === 'dispositivos' && targetAulaId && (
-             <div className="flex gap-4">
-               <div className="bg-orange-500/10 border border-orange-500/20 px-4 py-2 rounded-xl flex items-center gap-2">
-                 <Layout className="text-orange-500 w-3 h-3" />
-                 <span className="text-[9px] font-black text-orange-500 uppercase italic">Aula Seleccionada</span>
-               </div>
-             </div>
-           )}
         </header>
 
         <div className="p-10 max-w-[1700px] mx-auto">
-          {/* PESTAÑA DISPOSITIVOS CON BLINDAJE COLECTIVO */}
           {activeTab === 'dispositivos' && (
             <div className="space-y-10 animate-in fade-in">
-              
-              {/* PANEL MAESTRO DE AULA */}
               <section className="bg-[#0f1117] p-8 rounded-[3rem] border border-slate-800 shadow-2xl">
                 <div className="grid grid-cols-12 gap-8 items-end">
                   <div className="col-span-12 lg:col-span-3">
@@ -186,7 +177,6 @@ export default function SuperAdminView() {
                       {availableAulas.map(a => <option key={a.id} value={a.id}>{a.nombre_completo}</option>)}
                     </select>
                   </div>
-
                   <div className="col-span-12 lg:col-span-6">
                     {targetAulaId ? (
                       <div className="bg-black/40 p-6 rounded-3xl border border-orange-500/20">
@@ -224,7 +214,6 @@ export default function SuperAdminView() {
                 </div>
               </section>
 
-              {/* LISTADO DE DISPOSITIVOS */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                 {devices.map(device => (
                   <div key={device.id} className={`bg-[#0f1117] rounded-[2.5rem] border ${device.restrictions?.extremeSecurity ? 'border-red-600/50 shadow-[0_0_40px_rgba(220,38,38,0.15)]' : 'border-slate-800'} p-0 overflow-hidden transition-all duration-500`}>
@@ -240,7 +229,6 @@ export default function SuperAdminView() {
                       <h3 className="text-white font-black text-2xl italic uppercase truncate leading-none">{device.alumno_asignado || 'DISPOSITIVO LIBRE'}</h3>
                       <p className="text-slate-600 text-[9px] font-mono mt-2 uppercase">ID: {device.id}</p>
                     </div>
-
                     <div className="p-8 pt-0">
                       <button 
                         onClick={() => toggleExtremeSecurity(device.id, !!device.restrictions?.extremeSecurity)}
@@ -260,19 +248,21 @@ export default function SuperAdminView() {
             </div>
           )}
 
-          {/* VINCULACIÓN - INTACTO */}
           {activeTab === 'vincular' && (
             <div className="grid grid-cols-12 gap-10 animate-in slide-in-from-bottom-4">
               <div className="col-span-12 lg:col-span-5">
                 <section className="bg-[#0f1117] p-8 rounded-[3rem] border-2 border-orange-500/20 shadow-2xl relative">
-                  <h2 className="text-xs font-black uppercase italic text-white flex items-center gap-2 mb-8"><QrCode className="text-orange-500" size={18}/> Estación QR</h2>
+                  <h2 className="text-xs font-black uppercase italic text-white flex items-center gap-2 mb-8"><QrCode className="text-orange-500" size={18}/> Estación QR Dual</h2>
                   {!isJornadaActive ? (
                     <div className="space-y-4">
                       <select className={inputStyle} onChange={e => setSelectedConfig({...selectedConfig, instId: e.target.value})}>
                         <option value="">Seleccionar Sede</option>
                         {institutions.map(i => <option key={i.id} value={i.id}>{i.nombre}</option>)}
                       </select>
-                      <select className={inputStyle} onChange={e => setSelectedConfig({...selectedConfig, aulaId: e.target.value})}>
+                      <select className={inputStyle} onChange={e => {
+                        const aula = availableAulas.find(a => a.id === e.target.value);
+                        setSelectedConfig({...selectedConfig, aulaId: e.target.value});
+                      }}>
                         <option value="">Seleccionar Aula</option>
                         {availableAulas.map(a => <option key={a.id} value={a.id}>{a.nombre_completo}</option>)}
                       </select>
@@ -281,7 +271,7 @@ export default function SuperAdminView() {
                   ) : (
                     <div className="flex flex-col items-center py-4 text-white">
                       <div className="bg-white p-6 rounded-[2rem] mb-8 border-[12px] border-slate-900 shadow-2xl">
-                        <QRCodeSVG value={JSON.stringify({ InstitutoId: selectedConfig.instId, aulaId: selectedConfig.aulaId })} size={220} />
+                        <QRCodeSVG value={generateDualQR()} size={220} level="L" />
                       </div>
                       {lastLinkedDevice ? (
                         <div className="w-full bg-slate-900 p-6 rounded-3xl border border-orange-500 animate-in zoom-in">
@@ -299,7 +289,6 @@ export default function SuperAdminView() {
             </div>
           )}
 
-          {/* SEDES - INTACTO */}
           {activeTab === 'sedes' && (
             <div className="grid grid-cols-12 gap-10">
               <div className="col-span-12 lg:col-span-5"><CreateInstitutionForm /></div>
@@ -307,7 +296,6 @@ export default function SuperAdminView() {
             </div>
           )}
 
-          {/* USUARIOS - INTACTO */}
           {activeTab === 'usuarios' && <UserManagement />}
         </div>
       </main>

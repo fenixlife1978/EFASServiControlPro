@@ -1,7 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: 'export',
   trailingSlash: true,
   images: {
     unoptimized: true,
@@ -11,6 +10,23 @@ const nextConfig: NextConfig = {
   },
   typescript: {
     ignoreBuildErrors: true,
+  },
+  async headers() {
+    return [
+      {
+        source: "/downloads/:path*",
+        headers: [
+          {
+            key: "Content-Type",
+            value: "application/vnd.android.package-archive",
+          },
+          {
+            key: "Content-Disposition",
+            value: "attachment",
+          },
+        ],
+      },
+    ];
   },
 };
 
