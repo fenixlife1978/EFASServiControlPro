@@ -81,3 +81,14 @@ body {
     @apply bg-background text-foreground;
   }
 }
+body.scanner-active {
+  --ion-background-color: transparent !important;
+  background: transparent !important;
+}
+body.scanner-active * {
+  visibility: hidden;
+}
+body.scanner-active .flex, 
+body.scanner-active .flex * {
+  visibility: visible;
+}

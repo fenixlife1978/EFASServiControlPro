@@ -1,87 +1,86 @@
 'use client';
-
 import React, { useState } from 'react';
-import { addDocumentNonBlocking } from '@/firebase';
-import { Send, MessageSquare, ShieldAlert } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { useToast } from '@/hooks/use-toast';
+import { db } from '@/firebase/config';
+import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { Send, MessageSquare, X, AlertCircle } from 'lucide-react';
 
-export function DirectMessage({ institutionId }: { institutionId: string }) {
-  const [message, setMessage] = useState('');
-  const [targetId, setTargetId] = useState('');
-  const [isSending, setIsSending] = useState(false);
-  const { toast } = useToast();
+interface MessageProps {
+  deviceId: string;
+  alumnoNombre: string;
+  userRole: string; // 'super-admin' | 'director' | 'profesor'
+  onClose: () => void;
+}
 
-  const sendMessage = async (e: React.FormEvent) => {
+export default function DirectMessage({ deviceId, alumnoNombre, userRole, onClose }: MessageProps) {
+  const [mensaje, setMensaje] = useState('');
+  const [sending, setSending] = useState(false);
+
+  // Verificación estricta de rol
+  const canSendMessage = userRole === 'super-admin' || userRole === 'director';
+
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!message || !targetId) {
-        toast({ title: "Atención", description: "Completa todos los campos", variant: "destructive" });
-        return;
-    }
+    if (!canSendMessage || !mensaje.trim()) return;
 
-    setIsSending(true);
+    setSending(true);
     try {
-      // Guardamos el mensaje para que el dispositivo del alumno lo detecte
-      await addDocumentNonBlocking(`institutions/${institutionId}/mensajes_directos`, {
-        targetId: targetId.trim().toUpperCase(),
-        mensaje: message,
-        remitente: 'DIRECCIÓN',
-        prioridad: 'ALTA',
-        visto: false,
-        timestamp: new Date()
+      await updateDoc(doc(db, "dispositivos", deviceId), {
+        mensaje_alerta: mensaje.trim(),
+        mensaje_timestamp: serverTimestamp(),
+        mensaje_remitente: userRole.toUpperCase()
       });
-
-      toast({ title: "ALERTA ENVIADA", description: "El mensaje aparecerá en el dispositivo." });
-      setMessage('');
-      setTargetId('');
+      setMensaje('');
+      onClose();
     } catch (error) {
-      toast({ variant: "destructive", title: "ERROR DE ENVÍO" });
+      console.error("Error al enviar mensaje:", error);
     } finally {
-      setIsSending(false);
+      setSending(false);
     }
   };
 
   return (
-    <div className="bg-[#11141d] border border-white/5 rounded-3xl p-8 shadow-xl relative overflow-hidden">
-      <div className="absolute top-0 right-0 p-4 opacity-5">
-        <ShieldAlert className="w-24 h-24 text-orange-500" />
-      </div>
-      
-      <div className="flex items-center gap-3 mb-6 relative">
-        <MessageSquare className="text-orange-500 w-6 h-6" />
-        <h2 className="text-xl font-black italic uppercase text-white">Mensajería Directa</h2>
-      </div>
-
-      <form onSubmit={sendMessage} className="space-y-4 relative">
-        <div className="grid grid-cols-1 gap-4">
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xl z-[70] flex items-center justify-center p-4">
+      <div className="bg-white rounded-[3rem] w-full max-w-md shadow-2xl overflow-hidden border border-slate-100">
+        <div className="bg-slate-900 p-8 flex items-center justify-between">
+          <div className="flex items-center gap-4 text-white">
+            <MessageSquare className="w-6 h-6 text-orange-500" />
             <div>
-                <label className="text-[10px] font-black text-slate-500 uppercase ml-2">ID Estudiante o Dispositivo</label>
-                <input 
-                    value={targetId}
-                    onChange={(e) => setTargetId(e.target.value)}
-                    className="w-full bg-[#1c212c] rounded-2xl py-4 px-4 text-sm font-bold text-orange-500 outline-none focus:ring-2 focus:ring-orange-500 mt-1 border border-white/5"
-                    placeholder="EJ: EST-2024"
-                />
+              <h2 className="text-xl font-black italic uppercase leading-none">Mensaje Directo</h2>
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Para: {alumnoNombre}</p>
             </div>
-
-            <div>
-                <label className="text-[10px] font-black text-slate-500 uppercase ml-2">Mensaje de Control</label>
-                <textarea 
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    className="w-full bg-[#1c212c] rounded-2xl py-4 px-4 text-sm outline-none focus:ring-2 focus:ring-orange-500 text-white mt-1 h-28 resize-none border border-white/5"
-                    placeholder="Escriba la advertencia..."
-                />
-            </div>
+          </div>
+          <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors">
+            <X className="w-6 h-6" />
+          </button>
         </div>
 
-        <Button 
-          disabled={isSending}
-          className="w-full bg-orange-600 hover:bg-orange-700 text-white font-black italic rounded-2xl py-7 uppercase shadow-lg shadow-orange-900/20 transition-all active:scale-95"
-        >
-          <Send className="w-5 h-5 mr-2" /> {isSending ? 'PROCESANDO...' : 'ENVIAR ALERTA INMEDIATA'}
-        </Button>
-      </form>
+        <div className="p-8">
+          {!canSendMessage ? (
+            <div className="bg-red-50 p-6 rounded-2xl flex flex-col items-center text-center">
+              <AlertCircle className="w-10 h-10 text-red-500 mb-2" />
+              <p className="text-xs font-black uppercase italic text-red-600">Acceso Restringido</p>
+              <p className="text-[10px] text-red-400 font-bold uppercase mt-1">Solo Super Admin o Directores pueden enviar alertas.</p>
+            </div>
+          ) : (
+            <form onSubmit={handleSendMessage} className="space-y-4">
+              <textarea 
+                autoFocus
+                value={mensaje}
+                onChange={(e) => setMensaje(e.target.value)}
+                placeholder="Escribe la instrucción para el estudiante..."
+                className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl p-5 font-bold text-slate-900 focus:border-orange-500 outline-none h-32 resize-none italic text-sm"
+              />
+              <button 
+                type="submit" 
+                disabled={sending || !mensaje.trim()}
+                className="w-full bg-orange-500 text-white py-5 rounded-2xl font-black uppercase italic text-xs shadow-xl hover:bg-slate-900 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+              >
+                {sending ? "Enviando..." : <><Send className="w-4 h-4" /> Enviar Alerta</>}
+              </button>
+            </form>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -37,7 +37,7 @@ export default function SignUpPage() {
     setError(null);
 
     try {
-      await createUserWithEmailAndPassword(auth, email, password);
+      await createUserWithEmailAndPassword(auth.auth, email, password);
       
       toast({
         title: 'Protocolo de Registro Exitoso',

@@ -21,10 +21,10 @@ interface StudentsTableProps {
 const getTodayInfractions = (student: Alumno) => {
     if (!student.logs_actividad) return 0;
     const today = new Date();
-    // The date from firestore is a Timestamp object.
     return student.logs_actividad.filter(log => {
         if (!log.date) return false;
-        const logDate = log.date.toDate();
+        // @ts-ignore - asumiendo que es un Timestamp de Firebase
+        const logDate = typeof log.date.toDate === 'function' ? log.date.toDate() : new Date(log.date);
         return logDate.getDate() === today.getDate() &&
                logDate.getMonth() === today.getMonth() &&
                logDate.getFullYear() === today.getFullYear();
@@ -41,7 +41,9 @@ export function StudentsTable({ institutionId, classroomId }: StudentsTableProps
         return collection(firestore, 'institutions', institutionId, 'Aulas', classroomId, 'Alumnos');
     }, [firestore, institutionId, classroomId]);
     
-    const { value: students, loading: isLoading } = useCollection(studentsRef);
+    // Forzamos el cast a Alumno[] para resolver el error de DocumentData
+    const { value, loading: isLoading } = useCollection(studentsRef as any);
+    const students = value as Alumno[] | undefined;
 
     return (
         <>

@@ -3,49 +3,48 @@ import { QRCodeSVG } from 'qrcode.react';
 import { useEffect, useState } from 'react';
 
 interface QRProps {
-  activeId: string;      // ID de la Institución
-  workingCondoId: string; // ID del Aula
+  InstitutoId: string;
+  aulaId: string;
 }
 
-export default function EnrollmentQR({ activeId, workingCondoId }: QRProps) {
+export default function EnrollmentQR({ InstitutoId, aulaId }: QRProps) {
   const [qrData, setQrData] = useState("");
 
   useEffect(() => {
-    // El QR contiene los IDs necesarios para que la tablet sepa dónde inscribirse
     const data = JSON.stringify({
       action: 'enroll',
-      activeId: activeId,
-      workingCondoId: workingCondoId,
+      InstitutoId: InstitutoId,
+      aulaId: aulaId,
       timestamp: Date.now()
     });
     setQrData(data);
-  }, [activeId, workingCondoId]);
+  }, [InstitutoId, aulaId]);
 
   return (
-    <div className="flex flex-col items-center p-8 bg-white rounded-2xl shadow-xl border border-slate-200">
-      <div className="mb-4 text-center">
-          <h3 className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em]">EFAS ServiControlPro</h3>
-          <h3 className="text-lg font-black text-slate-800 uppercase italic">Escáner de Registro</h3>
+    <div className="flex flex-col items-center p-8 bg-white rounded-[3rem] shadow-2xl border border-slate-100">
+      <div className="mb-6 text-center">
+          <h3 className="text-[10px] font-black text-orange-600 uppercase tracking-[0.3em] italic">EFAS ServControlPro</h3>
+          <h3 className="text-xl font-black text-slate-900 uppercase italic">Vincular Terminal</h3>
       </div>
       
-      <div className="p-4 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200">
+      <div className="p-6 bg-slate-50 rounded-[2rem] border-2 border-dashed border-slate-200">
         {qrData && (
           <QRCodeSVG 
             value={qrData} 
-            size={256}
+            size={220}
             level={"H"}
             includeMargin={true}
           />
         )}
       </div>
 
-      <div className="mt-6 text-center">
-        <p className="text-xs text-slate-500 font-bold uppercase mb-1">Salon/Aula Activo</p>
-        <p className="text-sm text-blue-600 font-mono font-bold">{workingCondoId}</p>
+      <div className="mt-8 text-center space-y-1">
+        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Aula Seleccionada</p>
+        <p className="text-xs text-slate-900 font-mono font-bold bg-slate-100 px-4 py-1 rounded-full">{aulaId}</p>
       </div>
       
-      <p className="mt-4 text-[10px] text-slate-400 text-center max-w-[200px]">
-        Apunta la cámara de la tablet a este código para iniciar el registro cronológico.
+      <p className="mt-6 text-[10px] text-slate-400 text-center max-w-[220px] font-medium leading-relaxed">
+        Escanea este código con la tablet para conectarla automáticamente al sistema de control.
       </p>
     </div>
   );

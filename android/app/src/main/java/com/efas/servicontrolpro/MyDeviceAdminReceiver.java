@@ -3,29 +3,47 @@ package com.efas.servicontrolpro;
 import android.app.admin.DeviceAdminReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.provider.Settings;
 import android.widget.Toast;
 import androidx.annotation.NonNull;
+import com.google.firebase.firestore.FirebaseFirestore;
+import java.util.HashMap;
+import java.util.Map;
 
-// Importamos lo necesario para una alerta básica (puedes expandir esto luego con Firebase SDK)
 public class MyDeviceAdminReceiver extends DeviceAdminReceiver {
 
     @Override
     public void onEnabled(@NonNull Context context, @NonNull Intent intent) {
         super.onEnabled(context, intent);
-        Toast.makeText(context, "EFAS: Administrador Activado", Toast.LENGTH_SHORT).show();
+        updateProtectionStatus(context, "protegido");
+        Toast.makeText(context, "EFAS Guardian: Protección del Sistema Activa", Toast.LENGTH_SHORT).show();
     }
 
     @Override
     public CharSequence onDisableRequested(@NonNull Context context, @NonNull Intent intent) {
-        // AQUÍ DISPARAMOS LA ALERTA
-        // En una implementación completa, aquí llamarías a un servicio para escribir en Firestore
-        // Por ahora, bloqueamos la acción con un mensaje disuasorio profesional.
-        return "ALERTA DE SEGURIDAD: Este intento ha sido reportado al Director de la Institución. El dispositivo se bloqueará permanentemente si continúa.";
+        // Reportar intento de sabotaje antes de que ocurra
+        updateProtectionStatus(context, "intento_desactivacion");
+        return "ALERTA DE SEGURIDAD: Intentar desactivar EFAS ServiControlPro notificará inmediatamente a la administración.";
     }
 
     @Override
     public void onDisabled(@NonNull Context context, @NonNull Intent intent) {
         super.onDisabled(context, intent);
-        Toast.makeText(context, "ADVERTENCIA: Protección EFAS desactivada", Toast.LENGTH_LONG).show();
+        updateProtectionStatus(context, "vulnerable");
+        Toast.makeText(context, "ATENCIÓN: El dispositivo ya no está protegido por EFAS", Toast.LENGTH_LONG).show();
+    }
+
+    private void updateProtectionStatus(Context context, String status) {
+        String deviceId = Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ANDROID_ID);
+        FirebaseFirestore db = FirebaseFirestore.getInstance();
+        
+        Map<String, Object> update = new HashMap<>();
+        update.put("protectionLevel", status);
+        update.put("lastSecurityEvent", com.google.firebase.Timestamp.now());
+
+        if (deviceId != null) {
+            db.collection("dispositivos").document(deviceId)
+                .update(update);
+        }
     }
 }

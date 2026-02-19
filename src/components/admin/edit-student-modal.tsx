@@ -48,7 +48,7 @@ export function EditStudentModal({ isOpen, onOpenChange, student, institutionId,
         const studentDocRef = doc(firestore, 'institutions', institutionId, 'Aulas', classroomId, 'Alumnos', student.id);
         
         try {
-            updateDocumentNonBlocking(studentDocRef, {
+            updateDocumentNonBlocking('Alumnos', student.id, {
                 nombre_alumno: values.nombre_alumno,
             });
             toast({ title: 'Alumno actualizado', description: `El nombre se ha cambiado a "${values.nombre_alumno}".` });

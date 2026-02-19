@@ -1,90 +1,51 @@
 'use client';
+import React, { useState } from 'react';
+import { db } from '@/firebase/config';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { Loader2, Plus } from 'lucide-react';
 
-import { useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import * as z from 'zod';
-import { Button } from '@/components/ui/button';
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
-import { useFirestore, addDocumentNonBlocking } from '@/firebase';
-import { collection, serverTimestamp } from 'firebase/firestore';
-import { useToast } from '@/hooks/use-toast';
-import { Loader2, PlusCircle } from 'lucide-react';
+export default function CreateInstitutionForm() {
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({ nombre: '', InstitutoId: '', ubicacion: '' });
 
-const formSchema = z.object({
-  nombre: z.string().min(3, 'Mínimo 3 caracteres.'),
-  InstitutoId: z.string().min(3, 'El ID es obligatorio (ej: CAG-001).'),
-  logoUrl: z.string().url().optional().or(z.literal('')),
-});
-
-export function CreateInstitutionForm() {
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const firestore = useFirestore();
-  const { toast } = useToast();
-
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
-    defaultValues: { nombre: '', InstitutoId: '', logoUrl: '' },
-  });
-
-  async function onSubmit(values: z.infer<typeof formSchema>) {
-    if (!firestore) return;
-    setIsSubmitting(true);
-    
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.nombre || !formData.InstitutoId) return;
+    setLoading(true);
     try {
-        await addDocumentNonBlocking(collection(firestore, 'institutions'), {
-            nombre: values.nombre,
-            InstitutoId: values.InstitutoId.trim().toUpperCase(), // Reemplazo total de condoId
-            logoUrl: values.logoUrl || "",
-            status: 'published',
-            modoFiltro: 'Blacklist',
-            superAdminSuspended: false,
-            direccion: '',
-            createdAt: serverTimestamp(),
-        });
+      await addDoc(collection(db, "institutions"), {
+        nombre: formData.nombre,
+        InstitutoId: formData.InstitutoId.toUpperCase().trim(),
+        ubicacion: formData.ubicacion,
+        status: 'active',
+        createdAt: serverTimestamp()
+      });
+      setFormData({ nombre: '', InstitutoId: '', ubicacion: '' });
+    } catch (error) { console.error(error); } finally { setLoading(false); }
+  };
 
-        toast({ title: 'Éxito', description: 'Institución registrada con InstitutoId.' });
-        form.reset();
-        setTimeout(() => window.location.reload(), 1000);
-    } catch (error) {
-        toast({ variant: 'destructive', title: 'Error', description: 'No se pudo crear.' });
-    } finally {
-        setIsSubmitting(false);
-    }
-  }
+  const inputStyle = "w-full bg-[#1a1d26] border border-slate-800 p-4 rounded-2xl focus:border-orange-500 outline-none font-bold text-slate-200 text-xs transition-all placeholder:text-slate-600";
 
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-wrap gap-4 items-start">
-        <FormField control={form.control} name="nombre" render={({ field }) => (
-          <FormItem>
-            <FormLabel className="text-xs text-slate-400 uppercase font-bold">Nombre</FormLabel>
-            <FormControl><Input className="bg-slate-800 border-slate-700 w-64 text-white" {...field} /></FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <FormField control={form.control} name="InstitutoId" render={({ field }) => (
-          <FormItem>
-            <FormLabel className="text-xs text-slate-400 uppercase font-bold">InstitutoId</FormLabel>
-            <FormControl><Input placeholder="CAG-001" className="bg-slate-800 border-slate-700 w-40 text-orange-400 font-bold" {...field} /></FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <FormField control={form.control} name="logoUrl" render={({ field }) => (
-          <FormItem>
-            <FormLabel className="text-xs text-slate-400 uppercase font-bold">URL Logo</FormLabel>
-            <FormControl><Input className="bg-slate-800 border-slate-700 w-64 text-white" {...field} /></FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <div className="pt-8">
-          <Button type="submit" disabled={isSubmitting} className="bg-orange-600 hover:bg-orange-700 h-10 px-6 font-bold">
-            {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-4 w-4" />}
-            REGISTRAR
-          </Button>
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-2">
+        <label className="text-[8px] font-black uppercase text-slate-500 ml-2 tracking-widest">Nombre de la Sede</label>
+        <input required className={inputStyle} value={formData.nombre} onChange={(e) => setFormData({...formData, nombre: e.target.value})} placeholder="EJ: COLEGIO CENTRAL" />
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <label className="text-[8px] font-black uppercase text-slate-500 ml-2 tracking-widest">ID Instituto</label>
+          <input required className={inputStyle} value={formData.InstitutoId} onChange={(e) => setFormData({...formData, InstitutoId: e.target.value})} placeholder="CBT-001" />
         </div>
-      </form>
-    </Form>
+        <div className="space-y-2">
+          <label className="text-[8px] font-black uppercase text-slate-500 ml-2 tracking-widest">Ubicación</label>
+          <input className={inputStyle} value={formData.ubicacion} onChange={(e) => setFormData({...formData, ubicacion: e.target.value})} placeholder="Sede Norte" />
+        </div>
+      </div>
+      <button disabled={loading} type="submit" className="w-full bg-orange-500 hover:bg-orange-600 text-white font-black italic uppercase py-5 rounded-2xl transition-all shadow-lg shadow-orange-500/10 flex items-center justify-center gap-3 text-xs mt-4">
+        {loading ? <Loader2 className="animate-spin w-4 h-4" /> : <Plus className="w-4 h-4" />}
+        Desplegar Sede
+      </button>
+    </form>
   );
 }

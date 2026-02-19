@@ -1,19 +1,19 @@
 'use client';
 import { useState } from 'react';
 import { useFirestore } from '@/firebase';
-import { collection, getDocs, doc, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { collection, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import type { Alumno } from '@/lib/firestore-types';
 
 interface Props {
-  enrollmentId: string;    // ID del doc en pending_enrollments
-  deviceId: string;        // ID del hardware de la tablet
-  activeId: string;        // ID Institución
-  workingCondoId: string;  // ID Aula
+  enrollmentId?: string;    // ID opcional (solo para nuevas vinculaciones)
+  deviceId: string;         // ID del hardware (MAC)
+  InstitutoId: string;      
+  aulaId: string;           
   onClose: () => void;
 }
 
-export default function AssignStudentModal({ enrollmentId, deviceId, activeId, workingCondoId, onClose }: Props) {
+export default function AssignStudentModal({ enrollmentId, deviceId, InstitutoId, aulaId, onClose }: Props) {
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const firestore = useFirestore();
@@ -26,26 +26,27 @@ export default function AssignStudentModal({ enrollmentId, deviceId, activeId, w
     setLoading(true);
 
     try {
-      const alumnosRef = collection(firestore, 'institutions', activeId, 'Aulas', workingCondoId, 'Alumnos');
+      const alumnosRef = collection(firestore, 'institutions', InstitutoId, 'Aulas', aulaId, 'Alumnos');
       const snapshot = await getDocs(alumnosRef);
       const nextNumber = (snapshot.size + 1).toString().padStart(2, '0');
 
-      // Asumimos que deviceId es la MAC y se usa como ID de documento para el alumno
       const newAlumnoRef = doc(alumnosRef, deviceId);
-      const pendingDocRef = doc(firestore, 'pending_enrollments', enrollmentId);
       
       const newAlumnoData: Partial<Alumno> = {
         nro_equipo: nextNumber,
         nombre_alumno: name,
-        macAddress: deviceId, // Asignamos el deviceId a macAddress
-        institutionId: activeId,
-        classroomId: workingCondoId,
-        // 'modelo' no está disponible en este modal, se podría añadir si es necesario
+        macAddress: deviceId,
+        institutionId: InstitutoId,
+        classroomId: aulaId,
       };
       
       const batch = writeBatch(firestore);
-      batch.set(newAlumnoRef, newAlumnoData, { merge: true }); // Usamos merge por si el doc ya existe
-      batch.delete(pendingDocRef);
+      batch.set(newAlumnoRef, newAlumnoData, { merge: true });
+
+      if (enrollmentId) {
+        const pendingDocRef = doc(firestore, 'pending_enrollments', enrollmentId);
+        batch.delete(pendingDocRef);
+      }
 
       await batch.commit();
       
@@ -64,10 +65,10 @@ export default function AssignStudentModal({ enrollmentId, deviceId, activeId, w
       <div className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl border border-blue-100">
         <div className="text-center mb-6">
           <div className="bg-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-blue-200">
-            <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4"></path></svg>
+            <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"></path></svg>
           </div>
           <h2 className="text-2xl font-black text-slate-800 uppercase italic tracking-tighter">Vincular Estudiante</h2>
-          <p className="text-slate-500 text-sm font-medium">Se ha detectado un nuevo dispositivo</p>
+          <p className="text-slate-500 text-sm font-medium">Asignar nombre al dispositivo</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
@@ -84,7 +85,7 @@ export default function AssignStudentModal({ enrollmentId, deviceId, activeId, w
           </div>
 
           <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
-            <p className="text-[10px] font-bold text-blue-400 uppercase mb-1">ID Hardware Detectado</p>
+            <p className="text-[10px] font-bold text-blue-400 uppercase mb-1">ID Hardware</p>
             <p className="text-xs font-mono font-bold text-blue-700">{deviceId}</p>
           </div>
 
@@ -95,6 +96,7 @@ export default function AssignStudentModal({ enrollmentId, deviceId, activeId, w
           >
             {loading ? 'REGISTRANDO...' : 'FINALIZAR REGISTRO'}
           </button>
+          <button type="button" onClick={onClose} className="w-full text-slate-400 text-[10px] font-bold uppercase py-2">Cancelar</button>
         </form>
       </div>
     </div>

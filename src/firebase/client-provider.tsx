@@ -11,11 +11,13 @@ export function FirebaseClientProvider({ children }: { children: React.ReactNode
 
   useEffect(() => {
     try {
-      const initializedServices = initializeFirebase();
-      setServices({
-        ...initializedServices,
-        areServicesAvailable: !!initializedServices.auth && !!initializedServices.firestore
-      });
+      const initializedServices = initializeFirebase() as any;
+      if (initializedServices) {
+        setServices({
+          ...initializedServices,
+          areServicesAvailable: !!(initializedServices.auth && (initializedServices.db || initializedServices.firestore))
+        });
+      }
     } catch (error) {
       console.error("Error EFAS Init:", error);
     } finally {

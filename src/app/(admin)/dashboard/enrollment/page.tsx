@@ -13,7 +13,7 @@ import { useFirestore, useDoc, useCollection } from '@/firebase';
 import { collection, doc, DocumentReference, CollectionReference, Query } from 'firebase/firestore';
 import { EnrollmentModal } from '@/components/admin/enrollment-modal';
 import type { PendingEnrollment, Classroom } from '@/lib/firestore-types';
-import { useInstitution } from '../../institution-context';
+import { useInstitution } from '../institution-context';
 import { AdminUserNav } from '@/components/common/admin-user-nav';
 
 export default function EnrollmentPage() {

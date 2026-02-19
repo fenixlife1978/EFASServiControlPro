@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
-import { useAuth } from '../provider';
+import { useAuth } from '../index';
 
 export const useUser = () => {
   const auth = useAuth();
@@ -19,7 +19,7 @@ export const useUser = () => {
     }
 
     const unsubscribe = onAuthStateChanged(
-      auth,
+      auth.auth,
       (user) => {
         setUser(user);
         setLoading(false);

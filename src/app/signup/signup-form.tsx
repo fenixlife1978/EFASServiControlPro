@@ -44,7 +44,7 @@ export default function SignupForm() {
     setError(null);
 
     try {
-      await createUserWithEmailAndPassword(auth, email, password);
+      await createUserWithEmailAndPassword(auth.auth, email, password);
       toast({
         title: 'PROTOCOLO EXITOSO',
         description: 'Cuenta administrativa creada correctamente.',

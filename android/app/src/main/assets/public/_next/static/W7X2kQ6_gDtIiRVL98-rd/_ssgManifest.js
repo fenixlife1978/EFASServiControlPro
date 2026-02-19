@@ -1,1 +1,0 @@
-self.__SSG_MANIFEST=new Set(["\u002Fdashboard\u002Fclassrooms\u002F[classroomId]"]);self.__SSG_MANIFEST_CB&&self.__SSG_MANIFEST_CB()

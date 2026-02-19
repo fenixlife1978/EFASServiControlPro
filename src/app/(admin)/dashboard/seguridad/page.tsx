@@ -1,6 +1,6 @@
 'use client';
 
-import { useInstitution } from '@/app/(admin)/institution-context';
+import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
 import FilterConfig from '@/components/admin/FilterConfig';
 import { ShieldCheck, Lock, Globe } from 'lucide-react';
 

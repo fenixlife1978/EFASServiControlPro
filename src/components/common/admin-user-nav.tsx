@@ -21,7 +21,7 @@ export function AdminUserNav() {
 
   const handleLogout = async () => {
     if (auth) {
-        await auth.signOut();
+        await auth.auth.signOut();
         router.push('/login');
     }
   }

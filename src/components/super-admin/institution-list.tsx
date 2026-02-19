@@ -1,125 +1,50 @@
 'use client';
+import React, { useState, useEffect } from 'react';
+import { db } from '@/firebase/config';
+import { collection, onSnapshot, query } from 'firebase/firestore';
+import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
+import { School, ArrowRight, Trash2 } from 'lucide-react';
 
-import { useMemo } from 'react';
-import { useCollection, useFirestore, updateDocumentNonBlocking, deleteDocumentNonBlocking } from '@/firebase';
-import { collection, doc, query, orderBy } from 'firebase/firestore';
-import { useRouter } from 'next/navigation';
-import type { Institution } from '@/lib/firestore-types';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
-import { Switch } from '../ui/switch';
-import { useToast } from '@/hooks/use-toast';
-import { Globe, Lock, Trash2, Loader2, ExternalLink } from 'lucide-react';
-import { Button } from '../ui/button';
+export default function InstitutionList() {
+  const [institutions, setInstitutions] = useState<any[]>([]);
+  const { setInstitutionId } = useInstitution();
+  const [loading, setLoading] = useState(true);
 
-const InstitutionTableSkeleton = () => (
-    <div className="p-10 flex justify-center"><Loader2 className="animate-spin text-orange-500" /></div>
-);
+  useEffect(() => {
+    const unsub = onSnapshot(query(collection(db, "institutions")), (snapshot) => {
+      setInstitutions(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+    });
+    return () => unsub();
+  }, []);
 
-export function InstitutionList() {
-  const firestore = useFirestore();
-  const { toast } = useToast();
-  const router = useRouter();
-
-  const institutionsRef = useMemo(() => {
-    if (!firestore) return null;
-    return query(collection(firestore, 'institutions'), orderBy("nombre", "asc"));
-  }, [firestore]);
-
-  const { data: institutions, isLoading } = useCollection<Institution>(institutionsRef);
-  
-  const handleStatusChange = (institutionId: string, currentStatus: string) => {
-    if (!firestore) return;
-    const newStatus = currentStatus === 'published' ? 'unpublished' : 'published';
-    const institutionRef = doc(firestore, 'institutions', institutionId);
-    updateDocumentNonBlocking(institutionRef, { status: newStatus });
-    toast({ title: 'Estado actualizado', description: `La institución ahora está ${newStatus === 'published' ? 'publicada' : 'oculta'}.` });
-  };
-
-  const handleDelete = (institutionId: string) => {
-    if (!firestore) return;
-    if (confirm("¿Eliminar esta institución? Se perderá el acceso para sus usuarios y se borrarán sus datos.")) {
-        const institutionRef = doc(firestore, 'institutions', institutionId);
-        deleteDocumentNonBlocking(institutionRef);
-        toast({ title: 'Institución eliminada', variant: 'destructive' });
-    }
-  };
-
-  const gestionarInstitucion = (valorInstitutoId: string) => {
-    if (!valorInstitutoId) {
-      alert("Error: Esta institución no tiene un 'InstitutoId' válido.");
-      return;
-    }
-    
-    // Enviamos el valor (ej: CAG-001) a través del parámetro institutionId
-    router.push(`/dashboard?institutionId=${valorInstitutoId}`);
-  };
-
-  if (isLoading) {
-      return <InstitutionTableSkeleton />;
-  }
-  
-  if (!institutions || institutions.length === 0) {
-      return (
-          <div className="text-center py-16 text-slate-500">
-              <h3 className="text-xl font-bold text-slate-700">No hay instituciones</h3>
-              <p className="mt-2">Empieza por crear la primera institución educativa.</p>
-          </div>
-      )
-  }
+  if (loading) return <div className="text-center py-20 animate-pulse font-black italic text-slate-700 uppercase text-xs">Escaneando Red...</div>;
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow className="bg-slate-100 hover:bg-slate-100">
-          <TableHead className="font-bold text-slate-900">Institución</TableHead>
-          <TableHead className="font-bold text-slate-900">InstitutoId</TableHead>
-          <TableHead className="font-bold text-slate-900">Estado</TableHead>
-          <TableHead className="text-right font-bold text-slate-900">Acciones</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {institutions.map((inst) => (
-          <TableRow key={inst.id}>
-            <TableCell className="font-medium text-slate-900">{inst.nombre}</TableCell>
-            <TableCell>
-              <code className="bg-orange-100 text-orange-700 px-2 py-1 rounded font-bold">
-                {inst.InstitutoId || 'SIN ID'}
-              </code>
-            </TableCell>
-            <TableCell>
-              <div className="flex items-center gap-3">
-                <Switch 
-                  checked={inst.status === 'published'} 
-                  onCheckedChange={() => handleStatusChange(inst.id, inst.status)} 
-                />
-                {inst.status === 'published' ? (
-                  <span className="flex items-center text-green-600 text-xs font-bold">
-                    <Globe className="w-3 h-3 mr-1" /> PUBLICADO
-                  </span>
-                ) : (
-                  <span className="flex items-center text-red-500 text-xs font-bold">
-                    <Lock className="w-3 h-3 mr-1" /> OCULTO
-                  </span>
-                )}
-              </div>
-            </TableCell>
-            <TableCell className="text-right flex justify-end gap-2">
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => gestionarInstitucion(inst.InstitutoId)}
-                className="border-orange-500 text-orange-600 hover:bg-orange-500 hover:text-white"
-                disabled={!inst.InstitutoId}
-              >
-                <ExternalLink className="w-4 h-4 mr-1" /> GESTIONAR
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => handleDelete(inst.id)} className="text-slate-400 hover:text-red-500">
-                <Trash2 className="h-4 h-4" />
-              </Button>
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {institutions.map((inst) => (
+        <div key={inst.id} className="bg-[#1a1d26]/50 p-6 rounded-[2.5rem] border border-slate-800 hover:border-orange-500/50 transition-all group">
+          <div className="flex justify-between items-center mb-6">
+            <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 group-hover:border-orange-500/30 transition-colors">
+              <School className="w-5 h-5 text-slate-400 group-hover:text-orange-500" />
+            </div>
+            <div className="flex gap-2 items-center">
+               <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
+               <span className="text-[8px] font-black uppercase text-slate-500 tracking-tighter italic">Online</span>
+            </div>
+          </div>
+          <h3 className="text-lg font-black italic uppercase text-white mb-1 leading-tight">{inst.nombre}</h3>
+          <p className="text-[9px] font-bold text-slate-600 uppercase italic mb-8 tracking-widest">Access Key: {inst.InstitutoId}</p>
+          <div className="flex gap-2">
+            <button onClick={() => setInstitutionId(inst.InstitutoId)} className="flex-1 bg-white text-black font-black italic uppercase text-[9px] py-3 rounded-xl hover:bg-orange-500 hover:text-white transition-all flex items-center justify-center gap-2">
+              Gestionar <ArrowRight className="w-3 h-3" />
+            </button>
+            <button className="bg-slate-900 p-3 rounded-xl text-slate-600 hover:text-red-500 border border-slate-800 transition-all">
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

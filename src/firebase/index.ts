@@ -65,7 +65,7 @@ export const useCollection = (pathOrQuery: string | Query | CollectionReference)
     const ref = typeof pathOrQuery === 'string' ? collection(db, pathOrQuery) : pathOrQuery;
     
     // Correctly use useCollectionData with idField option
-    const [value, loading, error] = useCollectionData(ref as any, { idField: 'id' });
+    const [value, loading, error] = useCollectionData(ref as any);
 
     // The value from the hook is now an array of documents with 'id', or undefined. Default to empty array.
     return { value: value || [], loading, error };
@@ -118,3 +118,4 @@ export const deleteDocumentNonBlocking = async (collectionName: string, id: stri
     return { success: false, error: error.message };
   }
 };
+export const initializeFirebase = () => ({ auth, db, storage, firestore: db });
