@@ -5,19 +5,13 @@ export function middleware(request: NextRequest) {
   const session = request.cookies.get('__session')?.value;
   const { pathname } = request.nextUrl;
 
-  const isDashboardRoute = pathname.startsWith('/dashboard');
-  const isAuthRoute = pathname === '/login' || pathname === '/signup' || pathname === '/';
-
-  // REGLA DE PROTECCIÓN
-  if (isDashboardRoute && !session) {
-    // Si no hay sesión, verificamos si es una redirección interna de login reciente
-    // Esto evita el rebote en el primer intento tras limpiar caché
-    const loginUrl = new URL('/login', request.url);
-    return NextResponse.redirect(loginUrl);
+  // Si no hay sesión y trata de entrar a áreas privadas
+  if (!session && (pathname.startsWith('/dashboard') || pathname.startsWith('/super-admin'))) {
+    return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  // REGLA DE REDIRECCIÓN SI YA ESTÁ LOGUEADO
-  if (isAuthRoute && session) {
+  // Si ya hay sesión e intenta ir al login o raíz
+  if (session && (pathname === '/login' || pathname === '/')) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
@@ -25,9 +19,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    '/dashboard/:path*',
-    '/login',
-    '/signup',
-  ],
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
 };

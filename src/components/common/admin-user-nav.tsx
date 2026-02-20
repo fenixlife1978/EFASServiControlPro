@@ -66,7 +66,7 @@ export function AdminUserNav() {
 
   const handleLogout = async () => {
     setLoading(true);
-    await auth.signOut();
+    await auth.signOut(); document.cookie = "__session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;"; window.localStorage.clear(); window.location.replace("/login");
     // Limpieza manual extra para evitar el error del "segundo intento"
     window.localStorage.clear();
     router.refresh();
@@ -99,7 +99,7 @@ export function AdminUserNav() {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={handleLogout} className="text-red-600 font-bold uppercase text-[10px] cursor-pointer">
+        <DropdownMenuItem onClick={() => { auth.signOut().then(() => { document.cookie = "__session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;"; localStorage.clear(); sessionStorage.clear(); window.location.replace("/login"); }); }} className="text-red-600 font-bold uppercase text-[10px] cursor-pointer">
           <LogOut className="mr-2 h-4 w-4" /> Cerrar sesión
         </DropdownMenuItem>
       </DropdownMenuContent>

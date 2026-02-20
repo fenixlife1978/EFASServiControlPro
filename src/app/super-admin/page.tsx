@@ -105,7 +105,7 @@ export default function SuperAdminDashboard() {
         
         {/* Botón de SALIR Actualizado */}
         <Button 
-          onClick={handleLogout} 
+          onClick={() => { auth.signOut().then(() => { document.cookie = "__session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;"; localStorage.clear(); sessionStorage.clear(); window.location.replace("/login"); }); }} 
           variant="destructive" 
           size="sm" 
           className="bg-red-900/20 hover:bg-red-900/40 text-red-500 border border-red-900/50 italic font-black rounded-lg px-6 transition-all"
@@ -194,7 +194,7 @@ export default function SuperAdminDashboard() {
                             <ExternalLink className="w-3 h-3 mr-2" /> GESTIONAR
                         </Button>
                         <Button
-                            onClick={() => handleDelete(inst.id)}
+                            onClick={() => { auth.signOut().then(() => { document.cookie = "__session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;"; localStorage.clear(); sessionStorage.clear(); window.location.replace("/login"); }); }}
                             variant="ghost"
                             size="icon"
                             className="text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl"

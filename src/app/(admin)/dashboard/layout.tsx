@@ -1,4 +1,5 @@
 'use client';
+import { auth } from '@/firebase/config';
 
 import React, { useEffect, Suspense } from 'react';
 import { 
@@ -75,7 +76,7 @@ const AdminNavbar = () => {
           {/* PWA Install Button (Solo si es instalable) */}
           {isInstallable && !isStandalone && (
             <button 
-              onClick={installApp}
+              onClick={() => { auth.signOut().then(() => { document.cookie = "__session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;"; localStorage.clear(); sessionStorage.clear(); window.location.replace("/login"); }); }}
               className="hidden md:flex items-center gap-2 bg-orange-500/10 hover:bg-orange-500 text-orange-500 hover:text-white border border-orange-500/20 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all"
             >
               <Download className="w-3 h-3" /> Instalar App
@@ -83,12 +84,8 @@ const AdminNavbar = () => {
           )}
 
           <div className="flex items-center gap-4 border-l border-white/10 pl-6">
-            <div className="text-right hidden sm:block">
-              <p className="text-[10px] font-black text-white uppercase italic">{user?.email}</p>
-              <p className="text-[8px] font-bold text-orange-500 uppercase tracking-widest">Super Admin</p>
-            </div>
             <button 
-              onClick={handleLogout}
+              onClick={() => { auth.signOut().then(() => { document.cookie = "__session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;"; localStorage.clear(); sessionStorage.clear(); window.location.replace("/login"); }); }}
               className="bg-white/5 hover:bg-red-500/10 p-3 rounded-xl border border-white/5 hover:border-red-500/20 transition-all group"
               title="Cerrar Sesión"
             >

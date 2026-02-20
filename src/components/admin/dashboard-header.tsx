@@ -1,3 +1,4 @@
+import { auth } from '@/firebase/config';
 'use client';
 import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
 import { AdminUserNav } from "../common/admin-user-nav";
@@ -39,7 +40,7 @@ export function DashboardHeader() {
         </div>
       </div>
       <div className="flex items-center gap-2">
-        {isSuperAdmin && (
+        {isSuperAdmin <AdminUserNav />{isSuperAdmin {isSuperAdmin && ({isSuperAdmin && ( (<AdminUserNav />{isSuperAdmin {isSuperAdmin && ({isSuperAdmin && ( ( (
           <Button 
             variant="ghost" 
             onClick={() => router.push('/super-admin')}
@@ -49,7 +50,7 @@ export function DashboardHeader() {
             <span className="text-xs font-bold uppercase">Panel Maestro</span>
           </Button>
         )}
-        <AdminUserNav />
+        
       </div>
     </header>
   );
