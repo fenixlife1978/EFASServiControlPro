@@ -5,7 +5,7 @@ import { collection, query, onSnapshot, where, addDoc, serverTimestamp, doc, get
 import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
 import { 
   ShieldAlert, Radio, Users, LogOut, Lock, Search, Cpu, Battery, Link, MessageSquare, Send,
-  Plus, DoorOpen, Activity, Monitor, Globe, X, ChevronRight, Tablet, User, ArrowLeft, Settings, Edit2, Trash2, Check, Zap, FileText, BarChart3, Clock, Save, Building2, Key, Info
+  Plus, DoorOpen, Activity, Monitor, Globe, X, ChevronRight, Tablet, User, ArrowLeft, Settings, Edit2, Trash2, Check, Zap, FileText, BarChart3, Clock, Save, Building2, Key, Info, Edit3
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { GlobalControls } from '@/components/admin/config/GlobalControls';
@@ -25,13 +25,16 @@ export default function InstitutionView() {
   const [allAlumnos, setAllAlumnos] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
-  const [newAula, setNewAula] = useState({ nombre_completo: '', seccion: '', grado: '' });
+  const [newAula, setNewAula] = useState({ nombre_completo: '', seccion: '' });
+  const [editingAula, setEditingAula] = useState<any>(null);
   
   const [reportFilter, setReportFilter] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
   const [editingAlumno, setEditingAlumno] = useState<any>(null);
   const [tempName, setTempName] = useState('');
+
+  const inputStyle = "w-full bg-slate-900 border border-slate-800 p-4 rounded-xl text-white font-bold text-xs uppercase outline-none focus:border-orange-500 transition-all";
 
   useEffect(() => {
     if (!institutionId) return;
@@ -126,6 +129,44 @@ export default function InstitutionView() {
       }
       await deleteDoc(doc(db, "usuarios", alumno.id));
     } catch (e) { console.error(e); }
+  };
+
+  const handleSaveAula = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAula.nombre_completo || !newAula.seccion) return;
+    try {
+      if (editingAula) {
+        await updateDoc(doc(db, `institutions/${institutionId}/Aulas`, editingAula.id), {
+          ...newAula,
+          lastUpdated: serverTimestamp()
+        });
+      } else {
+        await addDoc(collection(db, `institutions/${institutionId}/Aulas`), {
+          ...newAula,
+          status: 'published',
+          createdAt: serverTimestamp(),
+          InstitutoId: institutionId
+        });
+      }
+      setShowModal(false);
+      setEditingAula(null);
+      setNewAula({ nombre_completo: '', seccion: '' });
+    } catch (e) { console.error(e); }
+  };
+
+  const handleDeleteAula = async (e: React.MouseEvent, aulaId: string) => {
+    e.stopPropagation();
+    if (!confirm('¿ELIMINAR ESTA AULA PERMANENTEMENTE?')) return;
+    try {
+      await deleteDoc(doc(db, `institutions/${institutionId}/Aulas`, aulaId));
+    } catch (e) { console.error(e); }
+  };
+
+  const handleEditAula = (e: React.MouseEvent, aula: any) => {
+    e.stopPropagation();
+    setEditingAula(aula);
+    setNewAula({ nombre_completo: aula.nombre_completo, seccion: aula.seccion });
+    setShowModal(true);
   };
 
   const filteredUsers = allAlumnos.filter(a => 
@@ -301,7 +342,12 @@ export default function InstitutionView() {
                 <>
                   <div className="flex justify-between items-center mb-10">
                     <h2 className="text-4xl font-black italic uppercase text-white tracking-tighter">Mapa <span className="text-orange-500 font-light">de Aulas</span></h2>
-                    <button onClick={() => setShowModal(true)} className="bg-orange-500 text-white p-4 rounded-2xl hover:bg-orange-600 shadow-lg shadow-orange-500/20 transition-all"><Plus className="w-6 h-6" /></button>
+                    <button 
+                      onClick={() => { setEditingAula(null); setNewAula({nombre_completo:'', seccion:''}); setShowModal(true); }} 
+                      className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase italic transition-all shadow-lg shadow-orange-500/20 flex items-center gap-2"
+                    >
+                      <Plus className="w-4 h-4" /> Crear Nueva Aula
+                    </button>
                   </div>
                   <div className="mb-12"><SecurityRules institutionId={institutionId!} /></div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -309,7 +355,13 @@ export default function InstitutionView() {
                       <button key={aula.id} onClick={() => setSelectedAula(aula)} className="bg-slate-900/30 p-8 rounded-[2.5rem] border border-slate-800 hover:border-orange-500 transition-all group text-left relative overflow-hidden">
                         <DoorOpen className="w-8 h-8 text-slate-700 mb-4 group-hover:text-orange-500 transition-colors" />
                         <h3 className="text-xl font-black italic uppercase text-white leading-tight">{aula.nombre_completo}</h3>
-                        <p className="text-[10px] font-bold text-slate-500 uppercase mt-1">{aula.grado} • {aula.seccion}</p>
+                        <p className="text-[10px] font-bold text-slate-500 uppercase mt-1">{aula.seccion || 'SIN SECCIÓN'}</p>
+                        
+                        <div className="absolute top-6 right-6 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div onClick={(e) => handleEditAula(e, aula)} className="p-2 bg-slate-800 hover:text-orange-500 rounded-lg transition-colors"><Edit3 size={14} /></div>
+                          <div onClick={(e) => handleDeleteAula(e, aula.id)} className="p-2 bg-slate-800 hover:text-red-500 rounded-lg transition-colors"><Trash2 size={14} /></div>
+                        </div>
+                        
                         <div className="absolute right-6 bottom-6 opacity-0 group-hover:opacity-100 transition-opacity"><ChevronRight className="text-orange-500" /></div>
                       </button>
                     ))}
@@ -437,7 +489,7 @@ export default function InstitutionView() {
         <div className="fixed inset-0 bg-[#0a0c10]/95 backdrop-blur-md z-[110] flex items-center justify-center p-4">
           <div className="bg-[#0f1117] border border-slate-800 rounded-[2.5rem] p-10 w-full max-w-md shadow-2xl">
             <h2 className="text-2xl font-black italic uppercase text-white mb-8">Editar <span className="text-blue-500">Nombre</span></h2>
-            <input className="w-full bg-slate-900 border border-slate-800 p-4 rounded-xl text-white font-bold text-xs uppercase" value={tempName} onChange={e => setTempName(e.target.value)} />
+            <input className={inputStyle} value={tempName} onChange={e => setTempName(e.target.value)} />
             <div className="flex gap-2 mt-6">
                <button onClick={handleUpdateName} className="flex-1 bg-blue-600 p-5 rounded-xl font-black uppercase text-white text-xs">Guardar</button>
                <button onClick={() => setEditingAlumno(null)} className="p-5 text-[9px] font-black uppercase text-slate-600">Cancelar</button>
@@ -448,16 +500,32 @@ export default function InstitutionView() {
 
       {showModal && (
         <div className="fixed inset-0 bg-[#0a0c10]/95 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-[#0f1117] border border-slate-800 rounded-[3rem] p-10 w-full max-w-md shadow-2xl">
-            <h2 className="text-3xl font-black italic uppercase text-white mb-8">Nueva <span className="text-orange-500">Aula</span></h2>
-            <form onSubmit={async (e) => {
-                e.preventDefault();
-                await addDoc(collection(db, `institutions/${institutionId}/Aulas`), { ...newAula, status: 'published', createdAt: serverTimestamp(), InstitutoId: institutionId });
-                setShowModal(false);
-                setNewAula({ nombre_completo: '', seccion: '', grado: '' });
-            }} className="space-y-4">
-              <input placeholder="NOMBRE" className="w-full bg-slate-900 border border-slate-800 p-4 rounded-xl text-white font-bold text-xs uppercase" value={newAula.nombre_completo} onChange={e => setNewAula({...newAula, nombre_completo: e.target.value})} />
-              <button type="submit" className="w-full bg-orange-500 p-5 rounded-xl font-black uppercase text-white text-xs">Desplegar</button>
+          <div className="bg-[#0f1117] border border-slate-800 rounded-[3rem] p-10 w-full max-w-md shadow-2xl animate-in zoom-in">
+            <h2 className="text-3xl font-black italic uppercase text-white mb-8">
+              {editingAula ? 'Editar' : 'Nueva'} <span className="text-orange-500">Aula</span>
+            </h2>
+            <form onSubmit={handleSaveAula} className="space-y-6">
+              <div className="space-y-2">
+                <label className="text-[9px] font-black text-slate-500 uppercase italic ml-1">Nombre del Aula</label>
+                <input placeholder="EJ: LABORATORIO" className={inputStyle} value={newAula.nombre_completo} onChange={e => setNewAula({...newAula, nombre_completo: e.target.value})} />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[9px] font-black text-slate-500 uppercase italic ml-1">Aula / Sección</label>
+                <input placeholder="EJ: 5TO AÑO B" className={inputStyle} value={newAula.seccion} onChange={e => setNewAula({...newAula, seccion: e.target.value})} />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4 mt-4">
+                <button 
+                  type="button"
+                  onClick={() => { setShowModal(false); setEditingAula(null); }} 
+                  className="bg-slate-800 text-slate-400 font-black py-5 rounded-xl text-[10px] uppercase italic hover:bg-slate-700 transition-all"
+                >
+                  Salir
+                </button>
+                <button type="submit" className="bg-orange-500 text-white font-black py-5 rounded-xl text-[10px] uppercase italic hover:bg-orange-600 transition-all">
+                  {editingAula ? 'Actualizar' : 'Desplegar'}
+                </button>
+              </div>
             </form>
           </div>
         </div>

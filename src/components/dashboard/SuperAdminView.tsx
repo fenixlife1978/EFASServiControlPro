@@ -1,12 +1,15 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { db } from '@/firebase/config';
-import { collection, onSnapshot, query, where, addDoc, serverTimestamp, orderBy, limit, updateDoc, doc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { 
+  collection, onSnapshot, query, where, addDoc, serverTimestamp, 
+  orderBy, limit, updateDoc, doc, arrayUnion, arrayRemove, deleteDoc 
+} from 'firebase/firestore';
 import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
   ShieldCheck, Users, Zap, QrCode, Play, Tablet, Building2, ShieldAlert, 
-  Plus, X, Smartphone, Lock, Eye, EyeOff, Layout, GraduationCap, Briefcase
+  Plus, X, Smartphone, Lock, Eye, EyeOff, Layout, GraduationCap, Briefcase, Trash2, Edit3, Globe, CheckCircle2, AlertCircle
 } from 'lucide-react';
 
 import CreateInstitutionForm from '@/components/super-admin/create-institution-form';
@@ -19,6 +22,7 @@ export default function SuperAdminView() {
   const [institutions, setInstitutions] = useState<any[]>([]);
   const [availableAulas, setAvailableAulas] = useState<any[]>([]);
   const [devices, setDevices] = useState<any[]>([]);
+  const [allUsers, setAllUsers] = useState<any[]>([]);
   
   const [targetInstId, setTargetInstId] = useState('');
   const [targetAulaId, setTargetAulaId] = useState('');
@@ -31,13 +35,24 @@ export default function SuperAdminView() {
   const [isSaving, setIsSaving] = useState(false);
   const [appToBlock, setAppToBlock] = useState('');
 
+  // Estados para Acciones Reales (Edición)
+  const [editingUser, setEditingUser] = useState<any>(null);
+  const [editForm, setEditForm] = useState({ nombre: '', InstitutoId: '' });
+
   useEffect(() => {
     return onSnapshot(collection(db, "institutions"), (s) => {
       setInstitutions(s.docs.map(d => ({ id: d.id, ...d.data() })));
     });
   }, []);
 
-  // CORRECCIÓN: Este efecto ahora escucha AMBOS selectores (el de dispositivos y el de vinculación)
+  // LISTADO DE PROFESORES Y DIRECTORES (Firestore query)
+  useEffect(() => {
+    const q = query(collection(db, "usuarios"), where("role", "in", ["director", "profesor"]));
+    return onSnapshot(q, (s) => {
+      setAllUsers(s.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }, []);
+
   useEffect(() => {
     const instIdToLoad = activeTab === 'vincular' ? selectedConfig.instId : targetInstId;
     if (!instIdToLoad) {
@@ -83,6 +98,32 @@ export default function SuperAdminView() {
       }
     });
   }, [isJornadaActive]);
+
+  // LOGICA DE ACCIONES REALES
+  const handleEditClick = (user: any) => {
+    setEditingUser(user);
+    setEditForm({ nombre: user.nombre || '', InstitutoId: user.InstitutoId || '' });
+  };
+
+  const handleUpdateUser = async () => {
+    if (!editingUser) return;
+    try {
+      await updateDoc(doc(db, "usuarios", editingUser.id), {
+        nombre: editForm.nombre,
+        InstitutoId: editForm.InstitutoId,
+        lastUpdated: serverTimestamp()
+      });
+      setEditingUser(null);
+    } catch (e) { console.error(e); }
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    if (confirm('¿ELIMINAR ESTE OPERADOR?')) {
+      try {
+        await deleteDoc(doc(db, "usuarios", userId));
+      } catch (e) { console.error(e); }
+    }
+  };
 
   const handleSaveStudent = async () => {
     if (!studentName || !lastLinkedDevice) return;
@@ -184,38 +225,25 @@ export default function SuperAdminView() {
                     </select>
                   </div>
                   <div className="col-span-12 lg:col-span-6">
-                    {targetAulaId ? (
-                      <div className="bg-black/40 p-6 rounded-3xl border border-orange-500/20">
-                        <p className="text-[9px] font-black text-orange-500 uppercase mb-4 italic flex items-center gap-2">
-                          <Lock size={12}/> Configuración de Apps para toda el Aula
-                        </p>
-                        <div className="flex gap-2">
-                          <input 
-                            value={appToBlock} 
-                            onChange={e => setAppToBlock(e.target.value)}
-                            placeholder="EJ: COM.TIKTOK.ANDROID"
-                            className="flex-1 bg-black border border-slate-800 px-4 py-3 rounded-xl text-[9px] font-bold text-white uppercase outline-none focus:border-orange-500"
-                          />
-                          <button onClick={addAppToAulaBlacklist} className="bg-orange-500 hover:bg-orange-600 text-white p-3 rounded-xl transition-all">
-                            <Plus size={18}/>
-                          </button>
-                        </div>
-                        <div className="flex flex-wrap gap-2 mt-4">
-                          {currentAulaData?.blacklistedApps?.map((app: string) => (
-                            <div key={app} className="bg-red-500/10 border border-red-500/20 px-3 py-1 rounded-lg flex items-center gap-2">
-                              <span className="text-[8px] font-bold text-red-500 uppercase italic">{app}</span>
-                              <button onClick={() => removeAppFromAulaBlacklist(app)} className="text-red-900 hover:text-red-500 transition-colors">
-                                <X size={12}/>
-                              </button>
-                            </div>
-                          ))}
+                    <div className="h-[100px] flex items-center justify-between px-8 border-2 border-slate-800 rounded-3xl bg-black/20">
+                      <div>
+                        <p className="text-[9px] font-black text-slate-500 uppercase italic">Estado de Filtro</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          {targetAulaId ? (
+                            <>
+                              <div className="w-2 h-2 rounded-full animate-pulse bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]" />
+                              <span className="text-xs font-black uppercase italic text-green-500">Protección Activa</span>
+                            </>
+                          ) : (
+                            <>
+                              <div className="w-2 h-2 rounded-full bg-red-500" />
+                              <span className="text-xs font-black uppercase italic text-red-500">Protección Desactivada</span>
+                            </>
+                          )}
                         </div>
                       </div>
-                    ) : (
-                      <div className="h-[100px] flex items-center justify-center border-2 border-dashed border-slate-800 rounded-3xl">
-                        <p className="text-[10px] font-black text-slate-600 uppercase italic">Selecciona un aula para gestionar apps colectivamente</p>
-                      </div>
-                    )}
+                      <ShieldAlert className={targetAulaId ? 'text-orange-500' : 'text-slate-800'} size={32} />
+                    </div>
                   </div>
                 </div>
               </section>
@@ -283,9 +311,7 @@ export default function SuperAdminView() {
                         </button>
                       </div>
 
-                      <select className={inputStyle} value={selectedConfig.aulaId} onChange={e => {
-                        setSelectedConfig({...selectedConfig, aulaId: e.target.value});
-                      }}>
+                      <select className={inputStyle} value={selectedConfig.aulaId} onChange={e => setSelectedConfig({...selectedConfig, aulaId: e.target.value})}>
                         <option value="">Seleccionar Aula</option>
                         {availableAulas.map(a => <option key={a.id} value={a.id}>{a.nombre_completo}</option>)}
                       </select>
@@ -325,7 +351,67 @@ export default function SuperAdminView() {
             </div>
           )}
 
-          {activeTab === 'usuarios' && <UserManagement />}
+          {activeTab === 'usuarios' && (
+            <div className="space-y-12 animate-in fade-in">
+              <UserManagement />
+
+              {/* GESTIÓN DE ACCIONES REALES PARA USUARIOS */}
+              {editingUser && (
+                <section className="bg-orange-500/10 border-2 border-orange-500 rounded-[2.5rem] p-8 animate-in zoom-in">
+                  <div className="flex justify-between items-center mb-6">
+                    <h4 className="text-xs font-black text-white uppercase italic">Modificar Operador: {editingUser.email}</h4>
+                    <button onClick={() => setEditingUser(null)}><X size={20}/></button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <input className={inputStyle} value={editForm.nombre} onChange={e => setEditForm({...editForm, nombre: e.target.value})} placeholder="Nombre" />
+                    <select className={inputStyle} value={editForm.InstitutoId} onChange={e => setEditForm({...editForm, InstitutoId: e.target.value})}>
+                      <option value="">Cambiar Sede</option>
+                      {institutions.map(i => <option key={i.id} value={i.id}>{i.nombre}</option>)}
+                    </select>
+                  </div>
+                  <button onClick={handleUpdateUser} className="w-full mt-4 bg-orange-500 text-white font-black py-4 rounded-xl text-[10px] uppercase italic">Actualizar Datos</button>
+                </section>
+              )}
+
+              <section className="bg-[#0f1117] border border-slate-800 rounded-[2.5rem] overflow-hidden">
+                <div className="p-8 border-b border-slate-800 flex justify-between items-center bg-black/20">
+                  <h3 className="text-xs font-black text-white uppercase italic flex items-center gap-2"><Globe className="text-orange-500" size={16}/> Supervisión de Operadores</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[10px] text-left">
+                    <thead>
+                      <tr className="text-slate-500 uppercase italic border-b border-slate-800/50">
+                        <th className="p-6">Nombre / Email</th>
+                        <th className="p-6">Rol</th>
+                        <th className="p-6">Sede Asignada</th>
+                        <th className="p-6 text-right">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/50">
+                      {allUsers.map(u => (
+                        <tr key={u.id} className="hover:bg-white/[0.02]">
+                          <td className="p-6">
+                            <p className="text-white font-black uppercase italic">{u.nombre || 'Sin Nombre'}</p>
+                            <p className="text-slate-500 lowercase">{u.email}</p>
+                          </td>
+                          <td className="p-6">
+                            <span className="px-3 py-1 rounded-lg bg-orange-500/10 text-orange-500 font-black uppercase italic border border-orange-500/20">{u.role}</span>
+                          </td>
+                          <td className="p-6 text-slate-400 font-mono font-bold">{u.InstitutoId || 'Sede no asignada'}</td>
+                          <td className="p-6 text-right">
+                            <div className="flex justify-end gap-2">
+                              <button onClick={() => handleEditClick(u)} className="p-3 bg-slate-800 text-slate-400 hover:text-white rounded-xl"><Edit3 size={14}/></button>
+                              <button onClick={() => handleDeleteUser(u.id)} className="p-3 bg-slate-800 text-red-500 hover:bg-red-600 hover:text-white rounded-xl"><Trash2 size={14}/></button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          )}
         </div>
       </main>
     </div>

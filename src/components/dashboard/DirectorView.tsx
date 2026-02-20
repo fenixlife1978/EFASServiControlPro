@@ -36,7 +36,7 @@ export default function DirectorView() {
       const qSesiones = query(
         collection(db, "sesiones_monitoreo"), 
         where("InstitutoId", "==", institutoId),
-        where("rol", "==", "profesor")
+        where("role", "==", "profesor")
       );
       const snapshot = await getDocs(qSesiones);
       setSesionesActivas(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -70,7 +70,7 @@ export default function DirectorView() {
     });
 
     // Carga inicial de datos base (poca frecuencia de cambio)
-    const qProf = query(collection(db, "usuarios"), where("InstitutoId", "==", institutoId), where("rol", "==", "profesor"));
+    const qProf = query(collection(db, "usuarios"), where("InstitutoId", "==", institutoId), where("role", "==", "profesor"));
     const unsubProf = onSnapshot(qProf, (s) => setProfesores(s.docs.map(d => ({ id: d.id, ...d.data() }))));
 
     const qAulas = query(collection(db, `institutions/${institutoId}/Aulas`), orderBy("nombre_completo"));
