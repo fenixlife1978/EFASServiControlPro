@@ -9,7 +9,7 @@ import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
  ShieldCheck, Users, Zap, QrCode, Play, Tablet, Building2, ShieldAlert, 
- Plus, X, Smartphone, Lock, Eye, EyeOff, Layout, GraduationCap, Briefcase, Trash2, Edit3, Globe, CheckCircle2, AlertCircle, Settings2, DoorOpen, Save
+ Plus, X, Smartphone, Lock, Eye, EyeOff, Layout, GraduationCap, Briefcase, Trash2, Edit3, Globe, CheckCircle2, AlertCircle, Settings2, DoorOpen, Save, Search
 } from 'lucide-react';
 
 import CreateInstitutionForm from '@/components/super-admin/create-institution-form';
@@ -24,6 +24,7 @@ export default function SuperAdminView() {
   const [availableAulas, setAvailableAulas] = useState<any[]>([]);
   const [devices, setDevices] = useState<any[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
   
   const [targetInstId, setTargetInstId] = useState('');
   const [targetAulaId, setTargetAulaId] = useState('');
@@ -41,8 +42,6 @@ export default function SuperAdminView() {
   const [editingUser, setEditingUser] = useState<any>(null);
   const [editForm, setEditForm] = useState({ nombre: '', InstitutoId: '', seccion: '' });
   const [editAulasList, setEditAulasList] = useState<any[]>([]);
-
-  // --- EFECTOS ORIGINALES MANTENIDOS ---
 
   useEffect(() => {
     return onSnapshot(doc(db, "config", "app_status"), (d) => {
@@ -81,7 +80,6 @@ export default function SuperAdminView() {
     });
   }, [targetInstId, selectedConfig.instId, activeTab]);
 
-  // Cargar aulas para el formulario de reasignación según la sede seleccionada en el form
   useEffect(() => {
     if (!editForm.InstitutoId) {
       setEditAulasList([]);
@@ -127,8 +125,6 @@ export default function SuperAdminView() {
       }
     });
   }, [isJornadaActive, sessionStartTime]);
-
-  // --- LÓGICA DE NEGOCIO ---
 
   const handleUpdateAppVersion = async () => {
     try {
@@ -225,7 +221,12 @@ export default function SuperAdminView() {
     } catch (e) { console.error(e); }
   };
 
-  // --- LÓGICA DE CÓDIGOS QR ---
+  const filteredUsers = allUsers.filter(u => 
+    u.nombre?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    u.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    u.seccion?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    u.role?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   const generateMasterQR = () => {
     const masterConfig = {
@@ -471,7 +472,6 @@ export default function SuperAdminView() {
                         <option value="">-- SELECCIONAR AULA --</option>
                         {editAulasList.map(a => <option key={a.id} value={a.nombre_completo}>{a.nombre_completo}</option>)}
                       </select>
-                      {!editForm.InstitutoId && <p className="text-[7px] text-slate-500 mt-1 ml-2 uppercase">* SELECCIONA UNA SEDE PRIMERO</p>}
                     </div>
                   </div>
                   <button onClick={handleUpdateUser} className="w-full mt-8 bg-orange-500 text-white font-black py-5 rounded-2xl uppercase italic text-xs shadow-lg shadow-orange-500/20 transition-all flex items-center justify-center gap-2">
@@ -481,10 +481,23 @@ export default function SuperAdminView() {
               )}
 
               <section className="bg-[#0f1117] border border-slate-800 rounded-[2.5rem] overflow-hidden shadow-2xl">
-                <div className="p-8 border-b border-slate-800 bg-black/20 flex justify-between items-center">
-                  <h3 className="text-xs font-black uppercase italic flex items-center gap-2"><Globe className="text-orange-500" size={16}/> Supervisión Global de Operadores</h3>
-                  <span className="text-[9px] font-black text-slate-500 uppercase">{allUsers.length} Usuarios Registrados</span>
+                <div className="p-8 border-b border-slate-800 bg-black/20 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                  <div>
+                    <h3 className="text-xs font-black uppercase italic flex items-center gap-2"><Globe className="text-orange-500" size={16}/> Supervisión Global de Operadores</h3>
+                    <span className="text-[9px] font-black text-slate-500 uppercase">{filteredUsers.length} de {allUsers.length} Usuarios</span>
+                  </div>
+                  
+                  <div className="relative w-full md:w-96 group">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-orange-500 transition-colors" size={16} />
+                    <input 
+                      className="w-full bg-slate-900 border border-slate-800 pl-12 pr-4 py-3 rounded-xl focus:border-orange-500 outline-none font-bold text-slate-200 text-[10px] uppercase transition-all"
+                      placeholder="BUSCAR POR NOMBRE, EMAIL O AULA..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                  </div>
                 </div>
+
                 <div className="overflow-x-auto">
                   <table className="w-full text-[10px] text-left">
                     <thead>
@@ -497,7 +510,7 @@ export default function SuperAdminView() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/50">
-                      {allUsers.map(u => (
+                      {filteredUsers.length > 0 ? filteredUsers.map(u => (
                         <tr key={u.id} className="hover:bg-white/[0.02] transition-colors">
                           <td className="p-6">
                             <p className="text-white font-black uppercase text-[11px]">{u.nombre}</p>
@@ -525,7 +538,13 @@ export default function SuperAdminView() {
                             </div>
                           </td>
                         </tr>
-                      ))}
+                      )) : (
+                        <tr>
+                          <td colSpan={5} className="p-12 text-center text-slate-600 font-black uppercase italic text-[10px]">
+                            No se encontraron operadores que coincidan con la búsqueda
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
