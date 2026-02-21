@@ -19,8 +19,29 @@ export default function LoginForm() {
   const [institutoId, setInstitutoId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
   
   const { toast } = useToast();
+
+  const handleResetPassword = async () => {
+    if (!email) {
+      setError('Por favor, ingresa tu email para enviarte el enlace de recuperación.');
+      return;
+    }
+    setResetLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, email.trim());
+      toast({
+        title: 'Correo enviado',
+        description: 'Revisa tu bandeja de entrada para restablecer tu contraseña.',
+      });
+      setError(null);
+    } catch (err: any) {
+      setError('Error al enviar el correo. Verifica que el email sea válido.');
+    } finally {
+      setResetLoading(false);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,7 +138,17 @@ export default function LoginForm() {
 
           <div className="grid gap-1.5 relative">
             <Lock className="absolute left-4 top-10 text-slate-500 h-4 w-4" />
-            <Label className="text-[9px] uppercase font-black ml-1 text-slate-500 italic">Password</Label>
+            <div className="flex items-center justify-between">
+              <Label className="text-[9px] uppercase font-black ml-1 text-slate-500 italic">Password</Label>
+              <button
+                type="button"
+                onClick={handleResetPassword}
+                disabled={resetLoading}
+                className="text-[9px] uppercase font-black text-[#f97316] hover:text-white italic transition-colors disabled:opacity-50"
+              >
+                {resetLoading ? 'Enviando...' : '¿Olvidaste tu contraseña?'}
+              </button>
+            </div>
             <Input 
               type="password" 
               required 

@@ -9,7 +9,7 @@ import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
  ShieldCheck, Users, Zap, QrCode, Play, Tablet, Building2, ShieldAlert, 
- Plus, X, Smartphone, Lock, Eye, EyeOff, Layout, GraduationCap, Briefcase, Trash2, Edit3, Globe, CheckCircle2, AlertCircle, Settings2
+ Plus, X, Smartphone, Lock, Eye, EyeOff, Layout, GraduationCap, Briefcase, Trash2, Edit3, Globe, CheckCircle2, AlertCircle, Settings2, DoorOpen, Save
 } from 'lucide-react';
 
 import CreateInstitutionForm from '@/components/super-admin/create-institution-form';
@@ -39,7 +39,8 @@ export default function SuperAdminView() {
 
   const [appVersion, setAppVersion] = useState({ code: 1, url: '', force: true });
   const [editingUser, setEditingUser] = useState<any>(null);
-  const [editForm, setEditForm] = useState({ nombre: '', InstitutoId: '' });
+  const [editForm, setEditForm] = useState({ nombre: '', InstitutoId: '', seccion: '' });
+  const [editAulasList, setEditAulasList] = useState<any[]>([]);
 
   // --- EFECTOS ORIGINALES MANTENIDOS ---
 
@@ -80,6 +81,17 @@ export default function SuperAdminView() {
     });
   }, [targetInstId, selectedConfig.instId, activeTab]);
 
+  // Cargar aulas para el formulario de reasignación según la sede seleccionada en el form
+  useEffect(() => {
+    if (!editForm.InstitutoId) {
+      setEditAulasList([]);
+      return;
+    }
+    return onSnapshot(collection(db, `institutions/${editForm.InstitutoId}/Aulas`), (s) => {
+      setEditAulasList(s.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }, [editForm.InstitutoId]);
+
   useEffect(() => {
     if (!targetInstId || !targetAulaId) {
       setCurrentAulaData(null);
@@ -116,7 +128,7 @@ export default function SuperAdminView() {
     });
   }, [isJornadaActive, sessionStartTime]);
 
-  // --- LÓGICA DE NEGOCIO ORIGINAL ---
+  // --- LÓGICA DE NEGOCIO ---
 
   const handleUpdateAppVersion = async () => {
     try {
@@ -132,7 +144,11 @@ export default function SuperAdminView() {
 
   const handleEditClick = (user: any) => {
     setEditingUser(user);
-    setEditForm({ nombre: user.nombre || '', InstitutoId: user.InstitutoId || '' });
+    setEditForm({ 
+      nombre: user.nombre || '', 
+      InstitutoId: user.InstitutoId || '',
+      seccion: user.seccion || ''
+    });
   };
 
   const handleUpdateUser = async () => {
@@ -141,9 +157,11 @@ export default function SuperAdminView() {
       await updateDoc(doc(db, "usuarios", editingUser.id), {
         nombre: editForm.nombre,
         InstitutoId: editForm.InstitutoId,
+        seccion: editForm.seccion.trim().toUpperCase(),
         lastUpdated: serverTimestamp()
       });
       setEditingUser(null);
+      alert("✅ Operador reasignado exitosamente");
     } catch (e) { console.error(e); }
   };
 
@@ -207,7 +225,7 @@ export default function SuperAdminView() {
     } catch (e) { console.error(e); }
   };
 
-  // --- LÓGICA DE CÓDIGOS QR (MEJORADA) ---
+  // --- LÓGICA DE CÓDIGOS QR ---
 
   const generateMasterQR = () => {
     const masterConfig = {
@@ -421,26 +439,47 @@ export default function SuperAdminView() {
             <div className="space-y-12">
               <UserManagement />
               {editingUser && (
-                <section className="bg-orange-500/10 border-2 border-orange-500 rounded-[2.5rem] p-8 animate-in slide-in-from-top-4">
-                  <div className="flex justify-between mb-6">
-                    <h4 className="text-xs font-black uppercase">Editando Operador: {editingUser.email}</h4>
-                    <button onClick={() => setEditingUser(null)}><X size={20}/></button>
+                <section className="bg-orange-500/5 border-2 border-orange-500 rounded-[2.5rem] p-8 animate-in slide-in-from-top-4 shadow-[0_0_50px_rgba(249,115,22,0.1)]">
+                  <div className="flex justify-between items-center mb-8">
+                    <h4 className="text-xs font-black uppercase italic text-white flex items-center gap-2"><Edit3 size={16} className="text-orange-500"/> Reasignación Global: {editingUser.email}</h4>
+                    <button onClick={() => setEditingUser(null)} className="p-2 hover:bg-slate-800 rounded-full transition-colors"><X size={20}/></button>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div className="space-y-2">
-                      <label className="text-[8px] font-black uppercase text-orange-500 ml-2">Nombre Completo</label>
+                      <label className="text-[8px] font-black uppercase text-orange-500 ml-2 italic">Nombre Completo</label>
                       <input className={inputStyle} value={editForm.nombre} onChange={e => setEditForm({...editForm, nombre: e.target.value})} />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[8px] font-black uppercase text-orange-500 ml-2">Asignar Sede</label>
-                      <select className={inputStyle} value={editForm.InstitutoId} onChange={e => setEditForm({...editForm, InstitutoId: e.target.value})}>
+                      <label className="text-[8px] font-black uppercase text-orange-500 ml-2 italic">Reasignar Sede</label>
+                      <select 
+                        className={inputStyle} 
+                        value={editForm.InstitutoId} 
+                        onChange={e => setEditForm({...editForm, InstitutoId: e.target.value, seccion: ''})}
+                      >
+                        <option value="">-- SELECCIONAR INSTITUTO --</option>
                         {institutions.map(i => <option key={i.id} value={i.id}>{i.nombre}</option>)}
                       </select>
                     </div>
+                    <div className="space-y-2">
+                      <label className="text-[8px] font-black uppercase text-orange-500 ml-2 italic">Reasignar Sección / Aula</label>
+                      <select 
+                        className={inputStyle} 
+                        value={editForm.seccion} 
+                        onChange={e => setEditForm({...editForm, seccion: e.target.value})}
+                        disabled={!editForm.InstitutoId}
+                      >
+                        <option value="">-- SELECCIONAR AULA --</option>
+                        {editAulasList.map(a => <option key={a.id} value={a.nombre_completo}>{a.nombre_completo}</option>)}
+                      </select>
+                      {!editForm.InstitutoId && <p className="text-[7px] text-slate-500 mt-1 ml-2 uppercase">* SELECCIONA UNA SEDE PRIMERO</p>}
+                    </div>
                   </div>
-                  <button onClick={handleUpdateUser} className="w-full mt-6 bg-orange-500 text-white font-black py-4 rounded-xl uppercase shadow-lg shadow-orange-500/20">Actualizar Credenciales</button>
+                  <button onClick={handleUpdateUser} className="w-full mt-8 bg-orange-500 text-white font-black py-5 rounded-2xl uppercase italic text-xs shadow-lg shadow-orange-500/20 transition-all flex items-center justify-center gap-2">
+                    <Save size={16}/> Ejecutar Cambio de Jurisdicción
+                  </button>
                 </section>
               )}
+
               <section className="bg-[#0f1117] border border-slate-800 rounded-[2.5rem] overflow-hidden shadow-2xl">
                 <div className="p-8 border-b border-slate-800 bg-black/20 flex justify-between items-center">
                   <h3 className="text-xs font-black uppercase italic flex items-center gap-2"><Globe className="text-orange-500" size={16}/> Supervisión Global de Operadores</h3>
@@ -451,21 +490,38 @@ export default function SuperAdminView() {
                     <thead>
                       <tr className="text-slate-500 uppercase border-b border-slate-800/50 bg-slate-900/30">
                         <th className="p-6">Identidad / Contacto</th>
-                        <th className="p-6">Rol de Acceso</th>
+                        <th className="p-6">Rol</th>
                         <th className="p-6">Sede Asignada</th>
-                        <th className="p-6 text-right">Control de Cuenta</th>
+                        <th className="p-6">Aula / Sección</th>
+                        <th className="p-6 text-right">Acciones</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/50">
                       {allUsers.map(u => (
                         <tr key={u.id} className="hover:bg-white/[0.02] transition-colors">
-                          <td className="p-6"><p className="text-white font-black uppercase text-[11px]">{u.nombre}</p><p className="text-slate-500 font-mono">{u.email}</p></td>
-                          <td className="p-6"><span className={`px-3 py-1 rounded-lg font-black uppercase text-[8px] ${u.role === 'director' ? 'bg-blue-500/10 text-blue-500' : 'bg-orange-500/10 text-orange-500'}`}>{u.role}</span></td>
-                          <td className="p-6 text-slate-400 font-bold uppercase">{institutions.find(i => i.id === u.InstitutoId)?.nombre || u.InstitutoId}</td>
+                          <td className="p-6">
+                            <p className="text-white font-black uppercase text-[11px]">{u.nombre}</p>
+                            <p className="text-slate-500 font-mono text-[9px]">{u.email}</p>
+                          </td>
+                          <td className="p-6">
+                            <span className={`px-3 py-1 rounded-lg font-black uppercase text-[8px] ${u.role === 'director' ? 'bg-blue-500/10 text-blue-500' : 'bg-orange-500/10 text-orange-500'}`}>
+                              {u.role}
+                            </span>
+                          </td>
+                          <td className="p-6">
+                            <p className="text-slate-300 font-bold uppercase">{institutions.find(i => i.id === u.InstitutoId)?.nombre || 'DESCONOCIDA'}</p>
+                            <p className="text-[8px] text-slate-600 font-mono uppercase italic">{u.InstitutoId}</p>
+                          </td>
+                          <td className="p-6">
+                             <div className="flex items-center gap-2">
+                               <DoorOpen size={12} className="text-orange-500" />
+                               <span className="text-white font-black uppercase italic">{u.seccion || 'SIN SECCIÓN'}</span>
+                             </div>
+                          </td>
                           <td className="p-6 text-right">
                             <div className="flex justify-end gap-2">
                               <button onClick={() => handleEditClick(u)} className="p-3 bg-slate-800 hover:bg-orange-500/20 hover:text-orange-500 rounded-xl transition-all"><Edit3 size={14}/></button>
-                              <button onClick={() => handleDeleteUser(u.id)} className="p-3 bg-slate-800 hover:bg-red-500/20 hover:text-red-500 text-red-500/50 rounded-xl transition-all"><Trash2 size={14}/></button>
+                              <button onClick={() => handleDeleteUser(u.id)} className="p-3 bg-slate-800 hover:bg-red-500/20 hover:text-red-500 text-red-500/30 rounded-xl transition-all"><Trash2 size={14}/></button>
                             </div>
                           </td>
                         </tr>
