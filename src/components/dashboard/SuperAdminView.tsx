@@ -167,6 +167,20 @@ export default function SuperAdminView() {
     });
   };
 
+  const handleCleanupInstitutions = async () => {
+    const confirmFirst = confirm("⚠️ ADVERTENCIA DE SEGURIDAD ⚠️\n\n¿Deseas eliminar las sedes con IDs aleatorios?\nEsta acción no se puede deshacer.");
+    if (!confirmFirst) return;
+    const confirmSecond = confirm("¿ESTÁS COMPLETAMENTE SEGURO?\nSe borrarán todos los documentos cuyos IDs no fueron creados manualmente.");
+    if (!confirmSecond) return;
+    
+    try {
+      const toDelete = institutions.filter(inst => inst.id.length > 15);
+      for (const inst of toDelete) {
+        await deleteDoc(doc(db, "institutions", inst.id));
+      }
+      alert("✅ Limpieza completada. Se eliminaron " + toDelete.length + " sedes huérfanas.");
+    } catch (e) { console.error(e); }
+  };
   const generateDualQR = () => {
     const host = typeof window !== 'undefined' ? window.location.origin : '';
     return JSON.stringify({
@@ -347,6 +361,11 @@ export default function SuperAdminView() {
           {activeTab === 'sedes' && (
             <div className="grid grid-cols-12 gap-10">
               <div className="col-span-12 lg:col-span-5"><CreateInstitutionForm /></div>
+              <div className="col-span-12 lg:col-span-5 mt-4 text-center">
+                <button onClick={handleCleanupInstitutions} className="text-[9px] font-black text-red-500/40 hover:text-red-500 uppercase tracking-widest flex items-center justify-center gap-2 mx-auto transition-all">
+                  <Trash2 size={12}/> Limpiar Sedes con ID Aleatorio
+                </button>
+              </div>
               <div className="col-span-12 lg:col-span-7"><InstitutionList /></div>
             </div>
           )}
