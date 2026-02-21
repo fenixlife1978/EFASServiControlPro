@@ -1,7 +1,6 @@
 'use client';
 import { auth } from '@/firebase/config';
-
-import React, { useEffect, Suspense } from 'react';
+import React, { useEffect, useState, Suspense } from 'react';
 import { 
   ShieldCheck, 
   LogOut, 
@@ -10,33 +9,29 @@ import {
   Download,
   School
 } from 'lucide-react';
-import Image from 'next/image';
 import Link from 'next/link';
-import { usePathname, redirect, useSearchParams, useRouter } from 'next/navigation';
+import { usePathname, useSearchParams, useRouter } from 'next/navigation';
 import { useUser } from '@/firebase';
 import { Skeleton } from '@/components/ui/skeleton';
 import { InstitutionProvider } from './institution-context';
-import { PlaceHolderImages } from '@/lib/placeholder-images';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
 
-// --- COMPONENTE DE NAVEGACIÓN SUPERIOR ---
 const AdminNavbar = () => {
   const pathname = usePathname();
-  const router = useRouter();
-  const { user } = useUser();
   const { installApp, isInstallable, isStandalone } = usePWAInstall();
-  const efasLogo = PlaceHolderImages.find(img => img.id === 'efas-logo');
 
   const handleLogout = () => {
-    localStorage.clear();
-    router.push('/login');
+    auth.signOut().then(() => {
+      document.cookie = "__session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;";
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.replace("/login");
+    });
   };
 
   return (
     <nav className="border-b border-white/5 bg-[#0a0c10]/80 backdrop-blur-md sticky top-0 z-[50]">
       <div className="max-w-[1600px] mx-auto px-6 h-20 flex items-center justify-between">
-        
-        {/* Logo y Branding */}
         <Link href="/dashboard" className="flex items-center gap-3 group">
           <div className="bg-orange-600 p-2 rounded-xl shadow-[0_0_15px_rgba(234,88,12,0.3)] group-hover:scale-105 transition-transform">
             <ShieldCheck className="text-white w-6 h-6" />
@@ -49,7 +44,6 @@ const AdminNavbar = () => {
           </div>
         </Link>
 
-        {/* Enlaces de Navegación Centrales */}
         <div className="hidden lg:flex items-center gap-8">
           <Link 
             href="/dashboard" 
@@ -71,12 +65,10 @@ const AdminNavbar = () => {
           </Link>
         </div>
 
-        {/* Perfil y Acciones */}
         <div className="flex items-center gap-6">
-          {/* PWA Install Button (Solo si es instalable) */}
           {isInstallable && !isStandalone && (
             <button 
-              onClick={() => { auth.signOut().then(() => { document.cookie = "__session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;"; localStorage.clear(); sessionStorage.clear(); window.location.replace("/login"); }); }}
+              onClick={installApp}
               className="hidden md:flex items-center gap-2 bg-orange-500/10 hover:bg-orange-500 text-orange-500 hover:text-white border border-orange-500/20 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all"
             >
               <Download className="w-3 h-3" /> Instalar App
@@ -85,7 +77,7 @@ const AdminNavbar = () => {
 
           <div className="flex items-center gap-4 border-l border-white/10 pl-6">
             <button 
-              onClick={() => { auth.signOut().then(() => { document.cookie = "__session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;"; localStorage.clear(); sessionStorage.clear(); window.location.replace("/login"); }); }}
+              onClick={handleLogout}
               className="bg-white/5 hover:bg-red-500/10 p-3 rounded-xl border border-white/5 hover:border-red-500/20 transition-all group"
               title="Cerrar Sesión"
             >
@@ -93,7 +85,6 @@ const AdminNavbar = () => {
             </button>
           </div>
         </div>
-
       </div>
     </nav>
   );
@@ -114,28 +105,33 @@ function AdminLayoutLoading() {
 
 function AdminLayoutComponent({ children }: { children: React.ReactNode }) {
   const { user, loading } = useUser(); 
+  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    if (!loading && !user) {
-      const redirectUrl = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
-      redirect(`/login?redirect=${encodeURIComponent(redirectUrl)}`);
-    }
-  }, [user, loading, pathname, searchParams]);
+    setMounted(true);
+  }, []);
 
-  if (loading) return <AdminLayoutLoading />;
+  useEffect(() => {
+    if (mounted && !loading && !user) {
+      const currentParams = searchParams.toString();
+      const redirectUrl = `${pathname}${currentParams ? `?${currentParams}` : ''}`;
+      router.push(`/login?redirect=${encodeURIComponent(redirectUrl)}`);
+    }
+  }, [user, loading, pathname, searchParams, router, mounted]);
+
+  if (!mounted || loading) return <AdminLayoutLoading />;
   if (!user) return null;
 
   return (
     <InstitutionProvider>
-      <div className="min-h-screen bg-[#0a0c10] flex flex-col font-sans">
+      <div className="min-h-screen bg-[#0a0c10] flex flex-col font-sans text-slate-200">
         <AdminNavbar />
-        
         <main className="flex-1 w-full max-w-[1600px] mx-auto p-6 md:p-8 overflow-y-auto">
           {children}
         </main>
-
         <footer className="py-8 border-t border-white/5 text-center bg-[#0a0c10]">
           <p className="text-[9px] text-slate-600 font-black uppercase tracking-[0.5em]">
             EFAS ServiControlPro © 2026 • Security Infrastructure
@@ -149,9 +145,7 @@ function AdminLayoutComponent({ children }: { children: React.ReactNode }) {
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
     <Suspense fallback={<AdminLayoutLoading />}>
-      <AdminLayoutComponent>
-        {children}
-      </AdminLayoutComponent>
+      <AdminLayoutComponent>{children}</AdminLayoutComponent>
     </Suspense>
   );
 }

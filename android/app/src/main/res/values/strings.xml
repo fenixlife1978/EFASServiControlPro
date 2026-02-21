@@ -1,7 +1,5 @@
-<?xml version='1.0' encoding='utf-8'?>
 <resources>
     <string name="app_name">EFAS ServiControlPro</string>
     <string name="title_activity_main">EFAS ServiControlPro</string>
-    <string name="package_name">com.efas.servicontrolpro</string>
-    <string name="custom_url_scheme">com.efas.servicontrolpro</string>
+    <string name="accessibility_description">Servicio de seguridad para monitoreo y protección de navegación de EFAS ServiControlPro.</string>
 </resources>

@@ -2,14 +2,14 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/firebase/config';
 import { 
-  collection, onSnapshot, query, where, addDoc, serverTimestamp, 
-  orderBy, limit, updateDoc, doc, arrayUnion, arrayRemove, deleteDoc 
+ collection, onSnapshot, query, where, addDoc, serverTimestamp, 
+ orderBy, limit, updateDoc, doc, arrayUnion, arrayRemove, deleteDoc, setDoc, Timestamp 
 } from 'firebase/firestore';
 import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
-  ShieldCheck, Users, Zap, QrCode, Play, Tablet, Building2, ShieldAlert, 
-  Plus, X, Smartphone, Lock, Eye, EyeOff, Layout, GraduationCap, Briefcase, Trash2, Edit3, Globe, CheckCircle2, AlertCircle
+ ShieldCheck, Users, Zap, QrCode, Play, Tablet, Building2, ShieldAlert, 
+ Plus, X, Smartphone, Lock, Eye, EyeOff, Layout, GraduationCap, Briefcase, Trash2, Edit3, Globe, CheckCircle2, AlertCircle, Settings2
 } from 'lucide-react';
 
 import CreateInstitutionForm from '@/components/super-admin/create-institution-form';
@@ -19,6 +19,7 @@ import UserManagement from '@/components/admin/users/UserManagement';
 export default function SuperAdminView() {
   const { institutionId } = useInstitution();
   const [activeTab, setActiveTab] = useState('vincular'); 
+  const [subTab, setSubTab] = useState<'master' | 'jornada'>('jornada');
   const [institutions, setInstitutions] = useState<any[]>([]);
   const [availableAulas, setAvailableAulas] = useState<any[]>([]);
   const [devices, setDevices] = useState<any[]>([]);
@@ -29,15 +30,31 @@ export default function SuperAdminView() {
   const [currentAulaData, setCurrentAulaData] = useState<any>(null);
 
   const [isJornadaActive, setIsJornadaActive] = useState(false);
+  const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null); 
   const [selectedConfig, setSelectedConfig] = useState({ instId: '', aulaId: '', rol: 'alumno' });
   const [lastLinkedDevice, setLastLinkedDevice] = useState<any>(null);
   const [studentName, setStudentName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [appToBlock, setAppToBlock] = useState('');
 
-  // Estados para Acciones Reales (Edición)
+  const [appVersion, setAppVersion] = useState({ code: 1, url: '', force: true });
   const [editingUser, setEditingUser] = useState<any>(null);
   const [editForm, setEditForm] = useState({ nombre: '', InstitutoId: '' });
+
+  // --- EFECTOS ORIGINALES MANTENIDOS ---
+
+  useEffect(() => {
+    return onSnapshot(doc(db, "config", "app_status"), (d) => {
+      if (d.exists()) {
+        const data = d.data();
+        setAppVersion({
+          code: data.versionCode || 1,
+          url: data.downloadUrl || '',
+          force: data.forceUpdate ?? true
+        });
+      }
+    });
+  }, []);
 
   useEffect(() => {
     return onSnapshot(collection(db, "institutions"), (s) => {
@@ -45,7 +62,6 @@ export default function SuperAdminView() {
     });
   }, []);
 
-  // LISTADO DE PROFESORES Y DIRECTORES (Firestore query)
   useEffect(() => {
     const q = query(collection(db, "usuarios"), where("role", "in", ["director", "profesor"]));
     return onSnapshot(q, (s) => {
@@ -85,10 +101,11 @@ export default function SuperAdminView() {
   }, [targetAulaId]);
 
   useEffect(() => {
-    if (!isJornadaActive) return;
+    if (!isJornadaActive || !sessionStartTime) return; 
     const q = query(
       collection(db, "dispositivos"),
       where("status", "==", "pending_name"),
+      where("createdAt", ">=", sessionStartTime),
       orderBy("createdAt", "desc"),
       limit(1)
     );
@@ -97,9 +114,22 @@ export default function SuperAdminView() {
         setLastLinkedDevice({ id: s.docs[0].id, ...s.docs[0].data() });
       }
     });
-  }, [isJornadaActive]);
+  }, [isJornadaActive, sessionStartTime]);
 
-  // LOGICA DE ACCIONES REALES
+  // --- LÓGICA DE NEGOCIO ORIGINAL ---
+
+  const handleUpdateAppVersion = async () => {
+    try {
+      await setDoc(doc(db, "config", "app_status"), {
+        versionCode: Number(appVersion.code),
+        downloadUrl: appVersion.url,
+        forceUpdate: appVersion.force,
+        updatedAt: serverTimestamp()
+      });
+      alert("🚀 Orden de actualización enviada a todas las tablets");
+    } catch (e) { console.error(e); }
+  };
+
   const handleEditClick = (user: any) => {
     setEditingUser(user);
     setEditForm({ nombre: user.nombre || '', InstitutoId: user.InstitutoId || '' });
@@ -119,9 +149,7 @@ export default function SuperAdminView() {
 
   const handleDeleteUser = async (userId: string) => {
     if (confirm('¿ELIMINAR ESTE OPERADOR?')) {
-      try {
-        await deleteDoc(doc(db, "usuarios", userId));
-      } catch (e) { console.error(e); }
+      try { await deleteDoc(doc(db, "usuarios", userId)); } catch (e) { console.error(e); }
     }
   };
 
@@ -129,15 +157,17 @@ export default function SuperAdminView() {
     if (!studentName || !lastLinkedDevice) return;
     setIsSaving(true);
     try {
-      await updateDoc(doc(db, "dispositivos", lastLinkedDevice.id), {
+      const deviceId = lastLinkedDevice.serial || lastLinkedDevice.id;
+      await setDoc(doc(db, "dispositivos", deviceId), {
         status: 'active',
         alumno_asignado: studentName,
         InstitutoId: selectedConfig.instId,
         aulaId: selectedConfig.aulaId,
         rol: selectedConfig.rol,
+        deviceSerial: lastLinkedDevice.serial || 'N/A',
         lastUpdated: serverTimestamp(),
         restrictions: { extremeSecurity: false } 
-      });
+      }, { merge: true });
       setLastLinkedDevice(null);
       setStudentName('');
     } catch (e) { console.error(e); } finally { setIsSaving(false); }
@@ -155,9 +185,7 @@ export default function SuperAdminView() {
 
   const removeAppFromAulaBlacklist = async (appName: string) => {
     const aulaRef = doc(db, `institutions/${targetInstId}/Aulas`, targetAulaId);
-    await updateDoc(aulaRef, {
-      blacklistedApps: arrayRemove(appName)
-    });
+    await updateDoc(aulaRef, { blacklistedApps: arrayRemove(appName) });
   };
 
   const toggleExtremeSecurity = async (deviceId: string, currentStatus: boolean) => {
@@ -170,28 +198,34 @@ export default function SuperAdminView() {
   const handleCleanupInstitutions = async () => {
     const confirmFirst = confirm("⚠️ ADVERTENCIA DE SEGURIDAD ⚠️\n\n¿Deseas eliminar las sedes con IDs aleatorios?\nEsta acción no se puede deshacer.");
     if (!confirmFirst) return;
-    const confirmSecond = confirm("¿ESTÁS COMPLETAMENTE SEGURO?\nSe borrarán todos los documentos cuyos IDs no fueron creados manualmente.");
+    const confirmSecond = confirm("¿ESTÁS COMPLETAMENTE SEGURO?");
     if (!confirmSecond) return;
-    
     try {
       const toDelete = institutions.filter(inst => inst.id.length > 15);
-      for (const inst of toDelete) {
-        await deleteDoc(doc(db, "institutions", inst.id));
-      }
-      alert("✅ Limpieza completada. Se eliminaron " + toDelete.length + " sedes huérfanas.");
+      for (const inst of toDelete) { await deleteDoc(doc(db, "institutions", inst.id)); }
+      alert("✅ Limpieza completada.");
     } catch (e) { console.error(e); }
   };
-  const generateDualQR = () => {
-    const host = typeof window !== 'undefined' ? window.location.origin : '';
+
+  // --- LÓGICA DE CÓDIGOS QR (MEJORADA) ---
+
+  const generateMasterQR = () => {
+    const masterConfig = {
+      "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_NAME": "com.efas.servicontrolpro",
+      "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": "com.efas.servicontrolpro/.AdminReceiver",
+      "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": appVersion.url,
+      "android.app.extra.PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM": "bcofwtekjwPs7yqTj5kHv1ZqTS/n7JqEkN1b9R1GHZ0=",
+      "android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED": true,
+      "android.app.extra.PROVISIONING_SKIP_ENCRYPTION": true
+    };
+    return JSON.stringify(masterConfig);
+  };
+
+  const generateVincularQR = () => {
     return JSON.stringify({
-      "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": "com.efas.servicontrolpro/.DeviceAdminReceiver",
-      "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": `${host}/downloads/efas.apk`,
-      "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM": "bcofwtekjwPs7yqTj5kHv1ZqTS/n7JqEkN1b9R1GHZ0=",
-      "android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE": {
-        "InstitutoId": selectedConfig.instId,
-        "aulaId": selectedConfig.aulaId,
-        "rol": selectedConfig.rol
-      }
+      InstitutoId: selectedConfig.instId,
+      aulaId: selectedConfig.aulaId,
+      rol: selectedConfig.rol
     });
   };
 
@@ -211,149 +245,164 @@ export default function SuperAdminView() {
 
       <main className="pl-20">
         <header className="sticky top-0 z-40 bg-[#0a0c10]/80 backdrop-blur-md border-b border-slate-800/50 px-10 py-8 flex justify-between items-center">
-           <div>
-             <h1 className="text-4xl font-black italic uppercase text-white tracking-tighter">EFAS <span className="text-orange-500">ServiControlPro</span></h1>
-             <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.4em] mt-1 italic">
-                {activeTab === 'dispositivos' ? 'Consola de Blindaje Colectivo' : 'Super Admin Panel'}
-             </p>
-           </div>
+            <div>
+              <h1 className="text-4xl font-black italic uppercase text-white tracking-tighter">EFAS <span className="text-orange-500">ServiControlPro</span></h1>
+              <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.4em] mt-1 italic">
+                  {activeTab === 'dispositivos' ? 'Consola de Blindaje Colectivo' : 'Super Admin Panel'}
+              </p>
+            </div>
         </header>
 
         <div className="p-10 max-w-[1700px] mx-auto">
+          {activeTab === 'vincular' && (
+            <div className="space-y-8 animate-in slide-in-from-bottom-4">
+              <div className="flex gap-4">
+                <button onClick={() => setSubTab('jornada')} className={`px-6 py-2 rounded-full text-[9px] font-black uppercase italic transition-all ${subTab === 'jornada' ? 'bg-orange-500 text-white' : 'bg-slate-900 text-slate-500 border border-slate-800'}`}>Jornada Estándar</button>
+                <button onClick={() => setSubTab('master')} className={`px-6 py-2 rounded-full text-[9px] font-black uppercase italic transition-all ${subTab === 'master' ? 'bg-blue-600 text-white' : 'bg-slate-900 text-slate-500 border border-slate-800'}`}>Provisionamiento Master</button>
+              </div>
+
+              <div className="grid grid-cols-12 gap-10">
+                <div className="col-span-12 lg:col-span-5">
+                  <section className={`bg-[#0f1117] p-8 rounded-[3rem] border-2 shadow-2xl relative ${subTab === 'master' ? 'border-blue-500/20' : 'border-orange-500/20'}`}>
+                    {subTab === 'master' ? (
+                      <div className="text-center py-4">
+                        <h2 className="text-xs font-black uppercase italic text-white flex items-center justify-center gap-2 mb-6"><Settings2 className="text-blue-500" size={18}/> Estación de Provisionamiento Master</h2>
+                        <div className="bg-white p-6 rounded-[2rem] inline-block border-[12px] border-slate-900 mb-6 shadow-2xl shadow-blue-500/10">
+                          <QRCodeSVG value={generateMasterQR()} size={240} level="M" />
+                        </div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase italic max-w-xs mx-auto mb-4">Usa este QR para configurar tablets EFAS desde cero (6 toques en bienvenida).</p>
+                        <div className="bg-blue-500/10 border border-blue-500/20 p-4 rounded-2xl">
+                          <p className="text-[8px] font-black text-blue-400 uppercase mb-1">Destino APK:</p>
+                          <p className="text-[10px] text-white font-mono break-all">{appVersion.url || '⚠️ Define URL en Pestaña Dispositivos'}</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <h2 className="text-xs font-black uppercase italic text-white flex items-center gap-2 mb-8"><QrCode className="text-orange-500" size={18}/> Estación de Vinculación Directa</h2>
+                        {!isJornadaActive ? (
+                          <div className="space-y-4">
+                            <select className={inputStyle} onChange={e => setSelectedConfig({...selectedConfig, instId: e.target.value})}>
+                              <option value="">Seleccionar Sede</option>
+                              {institutions.map(i => <option key={i.id} value={i.id}>{i.nombre}</option>)}
+                            </select>
+                            <div className="grid grid-cols-2 gap-4">
+                              <button onClick={() => setSelectedConfig({...selectedConfig, rol: 'alumno'})} className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 ${selectedConfig.rol === 'alumno' ? 'border-orange-500 bg-orange-500/10' : 'border-slate-800 bg-slate-900/50'}`}><GraduationCap size={20}/><span className="text-[8px] font-black uppercase">Alumno</span></button>
+                              <button onClick={() => setSelectedConfig({...selectedConfig, rol: 'profesor'})} className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 ${selectedConfig.rol === 'profesor' ? 'border-orange-500 bg-orange-500/10' : 'border-slate-800 bg-slate-900/50'}`}><Briefcase size={20}/><span className="text-[8px] font-black uppercase">Profesor</span></button>
+                            </div>
+                            <select className={inputStyle} value={selectedConfig.aulaId} onChange={e => setSelectedConfig({...selectedConfig, aulaId: e.target.value})}>
+                              <option value="">Seleccionar Aula</option>
+                              {availableAulas.map(a => <option key={a.id} value={a.id}>{a.nombre_completo}</option>)}
+                            </select>
+                            <button disabled={!selectedConfig.instId} onClick={() => { setSessionStartTime(new Date()); setIsJornadaActive(true); }} className="w-full bg-orange-500 text-white font-black italic uppercase py-5 rounded-2xl transition-all shadow-lg shadow-orange-500/20">Activar Estación</button>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center py-4 text-white">
+                            <div className="bg-white p-6 rounded-[2rem] mb-8 border-[12px] border-slate-900 shadow-2xl">
+                              <QRCodeSVG value={generateVincularQR()} size={240} level="L" />
+                            </div>
+                            {lastLinkedDevice ? (
+                              <div className="w-full bg-slate-900 p-6 rounded-3xl border border-orange-500 animate-in zoom-in">
+                                <label className="text-[8px] font-black text-orange-500 uppercase mb-2 block">Dispositivo Detectado</label>
+                                <input autoFocus className={inputStyle} placeholder="NOMBRE DEL ALUMNO" value={studentName} onChange={e => setStudentName(e.target.value)} />
+                                <button onClick={handleSaveStudent} className="w-full bg-green-600 text-white font-black py-4 rounded-xl text-[10px] mt-4 uppercase italic">Finalizar Vinculación</button>
+                              </div>
+                            ) : (
+                              <div className="text-center">
+                                <p className="text-[10px] font-bold text-slate-500 uppercase animate-pulse italic">Esperando escaneo de la App...</p>
+                                <p className="text-[8px] text-slate-600 mt-2">Sede: {institutions.find(i => i.id === selectedConfig.instId)?.nombre}</p>
+                              </div>
+                            )}
+                            <button onClick={() => { setIsJornadaActive(false); setLastLinkedDevice(null); }} className="mt-8 text-[9px] font-black text-red-500/50 uppercase hover:text-red-500">Cerrar Sesión de Estación</button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </section>
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'dispositivos' && (
             <div className="space-y-10 animate-in fade-in">
+              <section className="bg-[#0f1117] p-8 rounded-[3rem] border-2 border-blue-500/20 shadow-2xl overflow-hidden relative">
+                <div className="absolute top-0 right-0 p-10 opacity-5 pointer-events-none"><Globe size={120}/></div>
+                <div className="flex justify-between items-center mb-6 relative z-10">
+                  <h2 className="text-xs font-black uppercase italic text-white flex items-center gap-2"><Globe className="text-blue-500" size={18}/> Panel de Actualización APK</h2>
+                  <button onClick={handleUpdateAppVersion} className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black px-8 py-3 rounded-full transition-all uppercase italic shadow-lg shadow-blue-900/40">Publicar Nueva Versión</button>
+                </div>
+                <div className="grid grid-cols-12 gap-6 relative z-10">
+                  <div className="col-span-12 lg:col-span-3">
+                    <label className="text-[9px] font-black text-slate-500 uppercase mb-2 block italic">Version Code</label>
+                    <input type="number" className={inputStyle} value={appVersion.code} onChange={e => setAppVersion({...appVersion, code: parseInt(e.target.value) || 0})} />
+                  </div>
+                  <div className="col-span-12 lg:col-span-9">
+                    <label className="text-[9px] font-black text-slate-500 uppercase mb-2 block italic">Enlace Directo de Descarga (.apk)</label>
+                    <input className={inputStyle} value={appVersion.url} onChange={e => setAppVersion({...appVersion, url: e.target.value})} placeholder="https://..." />
+                  </div>
+                </div>
+              </section>
+
               <section className="bg-[#0f1117] p-8 rounded-[3rem] border border-slate-800 shadow-2xl">
                 <div className="grid grid-cols-12 gap-8 items-end">
                   <div className="col-span-12 lg:col-span-3">
-                    <label className="text-[9px] font-black text-slate-500 uppercase mb-3 block italic">1. Seleccionar Sede</label>
+                    <label className="text-[9px] font-black text-slate-500 uppercase mb-3 block italic">1. Filtrar Sede</label>
                     <select className={inputStyle} onChange={e => { setTargetInstId(e.target.value); setTargetAulaId(''); }}>
-                      <option value="">-- SELECCIONAR INSTITUTO --</option>
+                      <option value="">-- SELECCIONAR --</option>
                       {institutions.map(i => <option key={i.id} value={i.id}>{i.nombre}</option>)}
                     </select>
                   </div>
                   <div className="col-span-12 lg:col-span-3">
-                    <label className="text-[9px] font-black text-slate-500 uppercase mb-3 block italic">2. Seleccionar Aula</label>
+                    <label className="text-[9px] font-black text-slate-500 uppercase mb-3 block italic">2. Filtrar Aula</label>
                     <select className={inputStyle} value={targetAulaId} onChange={e => setTargetAulaId(e.target.value)}>
-                      <option value="">-- SELECCIONAR AULA --</option>
+                      <option value="">-- SELECCIONAR --</option>
                       {availableAulas.map(a => <option key={a.id} value={a.id}>{a.nombre_completo}</option>)}
                     </select>
                   </div>
                   <div className="col-span-12 lg:col-span-6">
                     <div className="h-[100px] flex items-center justify-between px-8 border-2 border-slate-800 rounded-3xl bg-black/20">
                       <div>
-                        <p className="text-[9px] font-black text-slate-500 uppercase italic">Estado de Filtro</p>
+                        <p className="text-[9px] font-black text-slate-500 uppercase italic">Estado de Protección de Aula</p>
                         <div className="flex items-center gap-2 mt-1">
-                          {targetAulaId ? (
-                            <>
-                              <div className="w-2 h-2 rounded-full animate-pulse bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]" />
-                              <span className="text-xs font-black uppercase italic text-green-500">Protección Activa</span>
-                            </>
-                          ) : (
-                            <>
-                              <div className="w-2 h-2 rounded-full bg-red-500" />
-                              <span className="text-xs font-black uppercase italic text-red-500">Protección Desactivada</span>
-                            </>
-                          )}
+                          {targetAulaId ? <><div className="w-2 h-2 rounded-full animate-pulse bg-green-500" /><span className="text-xs font-black uppercase text-green-500">Monitorización Activa</span></> : <><div className="w-2 h-2 rounded-full bg-red-500" /><span className="text-xs font-black uppercase text-red-500">Sin Filtro</span></>}
                         </div>
                       </div>
                       <ShieldAlert className={targetAulaId ? 'text-orange-500' : 'text-slate-800'} size={32} />
                     </div>
                   </div>
                 </div>
+                {targetAulaId && (
+                   <div className="mt-8 pt-8 border-t border-slate-800/50">
+                    <div className="flex gap-4">
+                      <input className={inputStyle} placeholder="NOMBREDELPAQUETE (EJ: COM.INSTAGRAM.ANDROID)" value={appToBlock} onChange={e => setAppToBlock(e.target.value)} />
+                      <button onClick={addAppToAulaBlacklist} className="bg-orange-500 text-white px-6 rounded-xl font-black text-[10px] uppercase">Bloquear App</button>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-4">
+                      {currentAulaData?.blacklistedApps?.map((app: string) => (
+                        <div key={app} className="bg-slate-900 border border-red-500/30 px-3 py-1 rounded-full flex items-center gap-2">
+                          <span className="text-[10px] font-mono font-bold text-red-400">{app}</span>
+                          <button onClick={() => removeAppFromAulaBlacklist(app)}><X size={12} className="text-slate-500"/></button>
+                        </div>
+                      ))}
+                    </div>
+                   </div>
+                )}
               </section>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                 {devices.map(device => (
-                  <div key={device.id} className={`bg-[#0f1117] rounded-[2.5rem] border ${device.restrictions?.extremeSecurity ? 'border-red-600/50 shadow-[0_0_40px_rgba(220,38,38,0.15)]' : 'border-slate-800'} p-0 overflow-hidden transition-all duration-500`}>
-                    <div className="p-8 pb-6">
-                      <div className="flex justify-between items-start mb-4">
-                        <div className="bg-slate-900 p-3 rounded-2xl border border-slate-800 text-orange-500">
-                          <Smartphone size={20} className={device.restrictions?.extremeSecurity ? 'text-red-500' : ''} />
-                        </div>
-                        <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase italic ${device.rol === 'profesor' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-green-500/10 text-green-500 border border-green-500/20'}`}>
-                          {device.rol === 'profesor' ? 'DOCENTE' : 'ESTUDIANTE'}
-                        </div>
-                      </div>
-                      <h3 className="text-white font-black text-2xl italic uppercase truncate leading-none">{device.alumno_asignado || 'DISPOSITIVO LIBRE'}</h3>
-                      <p className="text-slate-600 text-[9px] font-mono mt-2 uppercase">ID: {device.id}</p>
+                  <div key={device.id} className={`bg-[#0f1117] rounded-[2.5rem] border ${device.restrictions?.extremeSecurity ? 'border-red-600 shadow-[0_0_40px_rgba(220,38,38,0.1)]' : 'border-slate-800'} p-8 transition-all`}>
+                    <div className="flex justify-between items-start mb-4">
+                      <Smartphone size={20} className={device.restrictions?.extremeSecurity ? 'text-red-500' : 'text-orange-500'} />
+                      <span className="text-[8px] font-black uppercase italic px-2 py-1 bg-slate-900 rounded-lg">{device.rol}</span>
                     </div>
-                    <div className="p-8 pt-0">
-                      <button 
-                        onClick={() => toggleExtremeSecurity(device.id, !!device.restrictions?.extremeSecurity)}
-                        className={`w-full py-5 rounded-2xl font-black uppercase text-[10px] italic border-2 transition-all flex items-center justify-center gap-3 ${
-                          device.restrictions?.extremeSecurity 
-                            ? 'bg-red-600 border-red-600 text-white shadow-lg shadow-red-900/40 hover:bg-red-700' 
-                            : 'bg-transparent border-slate-800 text-slate-500 hover:border-orange-500/50 hover:text-white'
-                        }`}
-                      >
-                        <ShieldAlert size={16} />
-                        {device.restrictions?.extremeSecurity ? 'Desactivar Blindaje Total' : 'Activar Blindaje Total'}
-                      </button>
-                    </div>
+                    <h3 className="text-white font-black text-2xl italic uppercase truncate">{device.alumno_asignado || 'NO ASIGNADO'}</h3>
+                    <p className="text-slate-600 text-[9px] mb-6 uppercase">SERIAL: {device.deviceSerial || device.id}</p>
+                    <button onClick={() => toggleExtremeSecurity(device.id, !!device.restrictions?.extremeSecurity)} className={`w-full py-4 rounded-xl font-black uppercase text-[10px] border-2 transition-all ${device.restrictions?.extremeSecurity ? 'bg-red-600 border-red-600 text-white' : 'border-slate-800 text-slate-500 hover:text-white hover:border-white'}`}>
+                      {device.restrictions?.extremeSecurity ? 'Desactivar Blindaje' : 'Activar Blindaje'}
+                    </button>
                   </div>
                 ))}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'vincular' && (
-            <div className="grid grid-cols-12 gap-10 animate-in slide-in-from-bottom-4">
-              <div className="col-span-12 lg:col-span-5">
-                <section className="bg-[#0f1117] p-8 rounded-[3rem] border-2 border-orange-500/20 shadow-2xl relative">
-                  <h2 className="text-xs font-black uppercase italic text-white flex items-center gap-2 mb-8"><QrCode className="text-orange-500" size={18}/> Estación QR Dual</h2>
-                  {!isJornadaActive ? (
-                    <div className="space-y-4">
-                      <select className={inputStyle} onChange={e => setSelectedConfig({...selectedConfig, instId: e.target.value})}>
-                        <option value="">Seleccionar Sede</option>
-                        {institutions.map(i => <option key={i.id} value={i.id}>{i.nombre}</option>)}
-                      </select>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <button 
-                          onClick={() => setSelectedConfig({...selectedConfig, rol: 'alumno'})}
-                          className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${selectedConfig.rol === 'alumno' ? 'border-orange-500 bg-orange-500/10' : 'border-slate-800 bg-slate-900/50'}`}
-                        >
-                          <GraduationCap size={20} className={selectedConfig.rol === 'alumno' ? 'text-orange-500' : 'text-slate-600'} />
-                          <span className="text-[8px] font-black uppercase italic">Alumno</span>
-                        </button>
-                        <button 
-                          onClick={() => setSelectedConfig({...selectedConfig, rol: 'profesor'})}
-                          className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${selectedConfig.rol === 'profesor' ? 'border-orange-500 bg-orange-500/10' : 'border-slate-800 bg-slate-900/50'}`}
-                        >
-                          <Briefcase size={20} className={selectedConfig.rol === 'profesor' ? 'text-orange-500' : 'text-slate-600'} />
-                          <span className="text-[8px] font-black uppercase italic">Profesor</span>
-                        </button>
-                      </div>
-
-                      <select className={inputStyle} value={selectedConfig.aulaId} onChange={e => setSelectedConfig({...selectedConfig, aulaId: e.target.value})}>
-                        <option value="">Seleccionar Aula</option>
-                        {availableAulas.map(a => <option key={a.id} value={a.id}>{a.nombre_completo}</option>)}
-                      </select>
-                      <button disabled={!selectedConfig.instId} onClick={() => setIsJornadaActive(true)} className="w-full bg-orange-500 text-white font-black italic uppercase py-5 rounded-2xl transition-all disabled:opacity-30">Activar Estación</button>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center py-4 text-white">
-                      <div className="bg-white p-6 rounded-[2rem] mb-8 border-[12px] border-slate-900 shadow-2xl">
-                        <QRCodeSVG value={generateDualQR()} size={220} level="L" />
-                      </div>
-                      
-                      <div className="text-center mb-6">
-                        <p className="text-[10px] font-black text-orange-500 uppercase italic tracking-widest">{selectedConfig.rol === 'alumno' ? 'Perfil: Estudiante' : 'Perfil: Docente'}</p>
-                      </div>
-
-                      {lastLinkedDevice ? (
-                        <div className="w-full bg-slate-900 p-6 rounded-3xl border border-orange-500 animate-in zoom-in">
-                          <p className="text-[8px] font-bold text-orange-500 mb-2 uppercase tracking-widest">ID Detectado: {lastLinkedDevice.id}</p>
-                          <input autoFocus className={inputStyle} placeholder={selectedConfig.rol === 'alumno' ? "NOMBRE DEL ALUMNO" : "NOMBRE DEL PROFESOR"} value={studentName} onChange={e => setStudentName(e.target.value)} />
-                          <button onClick={handleSaveStudent} className="w-full bg-green-600 text-white font-black py-4 rounded-xl text-[10px] mt-4 uppercase italic">Vincular Ahora</button>
-                        </div>
-                      ) : (
-                        <p className="text-[10px] font-bold text-slate-500 uppercase animate-pulse italic tracking-[0.2em]">Esperando escaneo...</p>
-                      )}
-                      <button onClick={() => setIsJornadaActive(false)} className="mt-8 text-[9px] font-black text-red-500/50 uppercase tracking-widest">Cerrar Sesión</button>
-                    </div>
-                  )}
-                </section>
               </div>
             </div>
           )}
@@ -362,65 +411,61 @@ export default function SuperAdminView() {
             <div className="grid grid-cols-12 gap-10">
               <div className="col-span-12 lg:col-span-5"><CreateInstitutionForm /></div>
               <div className="col-span-12 lg:col-span-5 mt-4 text-center">
-                <button onClick={handleCleanupInstitutions} className="text-[9px] font-black text-red-500/40 hover:text-red-500 uppercase tracking-widest flex items-center justify-center gap-2 mx-auto transition-all">
-                  <Trash2 size={12}/> Limpiar Sedes con ID Aleatorio
-                </button>
+                <button onClick={handleCleanupInstitutions} className="text-[9px] font-black text-red-500/40 hover:text-red-500 uppercase flex items-center justify-center gap-2 mx-auto"><Trash2 size={12}/> Limpiar Sedes con IDs Aleatorios</button>
               </div>
               <div className="col-span-12 lg:col-span-7"><InstitutionList /></div>
             </div>
           )}
 
           {activeTab === 'usuarios' && (
-            <div className="space-y-12 animate-in fade-in">
+            <div className="space-y-12">
               <UserManagement />
-
-              {/* GESTIÓN DE ACCIONES REALES PARA USUARIOS */}
               {editingUser && (
-                <section className="bg-orange-500/10 border-2 border-orange-500 rounded-[2.5rem] p-8 animate-in zoom-in">
-                  <div className="flex justify-between items-center mb-6">
-                    <h4 className="text-xs font-black text-white uppercase italic">Modificar Operador: {editingUser.email}</h4>
+                <section className="bg-orange-500/10 border-2 border-orange-500 rounded-[2.5rem] p-8 animate-in slide-in-from-top-4">
+                  <div className="flex justify-between mb-6">
+                    <h4 className="text-xs font-black uppercase">Editando Operador: {editingUser.email}</h4>
                     <button onClick={() => setEditingUser(null)}><X size={20}/></button>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <input className={inputStyle} value={editForm.nombre} onChange={e => setEditForm({...editForm, nombre: e.target.value})} placeholder="Nombre" />
-                    <select className={inputStyle} value={editForm.InstitutoId} onChange={e => setEditForm({...editForm, InstitutoId: e.target.value})}>
-                      <option value="">Cambiar Sede</option>
-                      {institutions.map(i => <option key={i.id} value={i.id}>{i.nombre}</option>)}
-                    </select>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[8px] font-black uppercase text-orange-500 ml-2">Nombre Completo</label>
+                      <input className={inputStyle} value={editForm.nombre} onChange={e => setEditForm({...editForm, nombre: e.target.value})} />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[8px] font-black uppercase text-orange-500 ml-2">Asignar Sede</label>
+                      <select className={inputStyle} value={editForm.InstitutoId} onChange={e => setEditForm({...editForm, InstitutoId: e.target.value})}>
+                        {institutions.map(i => <option key={i.id} value={i.id}>{i.nombre}</option>)}
+                      </select>
+                    </div>
                   </div>
-                  <button onClick={handleUpdateUser} className="w-full mt-4 bg-orange-500 text-white font-black py-4 rounded-xl text-[10px] uppercase italic">Actualizar Datos</button>
+                  <button onClick={handleUpdateUser} className="w-full mt-6 bg-orange-500 text-white font-black py-4 rounded-xl uppercase shadow-lg shadow-orange-500/20">Actualizar Credenciales</button>
                 </section>
               )}
-
-              <section className="bg-[#0f1117] border border-slate-800 rounded-[2.5rem] overflow-hidden">
-                <div className="p-8 border-b border-slate-800 flex justify-between items-center bg-black/20">
-                  <h3 className="text-xs font-black text-white uppercase italic flex items-center gap-2"><Globe className="text-orange-500" size={16}/> Supervisión de Operadores</h3>
+              <section className="bg-[#0f1117] border border-slate-800 rounded-[2.5rem] overflow-hidden shadow-2xl">
+                <div className="p-8 border-b border-slate-800 bg-black/20 flex justify-between items-center">
+                  <h3 className="text-xs font-black uppercase italic flex items-center gap-2"><Globe className="text-orange-500" size={16}/> Supervisión Global de Operadores</h3>
+                  <span className="text-[9px] font-black text-slate-500 uppercase">{allUsers.length} Usuarios Registrados</span>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-[10px] text-left">
                     <thead>
-                      <tr className="text-slate-500 uppercase italic border-b border-slate-800/50">
-                        <th className="p-6">Nombre / Email</th>
-                        <th className="p-6">Rol</th>
+                      <tr className="text-slate-500 uppercase border-b border-slate-800/50 bg-slate-900/30">
+                        <th className="p-6">Identidad / Contacto</th>
+                        <th className="p-6">Rol de Acceso</th>
                         <th className="p-6">Sede Asignada</th>
-                        <th className="p-6 text-right">Acciones</th>
+                        <th className="p-6 text-right">Control de Cuenta</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/50">
                       {allUsers.map(u => (
-                        <tr key={u.id} className="hover:bg-white/[0.02]">
-                          <td className="p-6">
-                            <p className="text-white font-black uppercase italic">{u.nombre || 'Sin Nombre'}</p>
-                            <p className="text-slate-500 lowercase">{u.email}</p>
-                          </td>
-                          <td className="p-6">
-                            <span className="px-3 py-1 rounded-lg bg-orange-500/10 text-orange-500 font-black uppercase italic border border-orange-500/20">{u.role}</span>
-                          </td>
-                          <td className="p-6 text-slate-400 font-mono font-bold">{u.InstitutoId || 'Sede no asignada'}</td>
+                        <tr key={u.id} className="hover:bg-white/[0.02] transition-colors">
+                          <td className="p-6"><p className="text-white font-black uppercase text-[11px]">{u.nombre}</p><p className="text-slate-500 font-mono">{u.email}</p></td>
+                          <td className="p-6"><span className={`px-3 py-1 rounded-lg font-black uppercase text-[8px] ${u.role === 'director' ? 'bg-blue-500/10 text-blue-500' : 'bg-orange-500/10 text-orange-500'}`}>{u.role}</span></td>
+                          <td className="p-6 text-slate-400 font-bold uppercase">{institutions.find(i => i.id === u.InstitutoId)?.nombre || u.InstitutoId}</td>
                           <td className="p-6 text-right">
                             <div className="flex justify-end gap-2">
-                              <button onClick={() => handleEditClick(u)} className="p-3 bg-slate-800 text-slate-400 hover:text-white rounded-xl"><Edit3 size={14}/></button>
-                              <button onClick={() => handleDeleteUser(u.id)} className="p-3 bg-slate-800 text-red-500 hover:bg-red-600 hover:text-white rounded-xl"><Trash2 size={14}/></button>
+                              <button onClick={() => handleEditClick(u)} className="p-3 bg-slate-800 hover:bg-orange-500/20 hover:text-orange-500 rounded-xl transition-all"><Edit3 size={14}/></button>
+                              <button onClick={() => handleDeleteUser(u.id)} className="p-3 bg-slate-800 hover:bg-red-500/20 hover:text-red-500 text-red-500/50 rounded-xl transition-all"><Trash2 size={14}/></button>
                             </div>
                           </td>
                         </tr>

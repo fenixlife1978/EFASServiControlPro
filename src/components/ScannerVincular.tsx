@@ -1,59 +1,64 @@
 'use client';
-import React, { useState, useEffect } from 'react';
-import { BarcodeScanner } from '@capacitor-community/barcode-scanner';
+import React, { useEffect } from 'react';
+import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
+import { Preferences } from '@capacitor/preferences';
+import { db } from '@/firebase/config';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { Device } from '@capacitor/device';
 
 export default function ScannerVincular() {
-  const [loading, setLoading] = useState(false);
-
   const startScan = async () => {
     try {
-      // 1. Pedir permiso
-      const status = await BarcodeScanner.checkPermission({ force: true });
-      if (!status.granted) return;
+      // 1. Verificar/Pedir permisos
+      const permission = await BarcodeScanner.checkPermissions();
+      if (permission.camera !== 'granted') {
+        await BarcodeScanner.requestPermissions();
+      }
 
-      // 2. Preparar la cámara (hace el fondo transparente para ver la cámara)
-      await BarcodeScanner.hideBackground();
-      document.querySelector('body')?.classList.add('scanner-active');
+      // 2. Iniciar escaneo rápido (ML Kit)
+      const { barcodes } = await BarcodeScanner.scan();
       
-      setLoading(true);
+      if (barcodes.length > 0) {
+        const rawData = barcodes[0].displayValue;
+        const data = JSON.parse(rawData); // {InstitutoId, aulaId, rol}
 
-      const result = await BarcodeScanner.startScan(); // Aquí se queda esperando el QR
+        const info = await Device.getId();
+        const deviceId = info.identifier;
 
-      if (result.hasContent) {
-        document.querySelector('body')?.classList.remove('scanner-active');
-        const data = JSON.parse(result.content); // Esperamos {institutoId, alumnoId, nombre}
-        
-        // LLAMAMOS AL CÓDIGO JAVA QUE HICIMOS ANTES
-        // Nota: Aquí usamos la comunicación Capacitor -> Java
-        console.log("Datos recibidos del QR:", data);
-        
-        // Enviar a Firebase via la función nativa que creamos en MainActivity
-        // (Asumiendo que ya tienes el puente configurado)
-        alert("Vinculando a: " + data.nombreAlumno);
+        // 3. Guardar en Storage para el Java (MainActivity)
+        await Preferences.set({
+          key: 'InstitutoId',
+          value: data.InstitutoId
+        });
+
+        // 4. Registrar en Firebase
+        await setDoc(doc(db, "dispositivos", deviceId), {
+          id: deviceId,
+          InstitutoId: data.InstitutoId,
+          aulaId: data.aulaId,
+          rol: data.rol,
+          status: 'pending_name',
+          createdAt: serverTimestamp(),
+          lastUpdated: serverTimestamp()
+        }, { merge: true });
+
+        alert("VINCOLO EXITOSO. Protegiendo dispositivo...");
+        window.location.reload();
       }
     } catch (e) {
-      console.error(e);
-      stopScan();
+      console.error("Error en Scanner:", e);
     }
-  };
-
-  const stopScan = () => {
-    BarcodeScanner.showBackground();
-    BarcodeScanner.stopScan();
-    document.querySelector('body')?.classList.remove('scanner-active');
   };
 
   useEffect(() => {
     startScan();
-    return () => stopScan();
   }, []);
 
   return (
-    <div className="flex flex-col items-center justify-end h-screen pb-20 bg-transparent">
-      <div className="bg-black/80 p-6 rounded-3xl border border-orange-500 text-center">
-        <h2 className="text-white font-black italic uppercase">EFAS <span className="text-orange-500">GuardianPro</span></h2>
-        <p className="text-slate-400 text-xs mt-2">Apunte la cámara al código QR del Alumno</p>
-        <button onClick={stopScan} className="mt-4 text-red-500 font-bold text-xs uppercase">Cancelar</button>
+    <div className="flex flex-col items-center justify-center h-screen bg-black">
+      <div className="p-8 border-2 border-orange-500 rounded-3xl text-center bg-slate-900">
+        <h2 className="text-white font-black uppercase italic">EFAS <span className="text-orange-500">ServiControlPro</span></h2>
+        <p className="text-slate-400 text-[10px] mt-4 uppercase">Escaneando...</p>
       </div>
     </div>
   );
