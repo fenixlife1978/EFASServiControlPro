@@ -19,7 +19,7 @@ export function Logo({ className }: { className?: string }) {
         <div className="relative h-20 w-20 rounded-full overflow-hidden border-2 border-slate-700 bg-[#0f172a] flex items-center justify-center shadow-2xl">
           <Image 
             src={logoPath} 
-            alt="EFAS Logo Shield" 
+            alt="EDU Logo Shield" 
             width={64}
             height={64}
             className="object-contain"
@@ -36,10 +36,10 @@ export function Logo({ className }: { className?: string }) {
       {/* Nombre de la Marca debajo del círculo */}
       <div className="text-center leading-none">
         <h1 className="text-2xl font-black italic tracking-tighter text-white uppercase">
-          EFAS
+          EDU
         </h1>
         <p className="text-[#f97316] text-[11px] font-bold tracking-[0.2em] uppercase mt-1">
-          ServiControlPro
+          ControlPro
         </p>
       </div>
     </div>
