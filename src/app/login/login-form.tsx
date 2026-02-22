@@ -11,7 +11,8 @@ import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/aut
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertCircle, Loader2, Building2, Lock, Mail } from 'lucide-react';
+import { AlertCircle, Loader2, Building2, Lock, Mail, QrCode } from 'lucide-react';
+import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
 
 export default function LoginForm() {
   const [email, setEmail] = useState('');
@@ -94,6 +95,22 @@ export default function LoginForm() {
     }
   };
 
+  // Función para manejar el escaneo de vinculación
+  const startScan = async () => {
+    try {
+      const granted = await BarcodeScanner.requestPermissions();
+      if (granted.camera !== 'granted') {
+        toast({ title: "Acceso denegado", description: "Se requiere permiso de cámara." });
+        return;
+      }
+      // Esta función disparará la visibilidad en LoginPage
+      const event = new CustomEvent('start-qr-scan');
+      window.dispatchEvent(event);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   if (loading) return (
     <div className="flex flex-col items-center justify-center gap-4 p-12 bg-[#0f1117] rounded-[2.5rem] border border-slate-800 shadow-2xl">
       <Loader2 className="h-10 w-10 animate-spin text-[#f97316]" />
@@ -164,9 +181,24 @@ export default function LoginForm() {
             </Alert>
           )}
 
-          <Button type="submit" className="w-full bg-[#f97316] hover:bg-white hover:text-[#f97316] text-white font-black italic uppercase text-xs h-14 rounded-2xl shadow-lg mt-2">
+          <Button type="submit" className="w-full bg-[#f97316] hover:bg-white hover:text-[#f97316] text-white font-black italic uppercase text-xs h-14 rounded-2xl shadow-lg mt-2 transition-all">
             Sincronizar
           </Button>
+
+          {/* SECCIÓN DE VINCULACIÓN QR */}
+          <div className="relative my-4">
+            <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-slate-800" /></div>
+            <div className="relative flex justify-center text-[8px] uppercase font-black italic"><span className="bg-[#0f1117] px-2 text-slate-600">O vincula hardware</span></div>
+          </div>
+
+          <button 
+            type="button"
+            onClick={startScan}
+            className="w-full flex items-center justify-center gap-2 h-12 rounded-2xl border border-slate-800 bg-slate-900/30 hover:bg-slate-800 text-slate-400 hover:text-white transition-all text-[9px] font-black uppercase italic"
+          >
+            <QrCode size={16} />
+            Escaneado de Seguridad
+          </button>
         </form>
       </CardContent>
     </Card>

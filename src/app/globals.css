@@ -81,13 +81,22 @@ body {
     @apply bg-background text-foreground;
   }
 }
+
+/* --- MEJORAS PARA ESCÁNER EFAS SERVICONTROLPRO --- */
 body.scanner-active {
   --ion-background-color: transparent !important;
+  --background: transparent !important;
   background: transparent !important;
+  background-color: transparent !important;
 }
+
 body.scanner-active * {
   visibility: hidden;
 }
+
+/* Mantiene visible el contenedor del escáner y controles necesarios */
+body.scanner-active .scanner-ui,
+body.scanner-active .scanner-ui *,
 body.scanner-active .flex, 
 body.scanner-active .flex * {
   visibility: visible;
