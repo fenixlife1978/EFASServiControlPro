@@ -82,7 +82,7 @@ export default function LoginForm() {
         localStorage.setItem('userRole', 'super-admin');
       }
 
-      toast({ title: 'Sincronizado', description: 'Entrando al sistema...' });
+      toast({ title: 'Sincronizado', description: 'Accediendo a EDUControlPro...' });
 
       // 4. EL TRUCO FINAL: Un pequeño delay y navegación nativa para asegurar que el Middleware lea la cookie
       setTimeout(() => {
@@ -123,7 +123,7 @@ export default function LoginForm() {
       <CardHeader className="text-center pb-2">
         <div className="mb-4 flex justify-center scale-90"><Logo /></div>
         <CardTitle className="text-3xl font-black italic tracking-tighter uppercase leading-none">
-          Portal <span className="text-[#f97316]">Secure</span>
+          ACCESO <span className="text-[#f97316]">CONTROL PRO</span>
         </CardTitle>
       </CardHeader>
       <CardContent className="pt-6">
@@ -197,7 +197,7 @@ export default function LoginForm() {
             className="w-full flex items-center justify-center gap-2 h-12 rounded-2xl border border-slate-800 bg-slate-900/30 hover:bg-slate-800 text-slate-400 hover:text-white transition-all text-[9px] font-black uppercase italic"
           >
             <QrCode size={16} />
-            Escaneado de Seguridad
+            Vinculación EDUControlPro
           </button>
         </form>
       </CardContent>

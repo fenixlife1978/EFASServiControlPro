@@ -249,8 +249,8 @@ export default function SuperAdminView() {
 
   const generateMasterQR = () => {
     const masterConfig = {
-      "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_NAME": "com.efas.servicontrolpro",
-      "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": "com.efas.servicontrolpro/.AdminReceiver",
+      "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_NAME": "com.educontrolpro",
+      "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": "com.educontrolpro/.AdminReceiver",
       "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": appVersion.url,
       "android.app.extra.PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM": "bcofwtekjwPs7yqTj5kHv1ZqTS/n7JqEkN1b9R1GHZ0=",
       "android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED": true,
@@ -284,7 +284,7 @@ export default function SuperAdminView() {
       <main className="pl-20">
         <header className="sticky top-0 z-40 bg-[#0a0c10]/80 backdrop-blur-md border-b border-slate-800/50 px-10 py-8 flex justify-between items-center">
             <div>
-              <h1 className="text-4xl font-black italic uppercase text-white tracking-tighter">EFAS <span className="text-orange-500">ServiControlPro</span></h1>
+              <h1 className="text-4xl font-black italic uppercase text-white tracking-tighter">EDU <span className="text-orange-500">ControlPro</span></h1>
               <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.4em] mt-1 italic">Super Admin Control</p>
             </div>
         </header>

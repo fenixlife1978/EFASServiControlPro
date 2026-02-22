@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace "com.efas.servicontrolpro"
+    namespace "com.educontrolpro"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.efas.servicontrolpro"
+        applicationId "com.educontrolpro"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

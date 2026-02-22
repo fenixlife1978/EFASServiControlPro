@@ -48,7 +48,7 @@ export default function QRScanner() {
   return (
     <div className="flex flex-col items-center justify-center h-screen bg-[#0a0c10] text-white">
       <div className="text-center p-10">
-        <h2 className="text-2xl font-bold mb-4">Vinculación EFAS</h2>
+        <h2 className="text-2xl font-bold mb-4">Vinculación EDU</h2>
         <p className="text-slate-400 mb-8">Escanea el QR de la tablet</p>
         <button 
           onClick={startScanning}

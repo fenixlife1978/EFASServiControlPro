@@ -65,7 +65,7 @@ export default function LoginPage() {
           <LoginForm />
         </Suspense>
 
-        {/* Botón de Vinculación para EFAS ServiControlPro */}
+        {/* Botón de Vinculación para EDUControlPro Sistema de Control Parental Educativo */}
         {!isScanning && (
           <button 
             onClick={startScan}
@@ -92,7 +92,7 @@ function LoadingState() {
 
       <div className="space-y-1">
         <h2 className="text-2xl font-black italic tracking-tighter text-white uppercase">
-          EFAS <span className="text-[#f97316]">ServiControlPro</span>
+          EDU <span className="text-[#f97316]">ControlPro</span>
         </h2>
         <p className="text-[10px] font-bold tracking-[0.3em] text-slate-500 uppercase">
           Initializing Secure Protocol

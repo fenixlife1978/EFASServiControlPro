@@ -73,7 +73,7 @@ export default function SignUpPage() {
         </div>
         <div className="space-y-1">
           <h2 className="text-2xl font-black italic tracking-tighter text-white uppercase">
-            EFAS <span className="text-[#f97316]">ServiControlPro</span>
+            EDU <span className="text-[#f97316]">ControlPro</span>
           </h2>
           <p className="text-[10px] font-bold tracking-[0.3em] text-slate-500 uppercase">
             Configurando Perfil de Seguridad
@@ -94,7 +94,7 @@ export default function SignUpPage() {
             NUEVO <span className="text-[#f97316]">REGISTRO</span>
           </CardTitle>
           <CardDescription className="text-slate-400">
-            EFAS ServiControlPro: Alta de nuevo administrador. [cite: 2026-02-14]
+            EDUControlPro Sistema de Control Parental Educativo: Alta de nuevo administrador. [cite: 2026-02-14]
           </CardDescription>
         </CardHeader>
         <CardContent>

@@ -47,7 +47,7 @@ export default function FilterConfig({ activeId }: { activeId: string }) {
       
       toast({ 
         title: "Sincronización Exitosa", 
-        description: "Los filtros de EFAS ServiControlPro se han actualizado en todas las tablets." 
+        description: "Los filtros de EDUControlPro: Sistema de Control Parental Educativo se han actualizado en todas las tablets." 
       });
     } catch (e) {
       console.error(e);
@@ -153,7 +153,7 @@ export default function FilterConfig({ activeId }: { activeId: string }) {
             <>
               <Save className="w-6 h-6 text-orange-400 group-hover:scale-110 transition-transform" />
               <span className="text-lg uppercase italic tracking-tighter">
-                Aplicar Cambios en <span className="text-orange-400">ServiControlPro</span>
+                Aplicar Cambios en <span className="text-orange-400">ControlPro</span>
               </span>
             </>
           )}

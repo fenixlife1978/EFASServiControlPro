@@ -38,7 +38,7 @@ const AdminNavbar = () => {
           </div>
           <div className="hidden sm:block">
             <h1 className="text-white font-black italic uppercase tracking-tighter text-lg leading-none">
-              EFAS <span className="text-orange-500">ServiControlPro</span>
+              EDU <span className="text-orange-500">ControlPro</span>
             </h1>
             <p className="text-[8px] text-slate-500 font-bold uppercase tracking-[0.3em]">Institutional Security</p>
           </div>
@@ -134,7 +134,7 @@ function AdminLayoutComponent({ children }: { children: React.ReactNode }) {
         </main>
         <footer className="py-8 border-t border-white/5 text-center bg-[#0a0c10]">
           <p className="text-[9px] text-slate-600 font-black uppercase tracking-[0.5em]">
-            EFAS ServiControlPro © 2026 • Security Infrastructure
+            EDUControlPro Sistema de Control Parental Educativo © 2026 • Security Infrastructure
           </p>
         </footer>
       </div>

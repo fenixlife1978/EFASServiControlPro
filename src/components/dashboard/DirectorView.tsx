@@ -67,7 +67,7 @@ export default function DirectorView() {
       try {
         const instRef = doc(db, "institutions", workingInstitutoId);
         const instSnap = await getDoc(instRef);
-        if (instSnap.exists()) setNombreInstituto(instSnap.data().nombre || "Sede EFAS");
+        if (instSnap.exists()) setNombreInstituto(instSnap.data().nombre || "Sede EDU");
       } catch (err) { console.error("Error instituciones:", err); }
     };
     fetchNombreInst();
@@ -92,14 +92,21 @@ export default function DirectorView() {
       setProfesores(s.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (err) => console.error("Error profesores:", err));
 
-    // 4. Aulas
+    // 4. Aulas (CORREGIDO: Apuntando a subcolección y usando campos existentes según imagen)
     const qAulas = query(
         collection(db, "institutions", workingInstitutoId, "Aulas"), 
-        orderBy("nombre_completo")
+        orderBy("aulaId") 
     );
     const unsubAulas = onSnapshot(qAulas, (s) => {
       setAulas(s.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, (err) => console.error("Error aulas:", err));
+    }, (err) => {
+        console.error("Error aulas:", err);
+        // Fallback en caso de que el índice de orderBy tarde en propagarse
+        const qAulasSimple = query(collection(db, "institutions", workingInstitutoId, "Aulas"));
+        onSnapshot(qAulasSimple, (s) => {
+            setAulas(s.docs.map(d => ({ id: d.id, ...d.data() })));
+        });
+    });
 
     // 5. Dispositivos
     const qDev = query(
@@ -121,7 +128,7 @@ export default function DirectorView() {
     const qSup = query(
       collection(db, "sesiones_monitoreo"),
       where("InstitutoId", "==", workingInstitutoId),
-      where("aulaId", "==", aulaSeleccionada.id)
+      where("aulaId", "==", aulaSeleccionada.aulaId) // Usamos aulaId del documento
     );
     const unsubSup = onSnapshot(qSup, (s) => {
       setAlumnosAula(s.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -152,7 +159,7 @@ export default function DirectorView() {
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
       pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`EFAS_Reporte_${new Date().getTime()}.pdf`);
+      pdf.save(`EDU_Reporte_${new Date().getTime()}.pdf`);
     } catch (error) { console.error(error); }
   };
 
@@ -198,8 +205,8 @@ export default function DirectorView() {
                   {alerts.length > 0 ? alerts.slice(0, 4).map((alert, i) => (
                     <div key={i} className="bg-red-500/5 p-4 rounded-2xl border border-red-500/10 group hover:border-red-500/30 transition-all">
                         <div className="flex justify-between items-start mb-2">
-                           <p className="text-[9px] font-black text-white uppercase italic">{alert.alumno_asignado || 'Estudiante'}</p>
-                           <AlertTriangle size={12} className="text-red-500 animate-pulse" />
+                            <p className="text-[9px] font-black text-white uppercase italic">{alert.alumno_asignado || 'Estudiante'}</p>
+                            <AlertTriangle size={12} className="text-red-500 animate-pulse" />
                         </div>
                         <div className="flex items-center justify-between">
                            <p className="text-[8px] font-bold text-slate-600 uppercase truncate max-w-[120px]">{alert.last_url || 'BLOQUEADO'}</p>
@@ -211,8 +218,8 @@ export default function DirectorView() {
                     </div>
                   )) : (
                     <div className="text-center py-6 border border-dashed border-slate-800 rounded-3xl">
-                       <ShieldCheck size={24} className="text-slate-800 mx-auto mb-2" />
-                       <p className="text-[9px] font-black text-slate-600 uppercase italic">Sin Infracciones</p>
+                        <ShieldCheck size={24} className="text-slate-800 mx-auto mb-2" />
+                        <p className="text-[9px] font-black text-slate-600 uppercase italic">Sin Infracciones</p>
                     </div>
                   )}
                </div>
@@ -325,8 +332,10 @@ export default function DirectorView() {
                     className="w-full bg-slate-900/30 border border-slate-800 p-4 rounded-2xl flex justify-between items-center border-l-4 border-l-orange-500 hover:bg-orange-500/5 transition-all group"
                   >
                     <div className="text-left">
-                      <p className="text-white font-black text-[11px] uppercase italic group-hover:text-orange-500 transition-colors">{a.nombre_completo}</p>
-                      <p className="text-[9px] text-slate-500 font-bold uppercase italic">{a.nivel} - {a.seccion}</p>
+                      <p className="text-white font-black text-[11px] uppercase italic group-hover:text-orange-500 transition-colors">
+                        {a.aulaId}
+                      </p>
+                      <p className="text-[9px] text-slate-500 font-bold uppercase italic">Sección: {a.seccion}</p>
                     </div>
                     <Eye size={16} className="text-slate-700 group-hover:text-orange-500 transition-colors" />
                   </button>
@@ -344,7 +353,7 @@ export default function DirectorView() {
               <div className="flex items-center gap-4">
                 <div className="bg-orange-500 p-3 rounded-2xl animate-pulse shadow-lg shadow-orange-500/20"><Layout size={24} /></div>
                 <div>
-                  <h3 className="font-black italic uppercase text-lg">{aulaSeleccionada.nombre_completo}</h3>
+                  <h3 className="font-black italic uppercase text-lg">{aulaSeleccionada.aulaId} - {aulaSeleccionada.seccion}</h3>
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] text-orange-500 font-black uppercase italic tracking-widest">Monitoreo Live</span>
                     <span className="text-[8px] text-slate-500 font-bold uppercase">Último Pulso: {lastPulse}</span>

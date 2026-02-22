@@ -25,7 +25,7 @@ export function MasterLockScreen({ onUnlock }: { onUnlock: (key: string) => void
         <div className="relative w-24 h-24 rounded-full border-2 border-orange-500/50 bg-[#1e293b] flex items-center justify-center shadow-[0_0_50px_rgba(249,115,22,0.2)]">
           <Image 
             src="/logo-efas.png" 
-            alt="EFAS Logo" 
+            alt="EDU Logo" 
             width={70} 
             height={70} 
             className="object-contain"
@@ -33,7 +33,7 @@ export function MasterLockScreen({ onUnlock }: { onUnlock: (key: string) => void
         </div>
         <div className="text-center">
           <h1 className="text-2xl font-black italic text-white uppercase tracking-tighter">
-            EFAS <span className="text-[#f97316]">ServiControlPro</span>
+            EDU <span className="text-[#f97316]">ControlPro</span>
           </h1>
           <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.2em]">Protección de Sistema Activa</p>
         </div>

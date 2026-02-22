@@ -65,7 +65,7 @@ export default function Sidebar({ userRole: initialRole }: { userRole: string })
     <aside className="w-72 h-[calc(100vh-2rem)] m-4 p-6 bg-slate-900 rounded-[3rem] flex flex-col shadow-2xl border border-slate-800">
       <div className="mb-10 px-4">
         <h2 className="text-2xl font-black italic text-white tracking-tighter leading-none">
-          EFAS <span className="text-orange-500 block text-sm not-italic tracking-[0.2em]">SERVICONTROLPRO</span>
+          EDU <span className="text-orange-500 block text-sm not-italic tracking-[0.2em]">SERVICONTROLPRO</span>
         </h2>
       </div>
 

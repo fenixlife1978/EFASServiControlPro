@@ -177,7 +177,7 @@ export default function InstitutionView() {
           <div>
             <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.4em] text-orange-500 mb-1">
               <span className="w-2 h-2 bg-orange-500 rounded-full animate-ping"></span>
-              EFAS ServiControlPro v3.0
+              EDUControlPro Sistema de Control Parental Educativo v3.0
             </div>
             <h1 className="text-2xl font-black italic uppercase text-white tracking-tighter">
               {institutionName} <span className="text-slate-500 font-light ml-2">/ {activeSection.toUpperCase()}</span>

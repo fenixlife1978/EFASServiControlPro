@@ -1,5 +1,5 @@
 /**
- * EFAS ServiControlPro - Security Filter Logic
+ * EDUControlPro - Security Filter Logic
  * Compara una URL visitada contra las reglas de la institución.
  * Soporta Modo Normal (Blacklist) y Modo Estricto (Whitelist).
  */

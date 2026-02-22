@@ -1,7 +1,7 @@
 // Actualizamos el nombre del caché a la nueva marca [cite: 2026-02-11]
 const CACHE_NAME = 'efas-servicontrolpro-cache-v1';
 
-// Rutas actualizadas para EFAS ServiControlPro [cite: 2026-02-13]
+// Rutas actualizadas para EDUControlPro [cite: 2026-02-13]
 const urlsToCache = [
   '/',
   '/login',
@@ -67,7 +67,7 @@ self.addEventListener('fetch', (event) => {
 
 // Mantenemos tu lógica de notificaciones Push [cite: 2026-01-23]
 self.addEventListener('push', event => {
-  const data = event.data ? event.data.json() : { title: 'Notificación', body: 'Nuevo evento en EFAS' };
+  const data = event.data ? event.data.json() : { title: 'Notificación', body: 'Nuevo evento en EDU' };
   const options = {
     body: data.body,
     icon: '/logo-efas-192.png', // Usamos el nuevo logo en la notificación

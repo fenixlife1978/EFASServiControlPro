@@ -54,7 +54,7 @@ export default function BlockedPage() {
             ACCESO <br /> <span className="text-red-500">DENEGADO</span>
           </h1>
           <p className="text-slate-400 text-sm max-w-sm mx-auto font-medium">
-            Este sitio web ha sido restringido por <span className="text-white font-bold">{institutionData?.nombre || 'la institución'}</span> bajo el sistema <span className="font-bold text-white uppercase">EFAS ServControlPro</span>.
+            Este sitio web ha sido restringido por <span className="text-white font-bold">{institutionData?.nombre || 'la institución'}</span> bajo el sistema <span className="font-bold text-white uppercase">EDU ServControlPro</span>.
           </p>
         </div>
 

@@ -11,7 +11,7 @@ export const reportSecurityEvent = async (workingCondoId: string, deviceId: stri
       status: 'CRITICAL',
       adminNotified: 'vallecondo@gmail.com'
     });
-    console.log("Alerta de seguridad enviada a EFAS ServiControlPro");
+    console.log("Alerta de seguridad enviada a EDUControlPro");
   } catch (error) {
     console.error("Error reportando evento:", error);
   }

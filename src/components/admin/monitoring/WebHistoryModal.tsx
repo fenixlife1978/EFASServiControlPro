@@ -105,7 +105,7 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
 
         {/* Footer */}
         <div className="p-4 bg-black/20 border-t border-white/5 text-center">
-          <p className="text-[10px] text-slate-500 uppercase tracking-[0.2em]">EFAS ServiControlPro - Monitoreo en Tiempo Real</p>
+          <p className="text-[10px] text-slate-500 uppercase tracking-[0.2em]">EDUControlPro Sistema de Control Parental Educativo - Monitoreo en Tiempo Real</p>
         </div>
       </div>
     </div>

@@ -1,226 +1,212 @@
 'use client';
-import React, { useState, useEffect } from 'react';
-import { db } from '@/firebase/config';
-import { collection, query, where, onSnapshot, getDocs, doc, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
-import { Users, Search, Lock, Unlock, GraduationCap, AlertTriangle, Building2, Layers } from 'lucide-react';
 
+import { useEffect, useState } from 'react';
+import { db } from '@/firebase/config';
+import { collection, query, where, onSnapshot, orderBy, limit, doc, updateDoc } from 'firebase/firestore';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { 
+  Monitor, Clock, Globe, ShieldAlert, ShieldOff, ShieldCheck 
+} from 'lucide-react';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+
+// Definición de Props para eliminar el error en page.tsx
 interface ProfesorViewProps {
   professorId: string;
   institutoId: string;
 }
 
-export const ProfesorView = ({ professorId, institutoId }: ProfesorViewProps) => {
-  const [students, setStudents] = useState<any[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [profData, setProfData] = useState<any>(null);
-  const [instName, setInstName] = useState('...');
-  const [aulaName, setAulaName] = useState('...');
+interface Estudiante {
+  id: string;
+  nombre: string;
+  deviceId: string;
+  seccion: string;
+  aulaId: string;
+  bloqueado?: boolean;
+}
+
+interface Actividad {
+  url: string;
+  titulo: string;
+  timestamp: any;
+}
+
+export default function ProfesorView({ professorId, institutoId }: ProfesorViewProps) {
+  const [estudiantes, setEstudiantes] = useState<Estudiante[]>([]);
+  const [selectedAlumno, setSelectedAlumno] = useState<Estudiante | null>(null);
+  const [historial, setHistorial] = useState<Actividad[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  // Configuración de branding dinámico
+  const profesorAula = "LABORATORIO"; 
+  const institutoNombre = `SEDE: ${institutoId}`;
 
   useEffect(() => {
-    if (!institutoId || !professorId) return;
-    
-    let unsubStudents: (() => void) | null = null;
-    let unsubAula: (() => void) | null = null;
+    // Consulta filtrada por el InstitutoId recibido por props
+    const q = query(
+      collection(db, "usuarios"),
+      where("InstitutoId", "==", institutoId),
+      where("aulaId", "==", profesorAula),
+      where("role", "==", "estudiante")
+    );
 
-    const initializeView = async () => {
-      setLoading(true);
-      setError(null);
-      
-      try {
-        // 1. Buscar al profesor validando InstitutoId y role (como los directores)
-        // Usamos el ID del documento para ir directo, pero validamos sus campos
-        const profRef = doc(db, "usuarios", professorId);
-        const profSnap = await getDoc(profRef);
-        
-        if (!profSnap.exists()) {
-          setError("Usuario no encontrado");
-          setLoading(false);
-          return;
-        }
-
-        const pData = profSnap.data();
-
-        // Validación de seguridad: debe pertenecer al instituto y ser profesor
-        if (pData.InstitutoId !== institutoId || pData.role !== 'profesor') {
-          console.error("Acceso denegado: El usuario no es profesor de este instituto");
-          setError("Acceso no autorizado a esta sede");
-          setLoading(false);
-          return;
-        }
-
-        setProfData(pData);
-
-        // 2. Obtener Nombre de la Institución (Sede)
-        const instSnap = await getDoc(doc(db, "institutions", institutoId));
-        if (instSnap.exists()) {
-          setInstName(instSnap.data().nombre || "Sede EFAS");
-        }
-
-        // 3. Buscar Aula y Estudiantes si tiene sección asignada
-        if (pData.seccion) {
-          // Obtener nombre del Aula desde subcolección Aulas
-          const aulasRef = collection(db, "institutions", institutoId, "Aulas");
-          const qAula = query(aulasRef, where("seccion", "==", pData.seccion));
-          
-          unsubAula = onSnapshot(qAula, (snap) => {
-            if (!snap.empty) {
-              setAulaName(snap.docs[0].data().nombre_completo || snap.docs[0].data().nombre);
-            } else {
-              setAulaName("AULA: " + pData.seccion);
-            }
-          });
-
-          // Escuchar Estudiantes de la misma sección e InstitutoId
-          const qStudents = query(
-            collection(db, "usuarios"), 
-            where("InstitutoId", "==", institutoId),
-            where("role", "==", "estudiante"),
-            where("seccion", "==", pData.seccion)
-          );
-
-          unsubStudents = onSnapshot(qStudents, (snapshot) => {
-            setStudents(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-            setLoading(false);
-          });
-        } else {
-          setLoading(false);
-        }
-
-      } catch (err: any) {
-        console.error("Error en ProfesorView:", err);
-        setError("Error de conexión con la base de datos");
-        setLoading(false);
-      }
-    };
-
-    initializeView();
-
-    return () => {
-      if (unsubAula) unsubAula();
-      if (unsubStudents) unsubStudents();
-    };
-  }, [institutoId, professorId]);
-
-  const toggleBlindaje = async (studentId: string, currentStatus: boolean) => {
-    try {
-      await updateDoc(doc(db, "usuarios", studentId), {
-        blindajeTotal: !currentStatus,
-        lastSecurityAction: serverTimestamp(),
-        actionBy: professorId
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const docs: Estudiante[] = [];
+      snapshot.forEach((doc) => {
+        docs.push({ id: doc.id, ...doc.data() } as Estudiante);
       });
-    } catch (e) {
-      console.error("Error toggling blindaje:", e);
+      setEstudiantes(docs);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [institutoId, profesorAula]);
+
+  useEffect(() => {
+    if (!selectedAlumno) return;
+    const qActividad = query(
+      collection(db, "sesiones_monitoreo"),
+      where("deviceId", "==", selectedAlumno.deviceId),
+      orderBy("timestamp", "desc"),
+      limit(10)
+    );
+    const unsubscribeActividad = onSnapshot(qActividad, (snapshot) => {
+      const logs: Actividad[] = [];
+      snapshot.forEach((doc) => logs.push(doc.data() as Actividad));
+      setHistorial(logs);
+    });
+    return () => unsubscribeActividad();
+  }, [selectedAlumno]);
+
+  const toggleBloqueo = async (alumno: Estudiante) => {
+    try {
+      const alumnoRef = doc(db, "usuarios", alumno.id);
+      await updateDoc(alumnoRef, {
+        bloqueado: !alumno.bloqueado
+      });
+      if (selectedAlumno?.id === alumno.id) {
+        setSelectedAlumno({ ...alumno, bloqueado: !alumno.bloqueado });
+      }
+    } catch (error) {
+      console.error("Error al cambiar estado de bloqueo:", error);
     }
   };
 
-  const filteredStudents = students.filter(s => 
-    (s.nombre || s.displayName || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  if (loading) return (
-    <div className="flex h-64 flex-col items-center justify-center gap-4">
-      <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-orange-500"></div>
-      <p className="text-slate-500 font-black text-[10px] uppercase tracking-widest animate-pulse">Cargando Sede...</p>
-    </div>
-  );
-
-  if (error) return (
-    <div className="p-10 bg-red-500/5 border border-red-500/20 rounded-[3rem] text-center">
-      <AlertTriangle className="text-red-500 mx-auto mb-4" size={48} />
-      <h3 className="text-white font-black uppercase italic text-lg">Error de Validación</h3>
-      <p className="text-slate-400 text-xs mt-2 font-bold uppercase">{error}</p>
-    </div>
-  );
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-20">
+        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-[#f97316]"></div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6 p-2">
-      {/* Header Info Panel */}
-      <div className="bg-[#0f1117] p-8 rounded-[3rem] border border-slate-800 shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 p-8 opacity-5">
-            <GraduationCap size={120} />
+    <div className="p-6 space-y-6 bg-[#0f1117] min-h-screen text-slate-200 font-sans">
+      {/* HEADER ACTUALIZADO A EDUControlPro */}
+      <div className="flex justify-between items-center border-b border-slate-800 pb-6">
+        <div>
+          <h1 className="text-3xl font-black uppercase italic tracking-tighter text-white">
+            EDU<span className="text-[#f97316]">ControlPro</span>
+          </h1>
+          <p className="text-[#f97316] text-[10px] font-bold uppercase tracking-widest mt-1">
+            {institutoNombre} | AULA: {profesorAula} | PROFESOR: {professorId.substring(0,5)}
+          </p>
         </div>
-        
-        <div className="flex flex-col lg:flex-row justify-between items-center gap-8 relative z-10">
-          <div className="flex items-center gap-6">
-            <div className="p-5 bg-orange-500/10 rounded-[2rem] border border-orange-500/20 shadow-[0_0_20px_rgba(249,115,22,0.1)]">
-              <GraduationCap className="text-orange-500" size={40} />
-            </div>
-            <div>
-              <h2 className="text-2xl font-black text-white uppercase italic leading-none tracking-tighter">EFAS ServiControlPro</h2>
-              <div className="flex flex-wrap gap-3 mt-4">
-                <div className="flex items-center gap-2 px-4 py-1.5 bg-slate-900 border border-slate-800 rounded-full">
-                  <Building2 size={12} className="text-orange-500"/>
-                  <span className="text-[10px] font-black text-slate-300 uppercase italic">{instName}</span>
-                </div>
-                <div className="flex items-center gap-2 px-4 py-1.5 bg-slate-900 border border-slate-800 rounded-full">
-                  <Layers size={12} className="text-blue-500"/>
-                  <span className="text-[10px] font-black text-slate-300 uppercase italic">{aulaName}</span>
-                </div>
-                <div className="flex items-center gap-2 px-4 py-1.5 bg-orange-500/10 border border-orange-500/20 rounded-full">
-                  <span className="text-[10px] font-black text-orange-500 uppercase italic">SECCIÓN: {profData?.seccion || 'N/A'}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="relative w-full lg:w-80">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-            <input 
-              type="text" 
-              placeholder="BUSCAR ESTUDIANTE..."
-              className="w-full bg-black/40 border border-slate-800 rounded-2xl py-4 pl-12 pr-4 text-[11px] font-bold text-white uppercase outline-none focus:border-orange-500 transition-all placeholder:text-slate-700"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-        </div>
+        <Badge className="bg-slate-800 text-slate-400 border-slate-700 px-4 py-1">
+          {estudiantes.length} ALUMNOS ACTIVOS
+        </Badge>
       </div>
 
-      {/* Lista de Alumnos */}
-      {!profData?.seccion ? (
-        <div className="py-24 text-center bg-[#0f1117] rounded-[3rem] border border-dashed border-slate-800">
-          <AlertTriangle className="mx-auto text-orange-500/50 mb-4" size={50} />
-          <p className="text-slate-400 font-black uppercase italic text-sm">El perfil del profesor no tiene una sección vinculada.</p>
-        </div>
-      ) : students.length === 0 ? (
-        <div className="py-24 text-center bg-[#0f1117] rounded-[3rem] border border-dashed border-slate-800">
-          <Users className="mx-auto text-slate-800 mb-4" size={50} />
-          <p className="text-slate-600 font-black uppercase italic text-sm tracking-widest">Esperando conexión de estudiantes...</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {filteredStudents.map((student) => (
-            <div key={student.id} className={`p-6 rounded-[2.5rem] border transition-all duration-500 group ${student.blindajeTotal ? 'bg-red-500/5 border-red-500/40 shadow-[0_0_30px_rgba(239,68,68,0.1)]' : 'bg-[#0f1117] border-slate-800 hover:border-slate-700 shadow-xl'}`}>
-              <div className="flex items-center gap-4 mb-8">
-                <div className={`p-4 rounded-[1.5rem] transition-all duration-500 ${student.blindajeTotal ? 'bg-red-500/20' : 'bg-slate-800 group-hover:bg-slate-700'}`}>
-                  <Users className={student.blindajeTotal ? 'text-red-500' : 'text-slate-500'} size={22} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs font-black text-white uppercase truncate tracking-tight">{student.nombre || 'Estudiante'}</p>
-                  <p className="text-[9px] text-slate-500 font-bold uppercase italic mt-1">Tablet: {student.tabletId || 'No vinculada'}</p>
-                </div>
+      {/* GRID DE ALUMNOS */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {estudiantes.map((estudiante) => (
+          <Card key={estudiante.id} className={`bg-slate-900 border-2 transition-all ${estudiante.bloqueado ? 'border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.1)]' : 'border-slate-800 hover:border-[#f97316]'}`}>
+            <CardHeader className="pb-2">
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] font-black text-slate-500 uppercase">{estudiante.seccion}</span>
+                <div className={`h-2.5 w-2.5 rounded-full ${estudiante.bloqueado ? 'bg-red-500 shadow-[0_0_8px_#ef4444]' : 'bg-green-500 shadow-[0_0_8px_#22c55e]'}`} />
               </div>
-              
+              <CardTitle className="text-sm font-black text-white uppercase mt-2">{estudiante.nombre}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
               <button 
-                onClick={() => toggleBlindaje(student.id, student.blindajeTotal)}
-                className={`w-full py-5 rounded-2xl font-black text-[10px] uppercase italic transition-all active:scale-95 ${
-                  student.blindajeTotal 
-                  ? 'bg-red-600 text-white shadow-lg shadow-red-900/20' 
-                  : 'bg-white text-black hover:bg-orange-500 hover:text-white'
-                }`}
+                onClick={() => setSelectedAlumno(estudiante)}
+                className="w-full py-2.5 bg-slate-800 hover:bg-white hover:text-black text-white text-[10px] font-black uppercase italic rounded-xl transition-all flex items-center justify-center gap-2"
               >
-                {student.blindajeTotal ? (
-                  <span className="flex items-center justify-center gap-2"><Lock size={14} strokeWidth={3}/> Blindado</span>
-                ) : (
-                  <span className="flex items-center justify-center gap-2"><Unlock size={14} strokeWidth={3}/> Desbloqueado</span>
-                )}
+                <Monitor size={14} />
+                MONITOREAR
               </button>
+              <button 
+                onClick={() => toggleBloqueo(estudiante)}
+                className={`w-full py-2.5 text-[10px] font-black uppercase italic rounded-xl transition-all flex items-center justify-center gap-2 border-2 ${estudiante.bloqueado ? 'bg-red-500 text-white border-red-500' : 'border-red-500/20 text-red-500 hover:bg-red-500 hover:text-white'}`}
+              >
+                {estudiante.bloqueado ? <ShieldOff size={14} /> : <ShieldAlert size={14} />}
+                {estudiante.bloqueado ? 'DESBLOQUEAR NAV.' : 'BLOQUEAR NAV.'}
+              </button>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* MODAL DE MONITOREO */}
+      <Sheet open={!!selectedAlumno} onOpenChange={() => setSelectedAlumno(null)}>
+        <SheetContent side="right" className="w-full sm:max-w-md bg-[#0f1117] border-slate-800 text-white p-0">
+          <SheetHeader className="p-6 border-b border-slate-800 bg-slate-900/50">
+            <SheetTitle className="text-[#f97316] font-black uppercase italic">VISTA EN VIVO</SheetTitle>
+            <div className="mt-2">
+              <p className="text-xl font-black uppercase">{selectedAlumno?.nombre}</p>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">DEVICE: {selectedAlumno?.deviceId}</p>
             </div>
-          ))}
-        </div>
-      )}
+          </SheetHeader>
+
+          <div className="p-6 space-y-6">
+            <div className={`flex items-center gap-2 ${selectedAlumno?.bloqueado ? 'text-red-500' : 'text-green-500'}`}>
+              <ShieldCheck size={16} />
+              <span className="text-[10px] font-black uppercase tracking-widest">
+                {selectedAlumno?.bloqueado ? 'MODO RESTRICCIÓN ACTIVO' : 'NAVEGACIÓN SUPERVISADA'}
+              </span>
+            </div>
+
+            <div className="space-y-4">
+              <h3 className="text-[10px] font-black uppercase text-slate-500 tracking-widest flex items-center gap-2">
+                <Clock size={12} /> HISTORIAL DE ACTIVIDAD
+              </h3>
+              
+              <div className="space-y-3">
+                {historial.length > 0 ? (
+                  historial.map((log, i) => (
+                    <div key={i} className="p-4 bg-slate-900/80 border border-slate-800 rounded-2xl flex items-start gap-3">
+                      <div className="p-2 bg-[#f97316]/10 rounded-lg">
+                        <Globe size={16} className="text-[#f97316]" />
+                      </div>
+                      <div className="flex-1 overflow-hidden">
+                        <p className="text-[11px] font-black uppercase text-white truncate">{log.titulo || 'Sitio Web'}</p>
+                        <p className="text-[9px] text-slate-500 font-bold truncate lowercase italic">{log.url}</p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="py-10 text-center border-2 border-dashed border-slate-800 rounded-[2rem]">
+                    <p className="text-[10px] font-black uppercase text-slate-600 tracking-tighter">SIN REGISTROS EN ESTA SESIÓN</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <button 
+              onClick={() => selectedAlumno && toggleBloqueo(selectedAlumno)}
+              className={`w-full py-4 text-[11px] font-black uppercase italic rounded-2xl transition-all border-2 ${selectedAlumno?.bloqueado ? 'bg-green-500 border-green-500 text-white' : 'border-red-500 text-red-500 hover:bg-red-500 hover:text-white'}`}
+            >
+              {selectedAlumno?.bloqueado ? 'DESBLOQUEAR ACCESO' : 'BLOQUEAR ACCESO INMEDIATO'}
+            </button>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
-};
+}

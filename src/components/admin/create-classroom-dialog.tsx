@@ -102,7 +102,7 @@ export function CreateClassroomDialog({
       <DialogContent className="sm:max-w-md rounded-3xl p-8">
         <DialogHeader className="mb-2">
           <DialogTitle className="text-2xl font-black text-slate-800 uppercase italic tracking-tighter">
-            EFAS <span className="text-orange-500">ServiControlPro</span>
+            EDU <span className="text-orange-500">ControlPro</span>
           </DialogTitle>
           <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-1">Configurar Nuevo Salon/Aula</p>
         </DialogHeader>

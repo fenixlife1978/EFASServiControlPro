@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { SecurityRules } from '@/components/admin/config/SecurityRules';
-import { ProfesorView } from '@/components/dashboard/ProfesorView';
+import  ProfesorView from '@/components/dashboard/ProfesorView';
 import { useAuth } from '@/hooks/use-auth';
 
 export default function SecurityPage() {
@@ -29,7 +29,7 @@ export default function SecurityPage() {
           <p className="text-slate-500 font-bold uppercase text-xs tracking-[0.3em] mt-2">
             {hasAdminPrivileges 
               ? `Protocolos de Sede: ${institutoId} • Nivel Directivo` 
-              : `Sede: ${institutoId} • Gestión de Dispositivos EFAS`}
+              : `Sede: ${institutoId} • Gestión de Dispositivos EDU`}
           </p>
         </header>
         

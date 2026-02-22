@@ -24,7 +24,7 @@ export async function GET(request: Request) {
     </head>
     <body>
       <div class="loader"></div>
-      <h2>EFAS <span style="color:white">ServiControlPro</span></h2>
+      <h2>EDU <span style="color:white">ControlPro</span></h2>
       <p id="msg">Sincronizando seguridad...</p>
       
       <script>

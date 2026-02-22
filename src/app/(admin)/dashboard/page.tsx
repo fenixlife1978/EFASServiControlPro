@@ -4,7 +4,7 @@ import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
 import InstitutionView from '@/components/dashboard/InstitutionView';
 import SuperAdminView from '@/components/dashboard/SuperAdminView';
 import DirectorView from '@/components/dashboard/DirectorView';
-import { ProfesorView } from '@/components/dashboard/ProfesorView';
+import ProfesorView from '@/components/dashboard/ProfesorView';
 import { useAuth } from '@/hooks/use-auth';
 
 export default function DashboardPage() {

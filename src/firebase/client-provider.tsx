@@ -19,7 +19,7 @@ export function FirebaseClientProvider({ children }: { children: React.ReactNode
         });
       }
     } catch (error) {
-      console.error("Error EFAS Init:", error);
+      console.error("Error EDU Init:", error);
     } finally {
       setIsInitializing(false);
     }
@@ -31,7 +31,7 @@ export function FirebaseClientProvider({ children }: { children: React.ReactNode
         <div className="h-12 w-12 animate-spin rounded-full border-4 border-[#f97316] border-t-transparent" />
         <div className="space-y-1">
           <h2 className="text-2xl font-black italic tracking-tighter text-white uppercase">
-            EFAS <span className="text-[#f97316]">ServiControlPro</span>
+            EDU <span className="text-[#f97316]">ControlPro</span>
           </h2>
           <p className="text-[10px] font-bold tracking-[0.3em] text-slate-500 uppercase">
             Cargando Protocolo de Seguridad

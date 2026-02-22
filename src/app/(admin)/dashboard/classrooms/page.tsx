@@ -53,7 +53,7 @@ export default function GestionAulas() {
             Control de <span className="text-orange-500">Aulas</span>
           </h1>
           <p className="text-slate-400 font-bold uppercase text-[10px] tracking-[0.3em] mt-3 italic">
-            EFAS ServControlPro • {institutionId}
+            EDU ServControlPro • {institutionId}
           </p>
         </header>
 

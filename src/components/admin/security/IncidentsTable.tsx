@@ -31,7 +31,7 @@ export function IncidentsTable({ institutionId }: { institutionId: string }) {
           <h2 className="text-lg font-black italic text-white uppercase flex items-center gap-2">
             <ShieldAlert className="text-orange-500 w-5 h-5" /> Registro de Infracciones
           </h2>
-          <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-1">Monitoreo de seguridad EFAS</p>
+          <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-1">Monitoreo de seguridad EDU</p>
         </div>
       </div>
 

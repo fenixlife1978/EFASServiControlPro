@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">EFAS ServiControlPro</string>
-    <string name="title_activity_main">EFAS ServiControlPro</string>
-    <string name="accessibility_description">Servicio de seguridad para monitoreo y protección de navegación de EFAS ServiControlPro.</string>
+    <string name="app_name">EDUControlPro</string>
+    <string name="title_activity_main">EDUControlPro</string>
+    <string name="accessibility_description">Servicio de seguridad para monitoreo y protección de navegación de EDUControlPro.</string>
 </resources>

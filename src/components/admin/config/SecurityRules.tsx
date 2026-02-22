@@ -52,7 +52,7 @@ export const SecurityRules = ({ institutionId }: SecurityRulesProps) => {
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(22);
     doc.setFont("helvetica", "bold");
-    doc.text("EFAS SERVICONTROLPRO", 15, 20);
+    doc.text("EDU SERVICONTROLPRO", 15, 20);
     doc.setFontSize(9);
     doc.setFont("helvetica", "italic");
     doc.text(isInc ? "REPORTE DETALLADO DE INCIDENCIAS" : "REPORTE OFICIAL DE CUMPLIMIENTO CIPA", 15, 28);
@@ -65,7 +65,7 @@ export const SecurityRules = ({ institutionId }: SecurityRulesProps) => {
     // Sello de Sede Protegida Verde
     doc.setTextColor(34, 197, 94);
     doc.setFontSize(8);
-    doc.text(' [ SEDE PROTEGIDA - VALIDADO POR EFAS ]', 15 + doc.getTextWidth(instText), 50);
+    doc.text(' [ SEDE PROTEGIDA - VALIDADO POR EDU ]', 15 + doc.getTextWidth(instText), 50);
 
     autoTable(doc, {
       startY: 65,
@@ -73,7 +73,7 @@ export const SecurityRules = ({ institutionId }: SecurityRulesProps) => {
       body: isInc ? incidencias.map(i => [i.alumno, i.tablet, i.fecha, i.hora, i.url]) : (data?.blacklist || []).map((u: string) => ['BLACKLIST', u, 'ACTIVO']),
       headStyles: { fillColor: isInc ? [234, 88, 12] : [15, 17, 23] }
     });
-    doc.save(`EFAS_Reporte_${tipo}.pdf`);
+    doc.save(`EDU_Reporte_${tipo}.pdf`);
   };
 
   const packs = {

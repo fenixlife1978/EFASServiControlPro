@@ -21,7 +21,7 @@ import { signOut as firebaseSignOut } from 'firebase/auth';
 export { auth, db, storage };
 
 /**
- * Función Logout optimizada para EFAS ServiControlPro
+ * Función Logout optimizada para EDUControlPro
  * Realiza una limpieza profunda para evitar el "doble login" y roles fantasma.
  */
 export const logout = async () => {
@@ -79,7 +79,7 @@ export const useCollection = (pathOrQuery: string | Query | CollectionReference)
     return { value: value || [], loading, error };
 };
 
-// --- Funciones CRUD Estándar para EFAS ServiControlPro ---
+// --- Funciones CRUD Estándar para EDUControlPro ---
 
 export const addDocumentNonBlocking = async (path: string, data: any) => {
   try {

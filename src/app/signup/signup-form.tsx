@@ -63,7 +63,7 @@ export default function SignupForm() {
         <Loader2 className="h-12 w-12 animate-spin text-[#f97316]" />
         <div className="space-y-1">
           <h2 className="text-2xl font-black italic tracking-tighter text-white uppercase">
-            EFAS <span className="text-[#f97316]">ServiControlPro</span>
+            EDU <span className="text-[#f97316]">ControlPro</span>
           </h2>
           <p className="text-[10px] font-bold tracking-[0.3em] text-slate-500 uppercase">
             Sincronizando Identidad
@@ -81,7 +81,7 @@ export default function SignupForm() {
           REGISTRO <span className="text-[#f97316]">ADMIN</span>
         </CardTitle>
         <CardDescription className="text-slate-400">
-          EFAS ServiControlPro: Alta de Seguridad.
+          EDUControlPro Sistema de Control Parental Educativo: Alta de Seguridad.
         </CardDescription>
       </CardHeader>
       <CardContent>

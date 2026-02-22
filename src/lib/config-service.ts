@@ -12,7 +12,7 @@ export const subscribeToMasterKey = (callback: (key: string) => void) => {
       // Verificamos que el campo master_key exista en el documento
       if (data && data.master_key) {
         callback(data.master_key);
-        console.log("Configuración de seguridad de EFAS sincronizada");
+        console.log("Configuración de seguridad de EDU sincronizada");
       } else {
         console.warn("El documento existe pero el campo 'master_key' está vacío o falta.");
       }

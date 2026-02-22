@@ -11,7 +11,7 @@ export default function SecurityPage() {
     return (
       <div className="flex h-64 w-full items-center justify-center">
         <div className="animate-pulse text-slate-400 font-black uppercase tracking-widest">
-          Cargando parámetros de EFAS ServiControlPro...
+          Cargando parámetros de EDUControlPro Sistema de Control Parental Educativo...
         </div>
       </div>
     );
@@ -22,8 +22,8 @@ export default function SecurityPage() {
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-3xl font-black tracking-tighter italic">
-            <span className="text-slate-900">EFAS</span>{' '}
-            <span className="text-orange-500">ServiControlPro</span>
+            <span className="text-slate-900">EDU</span>{' '}
+            <span className="text-orange-500">ControlPro</span>
           </h1>
           <p className="text-slate-500 text-sm font-bold mt-1">
             Servidor Web para Control Parental Multi-Usuarios
@@ -46,7 +46,7 @@ export default function SecurityPage() {
             <Lock className="w-10 h-10 text-orange-500 mb-4" />
             <h3 className="text-xl font-black uppercase italic tracking-tighter mb-2">Protección Global</h3>
             <p className="text-slate-400 text-xs leading-relaxed font-medium">
-              Sincronización instantánea con el ecosistema ServiControlPro.
+              Sincronización instantánea con el ecosistema ControlPro.
             </p>
             <div className="mt-6 pt-6 border-t border-white/10 space-y-4">
               <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
@@ -70,7 +70,7 @@ export default function SecurityPage() {
               </li>
               <li className="text-xs text-slate-600 font-bold flex gap-3">
                 <span className="bg-orange-200 text-orange-700 w-5 h-5 rounded-full flex items-center justify-center text-[10px] shrink-0">2</span>
-                El Agente ServiControlPro intercepta la solicitud.
+                El Agente ControlPro intercepta la solicitud.
               </li>
             </ul>
           </div>

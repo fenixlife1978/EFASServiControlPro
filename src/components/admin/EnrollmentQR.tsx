@@ -23,7 +23,7 @@ export default function EnrollmentQR({ InstitutoId, aulaId }: QRProps) {
   return (
     <div className="flex flex-col items-center p-8 bg-white rounded-[3rem] shadow-2xl border border-slate-100">
       <div className="mb-6 text-center">
-          <h3 className="text-[10px] font-black text-orange-600 uppercase tracking-[0.3em] italic">EFAS ServControlPro</h3>
+          <h3 className="text-[10px] font-black text-orange-600 uppercase tracking-[0.3em] italic">EDU ServControlPro</h3>
           <h3 className="text-xl font-black text-slate-900 uppercase italic">Vincular Terminal</h3>
       </div>
       

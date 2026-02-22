@@ -51,7 +51,7 @@ export default function InstitutionsPage() {
             Control de <span className="text-orange-500">Instituciones</span>
           </h1>
           <p className="text-slate-500 font-bold uppercase text-[10px] tracking-[0.3em] mt-2">
-            Configuración Rooted de EFAS ServiControlPro
+            Configuración Rooted de EDUControlPro Sistema de Control Parental Educativo
           </p>
         </div>
         <div className="bg-orange-500 text-white px-4 py-2 rounded-full text-[9px] font-black uppercase italic tracking-widest">

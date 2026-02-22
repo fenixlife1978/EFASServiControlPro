@@ -99,7 +99,7 @@ export default function SuperAdminDashboard() {
       <header className="flex justify-between items-center max-w-7xl mx-auto mb-8">
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-black italic tracking-tighter uppercase">
-            EFAS <span className="text-orange-500">ServiControlPro</span>
+            EDU <span className="text-orange-500">ControlPro</span>
           </h1>
         </div>
         

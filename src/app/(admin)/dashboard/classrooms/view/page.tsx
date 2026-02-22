@@ -47,7 +47,7 @@ function MonitorContent() {
             Monitor <span className="text-orange-500">En Vivo</span>
           </h1>
           <p className="text-slate-400 font-bold uppercase text-[10px] tracking-[0.3em] mt-3 italic">
-            EFAS ServControlPro • Aula: {aulaId}
+            EDU ServControlPro • Aula: {aulaId}
           </p>
         </div>
         <button onClick={() => setShowQR(true)} className="bg-slate-900 hover:bg-orange-500 text-white px-8 py-4 rounded-2xl font-black uppercase italic text-xs transition-all shadow-lg flex items-center gap-3">

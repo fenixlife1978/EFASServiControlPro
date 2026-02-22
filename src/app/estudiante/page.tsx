@@ -97,7 +97,7 @@ export default function EstudiantePage() {
         iniciarMonitoreo(newDeviceId);
       }
     } catch (e) {
-      alert("QR no válido para EFAS");
+      alert("QR no válido para EDU");
       setLoading(false);
     }
   };
@@ -128,7 +128,7 @@ export default function EstudiantePage() {
     <div className="min-h-screen bg-[#0a0c10] text-white p-8 font-sans">
       <header className="mb-12 flex justify-between items-center bg-[#11141d] p-6 rounded-[2.5rem] border border-white/5">
         <div>
-          <h1 className="text-xl font-black italic uppercase text-orange-500 leading-none">EFAS</h1>
+          <h1 className="text-xl font-black italic uppercase text-orange-500 leading-none">EDU</h1>
           <p className="text-[8px] font-bold text-slate-500 uppercase">ServControlPro</p>
         </div>
         <div className="text-right">

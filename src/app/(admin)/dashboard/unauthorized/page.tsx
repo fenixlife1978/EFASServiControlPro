@@ -40,7 +40,7 @@ export default function UnauthorizedPage() {
           </Link>
 
           <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] mt-6">
-            EFAS ServiControlPro &copy; 2026
+            EDUControlPro Sistema de Control Parental Educativo &copy; 2026
           </p>
         </div>
       </div>

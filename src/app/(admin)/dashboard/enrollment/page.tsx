@@ -109,7 +109,7 @@ export default function EnrollmentPage() {
             <header className="flex justify-between items-center">
                 <div>
                     <h2 className="text-2xl font-black text-slate-800 italic uppercase">Inscripción de Dispositivos</h2>
-                    <p className="text-slate-500 text-sm font-medium">EFAS ServiControlPro • Gestión de Acceso</p>
+                    <p className="text-slate-500 text-sm font-medium">EDUControlPro Sistema de Control Parental Educativo • Gestión de Acceso</p>
                 </div>
                 <AdminUserNav />
             </header>
