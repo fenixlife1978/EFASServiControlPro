@@ -1,8 +1,0 @@
-{
-	"appId": "com.educontrolpro",
-	"appName": "EDUControlPro",
-	"webDir": "out",
-	"server": {
-		"androidScheme": "https"
-	}
-}
