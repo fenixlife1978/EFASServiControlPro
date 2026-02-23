@@ -3,15 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "electron:dev": "electron .",
-    "electron:build": "electron-builder"
     "dev": "next dev --turbopack",
     "genkit:dev": "genkit start -- tsx src/ai/dev.ts",
     "genkit:watch": "genkit start -- tsx --watch src/ai/dev.ts",
     "build": "NODE_ENV=production next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "electron:dev": "electron .",
+    "electron:build": "electron-builder"
   },
   "dependencies": {
     "@capacitor-community/barcode-scanner": "^4.0.1",
