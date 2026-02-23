@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
+import { getStorage } from "firebase/storage"; // <--- Agregado para arreglar el error
 
 // 1. Invocamos las llaves desde tus variables de entorno (Protegidas)
 const firebaseConfig = {
@@ -29,9 +30,10 @@ export const getLocalServerUrl = () => {
   return "http://localhost:5000";
 };
 
-// Inicializamos Firebase (seguirá funcionando para el Login siempre)
+// Inicializamos Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app); // <--- Agregado para arreglar el error
 
-export { db, auth };
+export { db, auth, storage }; // <--- Exportamos storage también
