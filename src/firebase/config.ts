@@ -1,36 +1,37 @@
-import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth, signOut } from "firebase/auth";
+import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
-import { getStorage } from "firebase/storage";
-import { useAuthState } from "react-firebase-hooks/auth";
-// Importación explícita
-import { useCollection as useFBCollection, useDocument as useFBDocument } from "react-firebase-hooks/firestore";
+import { getAuth } from "firebase/auth";
 
+// 1. Invocamos las llaves desde tus variables de entorno (Protegidas)
 const firebaseConfig = {
-    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
 };
 
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-
-export const auth = getAuth(app);
-export const db = getFirestore(app);
-export const storage = getStorage(app);
-
-export const useUser = () => {
-    const [user, loading, error] = useAuthState(auth);
-    return { user, loading, error };
+// 2. Función para detectar si el usuario eligió Local o Nube
+export const getDbMode = () => {
+  if (typeof window !== "undefined") {
+    // Si no hay nada guardado, por defecto usamos la nube (Firebase)
+    return localStorage.getItem("edu_db_mode") || "cloud"; 
+  }
+  return "cloud";
 };
 
-export const logout = async () => await signOut(auth);
+// 3. Función para obtener la dirección del Servidor de la Escuela
+export const getLocalServerUrl = () => {
+  if (typeof window !== "undefined") {
+    return localStorage.getItem("edu_local_url") || "http://localhost:5000";
+  }
+  return "http://localhost:5000";
+};
 
-// Exportación garantizada de los hooks
-export const useCollection = useFBCollection;
-export const useDocument = useFBDocument;
-export const useDoc = useFBDocument; // Alias para compatibilidad
+// Inicializamos Firebase (seguirá funcionando para el Login siempre)
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
 
-export default app;
+export { db, auth };

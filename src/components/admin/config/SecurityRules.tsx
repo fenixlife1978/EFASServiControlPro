@@ -22,6 +22,7 @@ export const SecurityRules = ({ institutionId }: SecurityRulesProps) => {
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
+    if (!institutionId) return;
     return onSnapshot(doc(db, "institutions", institutionId), (d) => {
       if (d.exists()) setData(d.data());
     });
