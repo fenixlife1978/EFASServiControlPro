@@ -5,7 +5,8 @@ const config: CapacitorConfig = {
   appName: 'EDUControlPro',
   webDir: 'out',
   server: {
-    androidScheme: 'https'
+    androidScheme: 'https',
+    errorPath: 'index.html'
   }
 };
 
