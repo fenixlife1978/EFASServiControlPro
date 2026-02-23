@@ -1,3 +1,9 @@
-Opcion 1 (local): "Instalar base de datos en esta PC"
-Opcion 2 )Servidor): "Conectar a servidor central propio"
-Opcion 3 (Nube): "Usar Firebase (Internet)"
+productName: EDUControlPro
+appId: com.educontrolpro
+directories:
+  output: dist
+win:
+  target: nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
