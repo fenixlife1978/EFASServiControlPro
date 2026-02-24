@@ -50,15 +50,12 @@ export default function LoginForm() {
     setError(null);
 
     try {
-      // 1. Autenticar
       const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
       const user = userCredential.user;
       const idToken = await user.getIdToken(true);
 
-      // 2. Establecer Cookie con persistencia forzada
       document.cookie = `__session=${idToken}; path=/; samesite=lax; max-age=3600; secure`;
 
-      // 3. Verificar Instituto (Excepto Super Admin)
       if (user.email !== 'vallecondo@gmail.com') {
         const q = query(
           collection(db, "usuarios"), 
@@ -84,7 +81,6 @@ export default function LoginForm() {
 
       toast({ title: 'Sincronizado', description: 'Accediendo a EDUControlPro...' });
 
-      // 4. EL TRUCO FINAL: Un pequeño delay y navegación nativa para asegurar que el Middleware lea la cookie
       setTimeout(() => {
         window.location.replace('/dashboard');
       }, 500);
@@ -95,7 +91,6 @@ export default function LoginForm() {
     }
   };
 
-  // Función para manejar el escaneo de vinculación
   const startScan = async () => {
     try {
       const granted = await BarcodeScanner.requestPermissions();
@@ -103,7 +98,6 @@ export default function LoginForm() {
         toast({ title: "Acceso denegado", description: "Se requiere permiso de cámara." });
         return;
       }
-      // Esta función disparará la visibilidad en LoginPage
       const event = new CustomEvent('start-qr-scan');
       window.dispatchEvent(event);
     } catch (err) {
@@ -184,21 +178,6 @@ export default function LoginForm() {
           <Button type="submit" className="w-full bg-[#f97316] hover:bg-white hover:text-[#f97316] text-white font-black italic uppercase text-xs h-14 rounded-2xl shadow-lg mt-2 transition-all">
             Sincronizar
           </Button>
-
-          {/* SECCIÓN DE VINCULACIÓN QR */}
-          <div className="relative my-4">
-            <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-slate-800" /></div>
-            <div className="relative flex justify-center text-[8px] uppercase font-black italic"><span className="bg-[#0f1117] px-2 text-slate-600">O vincula hardware</span></div>
-          </div>
-
-          <button 
-            type="button"
-            onClick={startScan}
-            className="w-full flex items-center justify-center gap-2 h-12 rounded-2xl border border-slate-800 bg-slate-900/30 hover:bg-slate-800 text-slate-400 hover:text-white transition-all text-[9px] font-black uppercase italic"
-          >
-            <QrCode size={16} />
-            Vinculación EDUControlPro
-          </button>
         </form>
       </CardContent>
     </Card>
