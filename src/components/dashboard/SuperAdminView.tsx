@@ -2,14 +2,14 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/firebase/config';
 import { 
- collection, onSnapshot, query, where, addDoc, serverTimestamp, 
- orderBy, limit, updateDoc, doc, arrayUnion, arrayRemove, deleteDoc, setDoc, Timestamp 
+  collection, onSnapshot, query, where, addDoc, serverTimestamp, 
+  orderBy, limit, updateDoc, doc, arrayUnion, arrayRemove, deleteDoc, setDoc, getDocs 
 } from 'firebase/firestore';
 import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
- ShieldCheck, Users, Zap, QrCode, Play, Tablet, Building2, ShieldAlert, 
- Plus, X, Smartphone, Lock, Eye, EyeOff, Layout, GraduationCap, Briefcase, Trash2, Edit3, Globe, CheckCircle2, AlertCircle, Settings2, DoorOpen, Save, Search, Layers
+  ShieldCheck, Users, Zap, QrCode, Play, Tablet, Building2, ShieldAlert, 
+  Plus, X, Smartphone, Lock, Eye, EyeOff, Layout, GraduationCap, Briefcase, Trash2, Edit3, Globe, CheckCircle2, AlertCircle, Settings2, DoorOpen, Save, Search, Layers
 } from 'lucide-react';
 
 import CreateInstitutionForm from '@/components/super-admin/create-institution-form';
@@ -17,6 +17,7 @@ import InstitutionList from '@/components/super-admin/institution-list';
 import UserManagement from '@/components/admin/users/UserManagement';
 
 export default function SuperAdminView() {
+  const [lastDeviceId, setLastDeviceId] = useState('');
   const { institutionId } = useInstitution();
   const [activeTab, setActiveTab] = useState('vincular'); 
   const [subTab, setSubTab] = useState<'master' | 'jornada'>('jornada');
@@ -33,7 +34,6 @@ export default function SuperAdminView() {
   const [isJornadaActive, setIsJornadaActive] = useState(false);
   const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null); 
   
-  // Estación de vinculación con selectores de precisión
   const [selectedConfig, setSelectedConfig] = useState({ 
     instId: '', 
     seccion: '',
@@ -56,7 +56,16 @@ export default function SuperAdminView() {
   });
   const [editAulasList, setEditAulasList] = useState<any[]>([]);
 
-  // Listeners Core
+  // Lógica para generar el ID secuencial automático (ej: DEV-0001)
+  const getNextDeviceId = async () => {
+    const q = query(collection(db, "dispositivos"), orderBy("createdAt", "desc"), limit(1));
+    const snap = await getDocs(q);
+    if (snap.empty) return "DEV-0001";
+    const lastId = snap.docs[0].id;
+    const lastNum = parseInt(lastId.split('-')[1]) || 0;
+    return `DEV-${(lastNum + 1).toString().padStart(4, '0')}`;
+  };
+
   useEffect(() => {
     return onSnapshot(doc(db, "config", "app_status"), (d) => {
       if (d.exists()) {
@@ -83,7 +92,6 @@ export default function SuperAdminView() {
     });
   }, []);
 
-  // Carga dinámica de aulas para Vinculación y Filtros
   useEffect(() => {
     const instIdToLoad = activeTab === 'vincular' ? selectedConfig.instId : targetInstId;
     if (!instIdToLoad) {
@@ -95,7 +103,6 @@ export default function SuperAdminView() {
     });
   }, [targetInstId, selectedConfig.instId, activeTab]);
 
-  // Carga dinámica para Reasignación de Usuarios
   useEffect(() => {
     if (!editForm.InstitutoId) {
       setEditAulasList([]);
@@ -106,7 +113,6 @@ export default function SuperAdminView() {
     });
   }, [editForm.InstitutoId]);
 
-  // Monitorización de Aula Específica (Pestaña Dispositivos)
   useEffect(() => {
     if (!targetInstId || !targetAulaId) {
       setCurrentAulaData(null);
@@ -120,30 +126,39 @@ export default function SuperAdminView() {
   useEffect(() => {
     const q = targetAulaId 
       ? query(collection(db, "dispositivos"), where("aulaId", "==", targetAulaId))
-      : query(collection(db, "dispositivos"));
-    
+      : query(collection(db, "dispositivos")); 
     return onSnapshot(q, (s) => {
       setDevices(s.docs.map(d => ({ id: d.id, ...d.data() })));
     });
   }, [targetAulaId]);
 
+  // NUEVA LÓGICA DE LISTENER DE VINCULACIÓN SEGÚN INSTRUCCIONES:
   useEffect(() => {
-    if (!isJornadaActive || !sessionStartTime) return; 
-    const q = query(
-      collection(db, "dispositivos"),
-      where("status", "==", "pending_name"),
-      where("createdAt", ">=", sessionStartTime),
-      orderBy("createdAt", "desc"),
-      limit(1)
-    );
-    return onSnapshot(q, (s) => {
-      if (!s.empty) {
-        setLastLinkedDevice({ id: s.docs[0].id, ...s.docs[0].data() });
-      }
+    if (
+      !isJornadaActive ||
+      !sessionStartTime ||
+      !selectedConfig.instId ||
+      !selectedConfig.aulaId
+    ) return;
+    const dispositivosRef = collection(db, "dispositivos");
+    const filtros = [
+      where("InstitutoId", "==", selectedConfig.instId),
+      
+      where("vinculado", "==", true),
+      where("vinculado", "==", true),
+    ];
+    const q = query(dispositivosRef, ...filtros);
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      let detectedDevice: any = null;
+      snapshot.forEach(doc => {
+        const device = doc.data();
+        if (!device.alumno_asignado && !detectedDevice) detectedDevice = { id: doc.id, ...device };
+      });
+      if (detectedDevice) setLastLinkedDevice(detectedDevice);
     });
-  }, [isJornadaActive, sessionStartTime]);
+    return () => unsubscribe();
+  }, [isJornadaActive, sessionStartTime, selectedConfig.instId, selectedConfig.aulaId]);
 
-  // Funciones de Acción
   const handleUpdateAppVersion = async () => {
     try {
       await setDoc(doc(db, "config", "app_status"), {
@@ -187,23 +202,50 @@ export default function SuperAdminView() {
     }
   };
 
-  const handleSaveStudent = async () => {
+    const handleSaveStudent = async () => {
     if (!studentName || !lastLinkedDevice) return;
     setIsSaving(true);
     try {
-      const deviceId = lastLinkedDevice.serial || lastLinkedDevice.id;
-      await setDoc(doc(db, "dispositivos", deviceId), {
-        status: 'active',
+      const selectedRole = selectedConfig.rol || 'alumno';
+      
+      // A. Actualizar Dispositivo: Ahora el aulaId ya viene del QR (que es el ID real)
+      await updateDoc(doc(db, "dispositivos", lastLinkedDevice.id), {
         alumno_asignado: studentName,
-        InstitutoId: selectedConfig.instId,
-        aulaId: selectedConfig.aulaId,
-        rol: selectedConfig.rol,
-        deviceSerial: lastLinkedDevice.serial || 'N/A',
+        status: 'active',
         lastUpdated: serverTimestamp(),
-        restrictions: { extremeSecurity: false } 
-      }, { merge: true });
+      });
+
+      // B. Crear Usuario en raíz: Vinculación exacta
+      const newUserRef = doc(collection(db, "usuarios"));
+      await setDoc(newUserRef, {
+        nombre: studentName,
+        rol: selectedRole,
+        InstitutoId: selectedConfig.instId,
+        aulaId: selectedConfig.aulaId, // El ID real (ej: LABORATORIO_1)
+        seccion: selectedConfig.seccion,
+        deviceId: lastLinkedDevice.id,
+        status: 'active',
+        createdAt: serverTimestamp()
+      });
+
+      alert(`✅ ${selectedRole.toUpperCase()} VINCULADO CORRECTAMENTE`);
+
+      // C. MODO RÁFAGA: Siguiente QR automático
       setLastLinkedDevice(null);
       setStudentName('');
+      const nextId = await getNextDeviceId();
+      setLastDeviceId(nextId);
+      await setDoc(doc(db, "dispositivos", nextId), {
+        createdAt: serverTimestamp(),
+        vinculado: false,
+        InstitutoId: selectedConfig.instId,
+        aulaId: selectedConfig.aulaId,
+        seccion: selectedConfig.seccion,
+        rol: selectedRole,
+        status: 'pending_hardware'
+      });
+      setSessionStartTime(new Date());
+
     } catch (e) { console.error(e); } finally { setIsSaving(false); }
   };
 
@@ -229,23 +271,17 @@ export default function SuperAdminView() {
     });
   };
 
-  const handleCleanupInstitutions = async () => {
-    if (!confirm("⚠️ ADVERTENCIA: ¿Eliminar sedes con IDs aleatorios?")) return;
-    try {
-      const toDelete = institutions.filter(inst => inst.id.length > 15);
-      for (const inst of toDelete) { await deleteDoc(doc(db, "institutions", inst.id)); }
-    } catch (e) { console.error(e); }
+  // NUEVA LÓGICA QR SEGÚN ESPECIFICACIÓN
+  const generateVincularQR = () => {
+    return JSON.stringify({
+      action: 'vincular', deviceId: lastDeviceId, 
+      InstitutoId: selectedConfig.instId,
+      aulaId: selectedConfig.aulaId,
+      seccion: selectedConfig.seccion,
+      nombreInstituto: institutions.find(i => i.id === selectedConfig.instId)?.nombre ?? '',
+      rol: selectedConfig.rol
+    });
   };
-
-  const filteredUsers = allUsers.filter(u => 
-    u.nombre?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    u.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    u.seccion?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    u.role?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const uniqueSectionsForEdit = Array.from(new Set(editAulasList.map(a => a.seccion))).filter(Boolean);
-  const uniqueSectionsForVincular = Array.from(new Set(availableAulas.map(a => a.seccion))).filter(Boolean);
 
   const generateMasterQR = () => {
     const masterConfig = {
@@ -259,13 +295,19 @@ export default function SuperAdminView() {
     return JSON.stringify(masterConfig);
   };
 
-  const generateVincularQR = () => {
-    return JSON.stringify({
-      InstitutoId: selectedConfig.instId,
-      aulaId: selectedConfig.aulaId,
-      rol: selectedConfig.rol
-    });
-  };
+  // Filtrado de usuarios para la tabla global
+  const filteredUsers = allUsers.filter(u => {
+    const search = searchTerm.toLowerCase();
+    return (
+      u.nombre?.toLowerCase().includes(search) ||
+      u.email?.toLowerCase().includes(search) ||
+      u.seccion?.toLowerCase().includes(search)
+    );
+  });
+
+  // Secciones únicas para los selects de vinculación y edición
+  const uniqueSectionsForVincular = Array.from(new Set(availableAulas.map((a: any) => a.seccion))).filter(Boolean);
+  const uniqueSectionsForEdit = Array.from(new Set(editAulasList.map((a: any) => a.seccion))).filter(Boolean);
 
   const inputStyle = "w-full bg-[#1a1d26] border border-slate-800 p-4 rounded-xl focus:border-orange-500 outline-none font-bold text-slate-200 text-[10px] uppercase transition-all";
 
@@ -332,31 +374,58 @@ export default function SuperAdminView() {
                               <button onClick={() => setSelectedConfig({...selectedConfig, rol: 'profesor'})} className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 ${selectedConfig.rol === 'profesor' ? 'border-orange-500 bg-orange-500/10' : 'border-slate-800 bg-slate-900/50'}`}><Briefcase size={20}/><span className="text-[8px] font-black uppercase">Profesor</span></button>
                             </div>
                             
-                            <button disabled={!selectedConfig.aulaId} onClick={() => { setSessionStartTime(new Date()); setIsJornadaActive(true); }} className="w-full bg-orange-500 disabled:bg-slate-800 text-white font-black py-5 rounded-2xl shadow-lg shadow-orange-500/20">Activar Estación</button>
+                            <button
+                              disabled={!selectedConfig.aulaId}
+                              onClick={async () => { 
+                                setLastLinkedDevice(null); // LIMPIA VINCULACIÓN ANTERIOR antes de empezar la nueva sesión
+                                const nextId = await getNextDeviceId();
+                                await setDoc(doc(db, "dispositivos", nextId), {
+                                  createdAt: serverTimestamp(),
+                                  vinculado: false,
+                                  InstitutoId: selectedConfig.instId,
+                                  aulaId: selectedConfig.aulaId,
+      seccion: selectedConfig.seccion,
+                                  rol: selectedConfig.rol,
+                                  status: 'pending_hardware'
+                                });
+                                setSessionStartTime(new Date()); 
+                                setIsJornadaActive(true); 
+                              }}
+                              className="w-full bg-orange-500 disabled:bg-slate-800 text-white font-black py-5 rounded-2xl shadow-lg shadow-orange-500/20"
+                            >
+                              Activar Estación
+                            </button>
                           </div>
                         ) : (
                           <div className="flex flex-col items-center py-4">
                             <div className="bg-white p-6 rounded-[2rem] mb-8 border-[12px] border-slate-900">
-                              <QRCodeSVG value={generateVincularQR()} size={240} level="L" />
+                              <QRCodeSVG
+                                value={generateVincularQR()}
+                                size={240}
+                                level="L"
+                              />
                             </div>
                             {lastLinkedDevice ? (
                               <div className="w-full bg-slate-900 p-6 rounded-3xl border border-orange-500 animate-in zoom-in">
-                                <label className="text-[8px] font-black text-orange-500 uppercase mb-2 block">Dispositivo Detectado</label>
-                                <input autoFocus className={inputStyle} placeholder="NOMBRE DEL ALUMNO" value={studentName} onChange={e => setStudentName(e.target.value)} />
+                                <label className="text-[8px] font-black text-orange-500 uppercase mb-2 block italic">Hardware: {lastLinkedDevice.hardware?.modelo || 'Detectado'}</label>
+                                <input autoFocus className={inputStyle} placeholder="NOMBRE DEL ASIGNADO" value={studentName} onChange={e => setStudentName(e.target.value)} />
                                 <button onClick={handleSaveStudent} className="w-full bg-green-600 text-white font-black py-4 rounded-xl text-[10px] mt-4 uppercase">Finalizar Vinculación</button>
                               </div>
                             ) : (
                               <div className="text-center">
-                                <p className="text-[10px] font-bold text-slate-500 uppercase animate-pulse">Esperando vinculación...</p>
-                                <p className="text-[8px] text-slate-600 mt-2">Aula: {availableAulas.find(a => a.id === selectedConfig.aulaId)?.nombre_completo}</p>
+                                <p className="text-[10px] font-bold text-slate-500 uppercase animate-pulse italic">Esperando señal del dispositivo...</p>
+                                <p className="text-[8px] text-slate-600 mt-2 italic">Aula: {availableAulas.find(a => a.id === selectedConfig.aulaId)?.nombre_completo}</p>
                               </div>
                             )}
-                            <button onClick={() => { setIsJornadaActive(false); setLastLinkedDevice(null); }} className="mt-8 text-[9px] font-black text-red-500/50 uppercase">Cerrar Sesión</button>
+                            <button onClick={() => { setIsJornadaActive(false); setLastLinkedDevice(null); }} className="mt-8 text-[9px] font-black text-red-500/50 uppercase italic">Cerrar Sesión</button>
                           </div>
                         )}
                       </>
                     )}
                   </section>
+                </div>
+                <div className="col-span-12 lg:col-span-7">
+                  {/* Aquí el resto de tu interfaz, como siempre */}
                 </div>
               </div>
             </div>
@@ -430,14 +499,15 @@ export default function SuperAdminView() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                 {devices.map(device => (
-                  <div key={device.id} className={`bg-[#0f1117] rounded-[2.5rem] border ${device.restrictions?.extremeSecurity ? 'border-red-600' : 'border-slate-800'} p-8`}>
+                  <div key={device.id} className={`bg-[#0f1117] rounded-[2.5rem] border ${device.restrictions?.extremeSecurity ? 'border-red-600' : 'border-slate-800'} p-8 shadow-xl`}>
                     <div className="flex justify-between items-start mb-4">
                       <Smartphone size={20} className={device.restrictions?.extremeSecurity ? 'text-red-500' : 'text-orange-500'} />
                       <span className="text-[8px] font-black uppercase italic px-2 py-1 bg-slate-900 rounded-lg">{device.rol}</span>
                     </div>
                     <h3 className="text-white font-black text-2xl italic uppercase truncate">{device.alumno_asignado || 'NO ASIGNADO'}</h3>
-                    <p className="text-slate-600 text-[9px] mb-6 uppercase">SERIAL: {device.deviceSerial || device.id}</p>
-                    <button onClick={() => toggleExtremeSecurity(device.id, !!device.restrictions?.extremeSecurity)} className={`w-full py-4 rounded-xl font-black uppercase text-[10px] border-2 ${device.restrictions?.extremeSecurity ? 'bg-red-600 text-white' : 'border-slate-800 text-slate-500 hover:text-white'}`}>
+                    <p className="text-slate-600 text-[9px] mb-2 uppercase">ID: {device.id}</p>
+                    <p className="text-orange-500 text-[8px] font-bold uppercase truncate">{device.hardware?.marca} {device.hardware?.modelo || ''}</p>
+                    <button onClick={() => toggleExtremeSecurity(device.id, !!device.restrictions?.extremeSecurity)} className={`w-full py-4 mt-6 rounded-xl font-black uppercase text-[10px] border-2 transition-all ${device.restrictions?.extremeSecurity ? 'bg-red-600 text-white border-red-600' : 'border-slate-800 text-slate-500 hover:text-white'}`}>
                       {device.restrictions?.extremeSecurity ? 'Desactivar Blindaje' : 'Activar Blindaje'}
                     </button>
                   </div>

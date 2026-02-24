@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { db, auth } from '@/firebase/config';
 import { 
   collection, query, onSnapshot, where, addDoc, serverTimestamp, 
-  doc, getDoc, updateDoc, deleteDoc 
+  doc, getDoc, updateDoc, deleteDoc, setDoc 
 } from 'firebase/firestore';
 import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
 import { 
@@ -19,7 +19,13 @@ import { SecurityRules } from '@/components/admin/config/SecurityRules';
 export default function InstitutionView() {
   const { institutionId, setInstitutionId } = useInstitution();
   const [institutionName, setInstitutionName] = useState('Cargando...');
-  const [instData, setInstData] = useState({ direccion: '', telefono: '' });
+  
+  // ESTADO PARA LA SEDE (Configuración General)
+  const [instData, setInstData] = useState<any>({ 
+    direccion: '', 
+    telefono: '' 
+  });
+
   const [activeSection, setActiveSection] = useState<'dashboard' | 'monitoring' | 'users' | 'settings' | 'security'>('dashboard');
   const [historyModal, setHistoryModal] = useState({ isOpen: false, tabletId: '', alumnoNombre: '' });
   const [messageModal, setMessageModal] = useState({ isOpen: false, tabletId: '', alumnoNombre: '', text: '' });
@@ -30,7 +36,14 @@ export default function InstitutionView() {
   const [allAlumnos, setAllAlumnos] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
-  const [newAula, setNewAula] = useState({ nombre_completo: '', seccion: '' });
+
+  // ESTADO PARA NUEVAS AULAS (Identidad EDUControlPro)
+  const [newAula, setNewAula] = useState<any>({ 
+    aulaId: '', 
+    seccion: '',
+    status: 'active'
+  });
+
   const [editingAula, setEditingAula] = useState<any>(null);
   const [editingUser, setEditingUser] = useState<any>(null);
   const [activeUrlRequest, setActiveUrlRequest] = useState<string | null>(null);
@@ -46,7 +59,10 @@ export default function InstitutionView() {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setInstitutionName(data.nombre);
-        setInstData({ direccion: data.direccion || '', telefono: data.telefono || '' });
+        setInstData({ 
+          direccion: data.direccion || '', 
+          telefono: data.telefono || '' 
+        });
       }
     };
     fetchInstData();
@@ -60,7 +76,7 @@ export default function InstitutionView() {
     const unsubTablets = onSnapshot(query(collection(db, "dispositivos"), where("InstitutoId", "==", institutionId)), (s) => {
       setTablets(s.docs.map(d => ({ id: d.id, ...d.data() })));
     });
-    const unsubAllAlumnos = onSnapshot(query(collection(db, "usuarios"), where("InstitutoId", "==", institutionId), where("role", "==", "estudiante")), (s) => {
+    const unsubAllAlumnos = onSnapshot(query(collection(db, "usuarios"), where("InstitutoId", "==", institutionId), where("rol", "==", "alumno")), (s) => {
       setAllAlumnos(s.docs.map(d => ({ id: d.id, ...d.data() })));
     });
     return () => { unsubAulas(); unsubTablets(); unsubAllAlumnos(); };
@@ -71,7 +87,7 @@ export default function InstitutionView() {
     const q = query(collection(db, "usuarios"), 
               where("InstitutoId", "==", institutionId), 
               where("aulaId", "==", selectedAula.id),
-              where("role", "==", "estudiante"));
+              where("rol", "==", "alumno"));
     return onSnapshot(q, (s) => {
       setAlumnos(s.docs.map(d => ({ id: d.id, ...d.data() })));
     });
@@ -92,6 +108,30 @@ export default function InstitutionView() {
     setIsSaving(false);
   };
 
+  const handleSaveAula = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAula.aulaId || !newAula.seccion || !institutionId) return;
+    
+    try {
+      // Normalizamos el ID (Mayúsculas y sin espacios)
+      const customAulaId = newAula.aulaId.toUpperCase().trim().replace(/\s+/g, '_');
+      const aulaRef = doc(db, "institutions", institutionId, "Aulas", customAulaId);
+      
+      await setDoc(aulaRef, {
+        aulaId: customAulaId,
+        seccion: newAula.seccion.toUpperCase().trim(),
+        InstitutoId: institutionId,
+        status: 'active',
+        createdAt: serverTimestamp(),
+        lastSecurityUpdate: serverTimestamp()
+      });
+
+      setNewAula({ aulaId: '', seccion: '', status: 'active' });
+      setShowModal(false);
+      alert("✅ Aula creada con ID: " + customAulaId);
+    } catch (e) { console.error(e); }
+  };
+
   const handleSendMessage = async () => {
     if (!messageModal.tabletId || !messageModal.text.trim()) return;
     setIsSaving(true);
@@ -104,19 +144,6 @@ export default function InstitutionView() {
       setMessageModal({ ...messageModal, isOpen: false, text: '' });
     } catch (e) { console.error(e); }
     setIsSaving(false);
-  };
-
-  const handleSaveAula = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newAula.nombre_completo || !newAula.seccion) return;
-    try {
-      if (editingAula) {
-        await updateDoc(doc(db, `institutions/${institutionId}/Aulas`, editingAula.id), { ...newAula, lastUpdated: serverTimestamp() });
-      } else {
-        await addDoc(collection(db, `institutions/${institutionId}/Aulas`), { ...newAula, status: 'published', createdAt: serverTimestamp(), InstitutoId: institutionId });
-      }
-      setShowModal(false); setEditingAula(null); setNewAula({ nombre_completo: '', seccion: '' });
-    } catch (e) { console.error(e); }
   };
 
   const handleDeleteAula = async (e: React.MouseEvent, aulaId: string) => {
@@ -155,8 +182,8 @@ export default function InstitutionView() {
   };
 
   const filteredUsers = allAlumnos.filter(a => 
-    a.nombre.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    (a.tabletId && a.tabletId.toLowerCase().includes(searchTerm.toLowerCase()))
+    a.nombre?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    (a.deviceId && a.deviceId.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   return (
@@ -201,16 +228,16 @@ export default function InstitutionView() {
                 <>
                   <div className="flex justify-between items-center mb-10">
                     <h2 className="text-4xl font-black italic uppercase text-white tracking-tighter">Mapa <span className="text-orange-500 font-light">de Aulas</span></h2>
-                    <button onClick={() => { setEditingAula(null); setNewAula({nombre_completo:'', seccion:''}); setShowModal(true); }} className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase italic transition-all flex items-center gap-2"><Plus className="w-4 h-4" /> Crear Nueva Aula</button>
+                    <button onClick={() => { setEditingAula(null); setNewAula({aulaId:'', seccion:''}); setShowModal(true); }} className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase italic transition-all flex items-center gap-2"><Plus className="w-4 h-4" /> Crear Nueva Aula</button>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {aulas.map((aula) => (
                       <button key={aula.id} onClick={() => setSelectedAula(aula)} className="bg-slate-900/30 p-8 rounded-[2.5rem] border border-slate-800 hover:border-orange-500 transition-all group text-left relative">
                         <DoorOpen className="w-8 h-8 text-slate-700 mb-4 group-hover:text-orange-500" />
-                        <h3 className="text-xl font-black italic uppercase text-white">{aula.nombre_completo}</h3>
+                        <h3 className="text-xl font-black italic uppercase text-white">{aula.aulaId}</h3>
                         <p className="text-[10px] font-bold text-slate-500 uppercase">{aula.seccion || 'SIN SECCIÓN'}</p>
                         <div className="absolute top-6 right-6 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <div title="Editar Aula" onClick={(e) => { e.stopPropagation(); setEditingAula(aula); setNewAula({nombre_completo: aula.nombre_completo, seccion: aula.seccion}); setShowModal(true); }} className="p-2 bg-slate-800 hover:text-orange-500 rounded-lg"><Edit3 size={14} /></div>
+                          <div title="Editar Aula" onClick={(e) => { e.stopPropagation(); setEditingAula(aula); setNewAula({aulaId: aula.aulaId, seccion: aula.seccion}); setShowModal(true); }} className="p-2 bg-slate-800 hover:text-orange-500 rounded-lg"><Edit3 size={14} /></div>
                           <div title="Eliminar Aula" onClick={(e) => handleDeleteAula(e, aula.id)} className="p-2 bg-slate-800 hover:text-red-500 rounded-lg"><Trash2 size={14} /></div>
                         </div>
                       </button>
@@ -245,7 +272,7 @@ export default function InstitutionView() {
                       </thead>
                       <tbody>
                         {filteredUsers.map((alumno) => {
-                          const device = tablets.find(t => t.id === alumno.tabletId);
+                          const device = tablets.find(t => t.id === alumno.deviceId);
                           const isReq = activeUrlRequest === alumno.id;
                           return (
                             <tr key={alumno.id} className="border-b border-slate-800/30 hover:bg-slate-800/10 transition-all group">
@@ -255,7 +282,7 @@ export default function InstitutionView() {
                                 ) : (
                                   <div>
                                     <p className="font-black text-white italic uppercase">{alumno.nombre}</p>
-                                    <p className="text-[8px] font-bold text-blue-500 flex items-center gap-1 mt-1 opacity-70"><HardDrive size={10}/> {device?.mac_address || device?.imei || device?.id || 'NO VINCULADO'}</p>
+                                    <p className="text-[8px] font-bold text-blue-500 flex items-center gap-1 mt-1 opacity-70"><HardDrive size={10}/> {alumno.deviceId || 'NO VINCULADO'}</p>
                                   </div>
                                 )}
                               </td>
@@ -263,10 +290,10 @@ export default function InstitutionView() {
                                 {editingUser?.id === alumno.id ? (
                                   <select className="bg-black border border-orange-500 rounded px-2 py-1 text-white uppercase text-[9px]" value={editingUser.aulaId} onChange={e => setEditingUser({...editingUser, aulaId: e.target.value})}>
                                     <option value="">SIN ASIGNAR</option>
-                                    {aulas.map(a => <option key={a.id} value={a.id}>{a.nombre_completo}</option>)}
+                                    {aulas.map(a => <option key={a.id} value={a.id}>{a.aulaId}</option>)}
                                   </select>
                                 ) : (
-                                  <span className="uppercase font-bold text-slate-400">{aulas.find(a => a.id === alumno.aulaId)?.nombre_completo || 'SIN AULA'}</span>
+                                  <span className="uppercase font-bold text-slate-400">{alumno.aulaId || 'SIN AULA'}</span>
                                 )}
                               </td>
                               <td className="px-6 py-5">
@@ -278,13 +305,8 @@ export default function InstitutionView() {
                                     </div>
                                   )}
                                   <button title="Consultar URL en Vivo" onClick={() => setActiveUrlRequest(isReq ? null : alumno.id)} className={`p-2 rounded-lg transition-all ${isReq ? 'bg-orange-500 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}><Link2 size={14} /></button>
-                                  <button title="Ver Historial Web (Top 20)" onClick={() => setHistoryModal({ isOpen: true, tabletId: alumno.tabletId || "", alumnoNombre: alumno.nombre })} className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-orange-500 transition-all"><Globe size={14} /></button>
-                                  {editingUser?.id === alumno.id ? (
-                                    <button title="Guardar Cambios" onClick={handleUpdateUser} className="p-2 bg-green-600 rounded-lg text-white"><Check size={14} /></button>
-                                  ) : (
-                                    <button title="Modificar Datos y Aula" onClick={() => setEditingUser({id: alumno.id, nombre: alumno.nombre, aulaId: alumno.aulaId})} className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-blue-500 transition-all"><Edit3 size={14} /></button>
-                                  )}
-                                  <button title="Eliminar Alumno y Liberar Hardware" onClick={() => handleDeleteUser(alumno.id, alumno.tabletId)} className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-red-500 transition-all"><Trash2 size={14} /></button>
+                                  <button title="Ver Historial Web" onClick={() => setHistoryModal({ isOpen: true, tabletId: alumno.deviceId || "", alumnoNombre: alumno.nombre })} className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-orange-500 transition-all"><Globe size={14} /></button>
+                                  <button title="Eliminar Alumno" onClick={() => handleDeleteUser(alumno.id, alumno.deviceId)} className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-red-500 transition-all"><Trash2 size={14} /></button>
                                 </div>
                               </td>
                             </tr>
@@ -301,7 +323,7 @@ export default function InstitutionView() {
                   <button onClick={() => setSelectedAula(null)} className="mb-8 flex items-center gap-2 text-[10px] font-black uppercase text-slate-500 hover:text-orange-500"><ArrowLeft className="w-3 h-3" /> Regresar</button>
                   <div className="grid grid-cols-1 gap-4">
                     {alumnos.map((alumno) => {
-                      const device = tablets.find(t => t.id === alumno.tabletId);
+                      const device = tablets.find(t => t.id === alumno.deviceId);
                       return (
                         <div key={alumno.id} className="flex items-center justify-between p-6 bg-slate-900/50 rounded-[2rem] border border-slate-800 gap-4">
                           <div className="flex items-center gap-4 flex-1">
@@ -312,8 +334,8 @@ export default function InstitutionView() {
                             </div>
                           </div>
                           <div className="flex gap-2">
-                            <button title="Enviar Mensaje Directo" onClick={() => setMessageModal({ isOpen: true, tabletId: alumno.tabletId || '', alumnoNombre: alumno.nombre, text: '' })} className="w-12 h-12 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center hover:bg-blue-500 transition-all group/msg"><MessageSquare className="w-5 h-5 group-hover/msg:text-white" /></button>
-                            <button title="Ver Actividad Reciente" onClick={() => setHistoryModal({ isOpen: true, tabletId: alumno.tabletId || "", alumnoNombre: alumno.nombre })} className="w-12 h-12 rounded-2xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center hover:bg-orange-500 transition-all group/globe"><Globe className="w-5 h-5 group-hover/globe:text-white" /></button>
+                            <button title="Enviar Mensaje" onClick={() => setMessageModal({ isOpen: true, tabletId: alumno.deviceId || '', alumnoNombre: alumno.nombre, text: '' })} className="w-12 h-12 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center hover:bg-blue-500 transition-all group/msg"><MessageSquare className="w-5 h-5 group-hover/msg:text-white" /></button>
+                            <button title="Ver Actividad" onClick={() => setHistoryModal({ isOpen: true, tabletId: alumno.deviceId || "", alumnoNombre: alumno.nombre })} className="w-12 h-12 rounded-2xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center hover:bg-orange-500 transition-all group/globe"><Globe className="w-5 h-5 group-hover/globe:text-white" /></button>
                           </div>
                         </div>
                       );
@@ -364,7 +386,7 @@ export default function InstitutionView() {
         </div>
       </main>
 
-      {/* MODALES EXTERNOS */}
+      {/* MODAL DE AULA: aulaId y seccion */}
       {showModal && (
         <div className="fixed inset-0 bg-[#0a0c10]/95 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
           <div className="bg-[#0f1117] border border-slate-800 rounded-[3rem] p-10 w-full max-w-md shadow-2xl animate-in zoom-in duration-300">
@@ -372,11 +394,17 @@ export default function InstitutionView() {
               {editingAula ? 'Editar' : 'Nueva'} <span className="text-orange-500">Aula</span>
             </h2>
             <form onSubmit={handleSaveAula} className="space-y-6">
-              <input placeholder="EJ: LABORATORIO" className={inputStyle} value={newAula.nombre_completo} onChange={e => setNewAula({...newAula, nombre_completo: e.target.value})} />
-              <input placeholder="EJ: 5TO AÑO B" className={inputStyle} value={newAula.seccion} onChange={e => setNewAula({...newAula, seccion: e.target.value})} />
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-slate-500 uppercase ml-1">Aula / Grado</label>
+                <input placeholder="EJ: LABORATORIO" className={inputStyle} value={newAula.aulaId || ""} onChange={e => setNewAula({...newAula, aulaId: e.target.value})} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-slate-500 uppercase ml-1">Sección</label>
+                <input placeholder="EJ: 5TO AÑO B" className={inputStyle} value={newAula.seccion || ""} onChange={e => setNewAula({...newAula, seccion: e.target.value})} />
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <button type="button" onClick={() => { setShowModal(false); setEditingAula(null); }} className="bg-slate-800 text-slate-400 font-black py-5 rounded-xl text-[10px] uppercase italic">Cancelar</button>
-                <button type="submit" className="bg-orange-500 text-white font-black py-5 rounded-xl text-[10px] uppercase italic">Guardar</button>
+                <button type="submit" className="bg-orange-500 text-white font-black py-5 rounded-xl text-[10px] uppercase italic">Guardar Aula</button>
               </div>
             </form>
           </div>
