@@ -17,6 +17,10 @@
     "directories": {
       "output": "dist"
     },
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/electron-serve"
+    ],
     "files": [
       "out/**/*",
       "main.js",
@@ -24,12 +28,15 @@
       "node_modules/**/*"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "public/icon.ico"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
+      "installerIcon": "public/icon.ico",
+      "uninstallerIcon": "public/icon.ico",
       "uninstallDisplayName": "Desinstalar EDUControlPro"
     }
   },

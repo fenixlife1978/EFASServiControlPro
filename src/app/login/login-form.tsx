@@ -11,7 +11,7 @@ import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/aut
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertCircle, Loader2, Building2, Lock, Mail, QrCode } from 'lucide-react';
+import { AlertCircle, Loader2, Building2, Lock, Mail, QrCode, ArrowLeft } from 'lucide-react';
 import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
 
 export default function LoginForm() {
@@ -20,25 +20,28 @@ export default function LoginForm() {
   const [institutoId, setInstitutoId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [resetMode, setResetMode] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
   
   const { toast } = useToast();
 
-  const handleResetPassword = async () => {
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!email) {
-      setError('Por favor, ingresa tu email para enviarte el enlace de recuperación.');
+      setError('Ingresa tu email para enviarte el enlace.');
       return;
     }
     setResetLoading(true);
+    setError(null);
     try {
       await sendPasswordResetEmail(auth, email.trim());
       toast({
         title: 'Correo enviado',
         description: 'Revisa tu bandeja de entrada para restablecer tu contraseña.',
       });
-      setError(null);
+      setResetMode(false);
     } catch (err: any) {
-      setError('Error al enviar el correo. Verifica que el email sea válido.');
+      setError('Error: Verifica que el email sea válido y esté registrado.');
     } finally {
       setResetLoading(false);
     }
@@ -117,68 +120,99 @@ export default function LoginForm() {
       <CardHeader className="text-center pb-2">
         <div className="mb-4 flex justify-center scale-90"><Logo /></div>
         <CardTitle className="text-3xl font-black italic tracking-tighter uppercase leading-none">
-          ACCESO <span className="text-[#f97316]">CONTROL PRO</span>
+          {resetMode ? 'RECUPERAR' : 'ACCESO'} <span className="text-[#f97316]">{resetMode ? 'CUENTA' : 'CONTROL PRO'}</span>
         </CardTitle>
       </CardHeader>
       <CardContent className="pt-6">
-        <form className="grid gap-4" onSubmit={handleLogin}>
-          <div className="grid gap-1.5 relative">
-            <Mail className="absolute left-4 top-10 text-slate-500 h-4 w-4" />
-            <Label className="text-[9px] uppercase font-black ml-1 text-slate-500 italic">Email</Label>
-            <Input
-              type="email"
-              placeholder="nombre@ejemplo.com"
-              required
-              className="bg-slate-900/50 border-slate-800 focus:border-[#f97316] h-12 rounded-xl font-bold pl-11 text-[11px]"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </div>
-
-          <div className="grid gap-1.5 relative">
-            <Building2 className="absolute left-4 top-10 text-slate-500 h-4 w-4" />
-            <Label className="text-[9px] uppercase font-black ml-1 text-slate-500 italic">ID Instituto</Label>
-            <Input
-              type="text"
-              placeholder="INST-XXXXX"
-              className="bg-slate-900/50 border-slate-800 focus:border-[#f97316] h-12 rounded-xl font-bold pl-11 text-[11px]"
-              value={institutoId}
-              onChange={(e) => setInstitutoId(e.target.value)}
-            />
-          </div>
-
-          <div className="grid gap-1.5 relative">
-            <Lock className="absolute left-4 top-10 text-slate-500 h-4 w-4" />
-            <div className="flex items-center justify-between">
-              <Label className="text-[9px] uppercase font-black ml-1 text-slate-500 italic">Password</Label>
-              <button
-                type="button"
-                onClick={handleResetPassword}
-                disabled={resetLoading}
-                className="text-[9px] uppercase font-black text-[#f97316] hover:text-white italic transition-colors disabled:opacity-50"
-              >
-                {resetLoading ? 'Enviando...' : '¿Olvidaste tu contraseña?'}
-              </button>
+        {resetMode ? (
+          <form className="grid gap-4" onSubmit={handleResetPassword}>
+            <div className="grid gap-1.5 relative">
+              <Mail className="absolute left-4 top-10 text-slate-500 h-4 w-4" />
+              <Label className="text-[9px] uppercase font-black ml-1 text-slate-500 italic">Email de recuperación</Label>
+              <Input
+                type="email"
+                placeholder="nombre@ejemplo.com"
+                required
+                className="bg-slate-900/50 border-slate-800 focus:border-[#f97316] h-12 rounded-xl font-bold pl-11 text-[11px]"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
             </div>
-            <Input 
-              type="password" 
-              required 
-              className="bg-slate-900/50 border-slate-800 focus:border-[#f97316] h-12 rounded-xl font-bold pl-11 text-[11px]"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
+            {error && (
+              <Alert variant="destructive" className="bg-red-500/10 border-red-500/20 text-red-500 py-2 rounded-xl border">
+                <AlertDescription className="text-[9px] font-black uppercase">{error}</AlertDescription>
+              </Alert>
+            )}
+            <Button type="submit" disabled={resetLoading} className="w-full bg-[#f97316] hover:bg-white hover:text-[#f97316] text-white font-black italic uppercase text-xs h-14 rounded-2xl shadow-lg transition-all">
+              {resetLoading ? 'Enviando...' : 'Enviar enlace'}
+            </Button>
+            <button 
+              type="button" 
+              onClick={() => { setResetMode(false); setError(null); }}
+              className="flex items-center justify-center gap-2 text-[9px] uppercase font-black text-slate-500 hover:text-white transition-colors italic"
+            >
+              <ArrowLeft size={12} /> Volver al login
+            </button>
+          </form>
+        ) : (
+          <form className="grid gap-4" onSubmit={handleLogin}>
+            <div className="grid gap-1.5 relative">
+              <Mail className="absolute left-4 top-10 text-slate-500 h-4 w-4" />
+              <Label className="text-[9px] uppercase font-black ml-1 text-slate-500 italic">Email</Label>
+              <Input
+                type="email"
+                placeholder="nombre@ejemplo.com"
+                required
+                className="bg-slate-900/50 border-slate-800 focus:border-[#f97316] h-12 rounded-xl font-bold pl-11 text-[11px]"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
 
-          {error && (
-            <Alert variant="destructive" className="bg-red-500/10 border-red-500/20 text-red-500 py-2 rounded-xl border">
-              <AlertDescription className="text-[9px] font-black uppercase">{error}</AlertDescription>
-            </Alert>
-          )}
+            <div className="grid gap-1.5 relative">
+              <Building2 className="absolute left-4 top-10 text-slate-500 h-4 w-4" />
+              <Label className="text-[9px] uppercase font-black ml-1 text-slate-500 italic">ID Instituto</Label>
+              <Input
+                type="text"
+                placeholder="INST-XXXXX"
+                className="bg-slate-900/50 border-slate-800 focus:border-[#f97316] h-12 rounded-xl font-bold pl-11 text-[11px]"
+                value={institutoId}
+                onChange={(e) => setInstitutoId(e.target.value)}
+              />
+            </div>
 
-          <Button type="submit" className="w-full bg-[#f97316] hover:bg-white hover:text-[#f97316] text-white font-black italic uppercase text-xs h-14 rounded-2xl shadow-lg mt-2 transition-all">
-            Sincronizar
-          </Button>
-        </form>
+            <div className="grid gap-1.5 relative">
+              <Lock className="absolute left-4 top-10 text-slate-500 h-4 w-4" />
+              <div className="flex items-center justify-between">
+                <Label className="text-[9px] uppercase font-black ml-1 text-slate-500 italic">Password</Label>
+                <button
+                  type="button"
+                  onClick={() => { setResetMode(true); setError(null); }}
+                  className="text-[9px] uppercase font-black text-[#f97316] hover:text-white italic transition-colors"
+                >
+                  ¿Olvidaste tu contraseña?
+                </button>
+              </div>
+              <Input 
+                type="password" 
+                required 
+                className="bg-slate-900/50 border-slate-800 focus:border-[#f97316] h-12 rounded-xl font-bold pl-11 text-[11px]"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+
+            {error && (
+              <Alert variant="destructive" className="bg-red-500/10 border-red-500/20 text-red-500 py-2 rounded-xl border">
+                <AlertDescription className="text-[9px] font-black uppercase">{error}</AlertDescription>
+              </Alert>
+            )}
+
+            <Button type="submit" className="w-full bg-[#f97316] hover:bg-white hover:text-[#f97316] text-white font-black italic uppercase text-xs h-14 rounded-2xl shadow-lg mt-2 transition-all">
+              Sincronizar
+            </Button>
+          </form>
+        )}
       </CardContent>
     </Card>
   );
