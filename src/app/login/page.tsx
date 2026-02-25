@@ -31,7 +31,7 @@ export default function LoginPage() {
       const { barcodes } = await BarcodeScanner.scan();
 
       if (barcodes.length > 0) {
-        const qrData = JSON.parse(barcodes[0].displayValue); const qrId = qrData.deviceId || barcodes[0].displayValue; // El ID que viene en el QR del sistema
+        const raw = barcodes[0].displayValue; const clean = raw.split("\n").join("").split("\r").join("").replace(/\\/g, ""); let qrData: any = {}; try { qrData = JSON.parse(clean); } catch (e) { qrData = { deviceId: clean }; } const qrId = (qrData.deviceId || clean).trim();
         
         // 1. Obtener info del hardware local
         const info = await Device.getInfo();
