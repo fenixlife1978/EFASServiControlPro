@@ -1,5 +1,4 @@
-import { Smartphone } from 'lucide-react';
-import QRCode from 'qrcode.react';
+
 'use client';
 import React, { useState, useEffect } from 'react';
 import { db } from '@/firebase/config';
