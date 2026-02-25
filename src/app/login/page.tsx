@@ -3,9 +3,9 @@ import { Suspense, useState, useEffect } from 'react';
 import { Loader2, QrCode, X, CheckCircle2 } from 'lucide-react';
 import LoginForm from './login-form';
 import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
-import { Device } from '@capacitor/device';
+import { Device } from "@capacitor/device";
 import { db } from '@/firebase/config';
-import { doc, updateDoc, serverTimestamp, onSnapshot, getDoc } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 
 export default function LoginPage() {
   const [isScanning, setIsScanning] = useState(false);
@@ -31,13 +31,25 @@ export default function LoginPage() {
       const { barcodes } = await BarcodeScanner.scan();
 
       if (barcodes.length > 0) {
-        const raw = barcodes[0].displayValue; const clean = raw.split("\n").join("").split("\r").join("").replace(/\\/g, ""); let qrData: any = {}; try { qrData = JSON.parse(clean); } catch (e) { qrData = { deviceId: clean }; } const qrId = (qrData.deviceId || clean).trim();
+        // Limpieza básica del valor del QR
+        const rawValue = barcodes[0].displayValue;
+        let cleanValue = rawValue.replace(/[\n\r]/g, '');
         
+        let qrId = '';
+        try {
+          // Intentamos parsear si es JSON
+          const data = JSON.parse(cleanValue);
+          qrId = (data.deviceId || data.enrollmentId || cleanValue).toString().trim().toUpperCase();
+        } catch (e) {
+          // Si no es JSON, usamos el valor directo
+          qrId = cleanValue.trim().toUpperCase();
+        }
+
         // 1. Obtener info del hardware local
         const info = await Device.getInfo();
         const id = await Device.getId();
 
-        // 2. Referencia al documento en Firebase
+        // 2. Referencia al documento en Firebase (Colección: dispositivos)
         const dispositivoRef = doc(db, "dispositivos", qrId);
 
         // 3. Intercambio: Entregamos hardware al sistema
@@ -56,7 +68,7 @@ export default function LoginPage() {
           }
         });
 
-        // 4. El sistema nos responde: ¿A quién pertenezco?
+        // 4. El sistema nos responde
         const snap = await getDoc(dispositivoRef);
         if (snap.exists()) {
           const data = snap.data();
@@ -65,13 +77,13 @@ export default function LoginPage() {
             location: data.institutoNombre || 'Sede Principal'
           });
           
-          // Guardamos identidad localmente para que el dispositivo "sepa" quién es siempre
           localStorage.setItem('deviceId', qrId);
-          localStorage.setItem('InstitutoId', data.InstitutoId);
+          localStorage.setItem('InstitutoId', data.InstitutoId || '');
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error en vinculación:', error);
+      alert("Error de vinculación: " + error.message);
     } finally {
       stopScan();
     }
@@ -84,7 +96,6 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#0a0c10] p-4">
-      {/* Modal de Éxito de Vinculación */}
       {bindingInfo && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-xl p-6">
           <div className="bg-[#0f1117] border border-orange-500/30 p-8 rounded-[2.5rem] max-w-sm w-full text-center shadow-[0_0_50px_rgba(249,115,22,0.2)]">
