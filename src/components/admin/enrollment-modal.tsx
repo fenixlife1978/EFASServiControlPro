@@ -93,8 +93,8 @@ export function EnrollmentModal({
                 <AlertDescription>
                     <div className="text-sm">
                         <p><strong>Modelo:</strong> "Dispositivo EDUControl"</p>
-                        <p><strong>MAC:</strong> {pendingEnrollment.deviceId}</p>
-                        <p><strong>Aula:</strong> {pendingEnrollment.aulaId}</p>
+                        <p><strong>MAC:</strong> {(pendingEnrollment as any).deviceId}</p>
+                        <p><strong>Aula:</strong> {(pendingEnrollment as any).aulaId}</p>
                     </div>
                 </AlertDescription>
             </Alert>
