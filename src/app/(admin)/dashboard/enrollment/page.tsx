@@ -74,9 +74,9 @@ export default function EnrollmentPage() {
     const qrValue = useMemo(() => {
         if (!enrollmentId || !selectedClassroom || !institutionId) return null;
         return JSON.stringify({
-            enrollmentId: enrollmentId,
-            classroomId: selectedClassroom,
-            institutionId: institutionId,
+            deviceId: enrollmentId,
+            aulaId: selectedClassroom,
+            InstitutoId: institutionId,
         });
     }, [enrollmentId, selectedClassroom, institutionId]);
 
