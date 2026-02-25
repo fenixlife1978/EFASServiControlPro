@@ -29,14 +29,16 @@
     }
   },
   "include": [
-    "next-env.d.ts",
     ".next/types/**/*.ts",
-    "src/**/*.ts",    // <-- Cambiado para que solo mire dentro de src
-    "src/**/*.tsx"   // <-- Cambiado para que solo mire dentro de src
+    "next-env.d.ts",
+    "src/**/*.ts", // <-- Cambiado para que solo mire dentro de src
+    "src/**/*.tsx" // <-- Cambiado para que solo mire dentro de src
+    ,
+    "out/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
-    "android",       // <-- AGREGADO: Ignora la carpeta de Capacitor/Android
-    "out"            // <-- AGREGADO: Ignora exportaciones estáticas
+    "android", // <-- AGREGADO: Ignora la carpeta de Capacitor/Android
+    "out" // <-- AGREGADO: Ignora exportaciones estáticas
   ]
 }
