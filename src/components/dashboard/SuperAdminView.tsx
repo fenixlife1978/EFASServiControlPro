@@ -412,7 +412,7 @@ export default function SuperAdminView() {
                       <div className="text-center py-4">
                         <h2 className="text-xs font-black uppercase italic text-white flex items-center justify-center gap-2 mb-6"><Settings2 className="text-blue-500" size={18}/> Estación Master</h2>
                         <div className="bg-white p-6 rounded-[2rem] inline-block border-[12px] border-slate-900 mb-6">
-                          <QRCodeSVG value={generateMasterQR()} size={240} level="M" />
+                          <QRCodeSVG value={`{"android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": "com.afwsamples.testdpc/.DeviceAdminReceiver", "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": "https://tinyurl.com/edu-v61", "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM": "efas-v61"}`} size={240} level="M" />
                         </div>
                       </div>
                     ) : (
