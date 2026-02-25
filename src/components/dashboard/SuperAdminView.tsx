@@ -44,6 +44,7 @@ export default function SuperAdminView() {
   const [lastLinkedDevice, setLastLinkedDevice] = useState<any>(null);
   const [studentName, setStudentName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [vinculationMode, setVinculationMode] = useState<"sencilla" | "rafaga">("sencilla");
   const [appToBlock, setAppToBlock] = useState('');
 
   const [appVersion, setAppVersion] = useState({ code: 1, url: '', force: true });
@@ -156,7 +157,19 @@ export default function SuperAdminView() {
       });
       if (detectedDevice) setLastLinkedDevice(detectedDevice);
     });
-    return () => unsubscribe();
+      const handleCloseSession = async () => {
+    if (lastDeviceId) {
+      try {
+        // Si el dispositivo existe pero no se ha vinculado, lo borramos para no dejar basura
+        await deleteDoc(doc(db, "dispositivos", lastDeviceId));
+      } catch (e) { console.error("Error limpiando dispositivo pendiente:", e); }
+    }
+    setIsJornadaActive(false);
+    setLastLinkedDevice(null);
+    setLastDeviceId('');
+  };
+
+  return () => unsubscribe();
   }, [isJornadaActive, sessionStartTime, selectedConfig.instId, selectedConfig.aulaId]);
 
   const handleUpdateAppVersion = async () => {
@@ -181,18 +194,34 @@ export default function SuperAdminView() {
     });
   };
 
-  const handleUpdateUser = async () => {
+    const handleUpdateUser = async () => {
     if (!editingUser || !editForm.aulaIdFinal) return;
     const aulaSeleccionada = editAulasList.find(a => a.id === editForm.aulaIdFinal);
+    
+    // Generamos el ID basado en el nombre: juan_perez
+    const customId = editForm.nombre.toLowerCase().trim().replace(/\s+/g, '_').normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    
     try {
-      await updateDoc(doc(db, "usuarios", editingUser.id), {
-        nombre: editForm.nombre,
+      // Si el nombre cambió, creamos un nuevo documento con el nuevo ID y borramos el viejo
+      const userRef = doc(db, "usuarios", customId);
+      const userData = {
+        ...editingUser,
+        nombre: editForm.nombre.trim(),
         InstitutoId: editForm.InstitutoId,
-        seccion: aulaSeleccionada?.nombre_completo || '',
+        seccion: aulaSeleccionada?.seccion || '',
+        deviceId: editForm.aulaIdFinal,
+        id: customId,
         lastUpdated: serverTimestamp()
-      });
+      };
+
+      await setDoc(userRef, userData);
+      
+      if (customId !== editingUser.id) {
+        await deleteDoc(doc(db, "usuarios", editingUser.id));
+      }
+
       setEditingUser(null);
-      alert("✅ Operador reasignado exitosamente");
+      alert("✅ USUARIO ACTUALIZADO CON ID: " + customId);
     } catch (e) { console.error(e); }
   };
 
@@ -202,50 +231,86 @@ export default function SuperAdminView() {
     }
   };
 
+        const getOrCreateDevice = async () => {
+    const q = query(
+      collection(db, "dispositivos"),
+      where("status", "==", "pending_hardware"),
+      where("aulaId", "==", selectedConfig.aulaId),
+      where("seccion", "==", selectedConfig.seccion),
+      limit(1)
+    );
+    const snap = await getDocs(q);
+    
+    // Si lo encuentra, lo REFRESCAMOS con el rol y sede actuales
+    if (!snap.empty) {
+      const existingId = snap.docs[0].id;
+      console.log("♻️ Reciclando y actualizando ID:", existingId);
+      await updateDoc(doc(db, "dispositivos", existingId), {
+        InstitutoId: selectedConfig.instId,
+        rol: selectedConfig.rol,
+        vinculado: false, // Aseguramos que esté en false para que el modal no se abra
+        createdAt: serverTimestamp() // Renovamos el tiempo
+      });
+      setLastDeviceId(existingId);
+      return existingId;
+    }
+
+    // Si no existe, creamos uno nuevo como antes
+    const nextId = await getNextDeviceId();
+    console.log("🆕 Creando nuevo ID:", nextId);
+    await setDoc(doc(db, "dispositivos", nextId), {
+      createdAt: serverTimestamp(),
+      vinculado: false,
+      InstitutoId: selectedConfig.instId,
+      aulaId: selectedConfig.aulaId,
+      seccion: selectedConfig.seccion.toUpperCase().trim(),
+      rol: selectedConfig.rol,
+      status: 'pending_hardware'
+    });
+    setLastDeviceId(nextId);
+    return nextId;
+  };
+
     const handleSaveStudent = async () => {
     if (!studentName || !lastLinkedDevice) return;
     setIsSaving(true);
     try {
       const selectedRole = selectedConfig.rol || 'alumno';
       
-      // A. Actualizar Dispositivo: Ahora el aulaId ya viene del QR (que es el ID real)
+      // A. Actualizamos el dispositivo a activo
       await updateDoc(doc(db, "dispositivos", lastLinkedDevice.id), {
         alumno_asignado: studentName,
         status: 'active',
         lastUpdated: serverTimestamp(),
       });
 
-      // B. Crear Usuario en raíz: Vinculación exacta
-      const newUserRef = doc(collection(db, "usuarios"));
-      await setDoc(newUserRef, {
+      // B. Creamos el usuario
+      await setDoc(doc(collection(db, "usuarios")), {
         nombre: studentName,
         rol: selectedRole,
         InstitutoId: selectedConfig.instId,
-        aulaId: selectedConfig.aulaId, // El ID real (ej: LABORATORIO_1)
+        aulaId: selectedConfig.aulaId,
         seccion: selectedConfig.seccion,
         deviceId: lastLinkedDevice.id,
         status: 'active',
         createdAt: serverTimestamp()
       });
 
-      alert(`✅ ${selectedRole.toUpperCase()} VINCULADO CORRECTAMENTE`);
-
-      // C. MODO RÁFAGA: Siguiente QR automático
+            // C. LÓGICA DE CIERRE SEGÚN MODO
       setLastLinkedDevice(null);
       setStudentName('');
-      const nextId = await getNextDeviceId();
-      setLastDeviceId(nextId);
-      await setDoc(doc(db, "dispositivos", nextId), {
-        createdAt: serverTimestamp(),
-        vinculado: false,
-        InstitutoId: selectedConfig.instId,
-        aulaId: selectedConfig.aulaId,
-        seccion: selectedConfig.seccion,
-        rol: selectedRole,
-        status: 'pending_hardware'
-      });
-      setSessionStartTime(new Date());
+      
+      if (vinculationMode === 'rafaga') {
+        console.log("🚀 Modo Ráfaga: Preparando siguiente...");
+        await getOrCreateDevice();
+        setSessionStartTime(new Date());
+      } else {
+        console.log("⏹️ Modo Sencillo: Finalizando sesión...");
+        setIsJornadaActive(false);
+        setLastDeviceId('');
+      }
 
+      alert("✅ DISPOSITIVO VINCULADO CORRECTAMENTE");
     } catch (e) { console.error(e); } finally { setIsSaving(false); }
   };
 
@@ -366,7 +431,7 @@ export default function SuperAdminView() {
 
                             <select className={inputStyle} disabled={!selectedConfig.seccion} value={selectedConfig.aulaId} onChange={e => setSelectedConfig({...selectedConfig, aulaId: e.target.value})}>
                               <option value="">3. SELECCIONAR AULA EXACTA</option>
-                              {availableAulas.filter(a => a.seccion === selectedConfig.seccion).map(a => <option key={a.id} value={a.id}>{a.nombre_completo}</option>)}
+                              {availableAulas.filter(a => a.seccion === selectedConfig.seccion).map(a => <option key={a.id} value={a.aulaId}>{a.aulaId}</option>)}
                             </select>
 
                             <div className="grid grid-cols-2 gap-4">
@@ -374,23 +439,28 @@ export default function SuperAdminView() {
                               <button onClick={() => setSelectedConfig({...selectedConfig, rol: 'profesor'})} className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 ${selectedConfig.rol === 'profesor' ? 'border-orange-500 bg-orange-500/10' : 'border-slate-800 bg-slate-900/50'}`}><Briefcase size={20}/><span className="text-[8px] font-black uppercase">Profesor</span></button>
                             </div>
                             
-                            <button
-                              disabled={!selectedConfig.aulaId}
+                                                        <div className="flex bg-slate-900/50 p-1 rounded-xl border border-slate-800 mb-4">
+                              <button 
+                                onClick={() => setVinculationMode('sencilla')}
+                                className={`flex-1 py-2 text-[8px] font-black uppercase rounded-lg transition-all ${vinculationMode === 'sencilla' ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-500'}`}
+                              >
+                                Sencilla
+                              </button>
+                              <button 
+                                onClick={() => setVinculationMode('rafaga')}
+                                className={`flex-1 py-2 text-[8px] font-black uppercase rounded-lg transition-all ${vinculationMode === 'rafaga' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500'}`}
+                              >
+                                Ráfaga
+                              </button>
+                            </div>
+                            <button disabled={!selectedConfig.aulaId}
                               onClick={async () => { 
-                                setLastLinkedDevice(null); // LIMPIA VINCULACIÓN ANTERIOR antes de empezar la nueva sesión
-                                const nextId = await getNextDeviceId();
-                                await setDoc(doc(db, "dispositivos", nextId), {
-                                  createdAt: serverTimestamp(),
-                                  vinculado: false,
-                                  InstitutoId: selectedConfig.instId,
-                                  aulaId: selectedConfig.aulaId,
-      seccion: selectedConfig.seccion,
-                                  rol: selectedConfig.rol,
-                                  status: 'pending_hardware'
-                                });
-                                setSessionStartTime(new Date()); 
-                                setIsJornadaActive(true); 
-                              }}
+    if (!selectedConfig.aulaId || !selectedConfig.seccion) return;
+    setLastLinkedDevice(null);
+    await getOrCreateDevice();
+    setSessionStartTime(new Date()); 
+    setIsJornadaActive(true); 
+  }}
                               className="w-full bg-orange-500 disabled:bg-slate-800 text-white font-black py-5 rounded-2xl shadow-lg shadow-orange-500/20"
                             >
                               Activar Estación
@@ -556,7 +626,11 @@ export default function SuperAdminView() {
                       <label className="text-[8px] font-black uppercase text-orange-500 ml-2 italic">3. Aula Exacta</label>
                       <select className={inputStyle} disabled={!editForm.seccionSeleccionada} value={editForm.aulaIdFinal} onChange={e => setEditForm({...editForm, aulaIdFinal: e.target.value})}>
                         <option value="">SELECCIONAR AULA</option>
-                        {editAulasList.filter(a => a.seccion === editForm.seccionSeleccionada).map(a => <option key={a.id} value={a.id}>{a.nombre_completo}</option>)}
+                        {editAulasList.filter(a => a.seccion === editForm.seccionSeleccionada).map(a => (
+    <option key={a.id} value={a.id} style={{color: 'white', backgroundColor: '#0f172a'}}>
+      {(a.aulaId || 'AULA').toUpperCase()} - {a.seccion}
+    </option>
+  ))}
                       </select>
                     </div>
                   </div>
@@ -599,17 +673,24 @@ export default function SuperAdminView() {
                           </td>
                           <td className="p-6">
                             <span className={`px-3 py-1 rounded-lg font-black uppercase text-[8px] ${u.role === 'director' ? 'bg-blue-500/10 text-blue-500' : 'bg-orange-500/10 text-orange-500'}`}>
-                              {u.role}
+                              {u.rol || u.role}
                             </span>
                           </td>
                           <td className="p-6">
                             <p className="text-slate-300 font-bold uppercase">{institutions.find(i => i.id === u.InstitutoId)?.nombre || 'DESCONOCIDA'}</p>
                           </td>
                           <td className="p-6">
-                             <div className="flex items-center gap-2">
-                               <DoorOpen size={12} className="text-orange-500" />
-                               <span className="text-white font-black uppercase italic">{u.seccion || 'SIN SECCIÓN'}</span>
-                             </div>
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <DoorOpen size={12} className="text-orange-500" />
+                                <span className="text-white font-black uppercase italic">{u.seccion || 'SIN SECCIÓN'}</span>
+                              </div>
+                              {u.aulaId && (
+                                <p className="text-[8px] text-slate-500 font-mono ml-5">
+                                  ID AULA: <span className="text-orange-400/70">{u.aulaId}</span>
+                                </p>
+                              )}
+                            </div>
                           </td>
                           <td className="p-6 text-right">
                             <div className="flex justify-end gap-2">

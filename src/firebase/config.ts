@@ -1,9 +1,8 @@
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
-import { getStorage } from "firebase/storage"; // <--- Agregado para arreglar el error
+import { getStorage } from "firebase/storage";
 
-// 1. Invocamos las llaves desde tus variables de entorno (Protegidas)
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -13,16 +12,21 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
 };
 
-// 2. Función para detectar si el usuario eligió Local o Nube
+// Inicialización segura: si ya existe una app, úsala; si no, inicialízala.
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+
+const auth = getAuth(app);
+const db = getFirestore(app);
+const storage = getStorage(app);
+
+// Tus funciones de lógica local se mantienen igual
 export const getDbMode = () => {
   if (typeof window !== "undefined") {
-    // Si no hay nada guardado, por defecto usamos la nube (Firebase)
     return localStorage.getItem("edu_db_mode") || "cloud"; 
   }
   return "cloud";
 };
 
-// 3. Función para obtener la dirección del Servidor de la Escuela
 export const getLocalServerUrl = () => {
   if (typeof window !== "undefined") {
     return localStorage.getItem("edu_local_url") || "http://localhost:5000";
@@ -30,10 +34,4 @@ export const getLocalServerUrl = () => {
   return "http://localhost:5000";
 };
 
-// Inicializamos Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const storage = getStorage(app); // <--- Agregado para arreglar el error
-
-export { db, auth, storage }; // <--- Exportamos storage también
+export { db, auth, storage, app };
