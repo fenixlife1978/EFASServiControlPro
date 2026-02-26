@@ -3,7 +3,8 @@ import { Suspense, useState, useEffect } from 'react';
 import { Loader2, QrCode, X, CheckCircle2 } from 'lucide-react';
 import LoginForm from './login-form';
 import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
-import { Device } from "@capacitor/device";
+import { Device } from '@capacitor/device';
+import { Preferences } from '@capacitor/preferences';
 import { db } from '@/firebase/config';
 import { doc, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 
@@ -16,6 +17,11 @@ export default function LoginPage() {
     window.addEventListener('start-qr-scan', handleStartScan);
     return () => window.removeEventListener('start-qr-scan', handleStartScan);
   }, []);
+
+  const stopScan = () => {
+    setIsScanning(false);
+    document.body.classList.remove('scanner-active');
+  };
 
   const startScan = async () => {
     try {
@@ -31,28 +37,27 @@ export default function LoginPage() {
       const { barcodes } = await BarcodeScanner.scan();
 
       if (barcodes.length > 0) {
-        // Limpieza básica del valor del QR
         const rawValue = barcodes[0].displayValue;
-        let cleanValue = rawValue.replace(/[\n\r]/g, '');
+        // Limpieza de caracteres de escape y saltos de línea
+        let cleanValue = rawValue.replace(/[\n\r]/g, "").replace(/\\/g, "");
         
-        let qrId = '';
+        let qrId = "";
         try {
-          // Intentamos parsear si es JSON
           const data = JSON.parse(cleanValue);
-          qrId = (data.deviceId || data.enrollmentId || cleanValue).toString().trim().toUpperCase();
+          qrId = String(data.deviceId || data.enrollmentId || cleanValue);
         } catch (e) {
-          // Si no es JSON, usamos el valor directo
-          qrId = cleanValue.trim().toUpperCase();
+          qrId = cleanValue;
         }
+        
+        // Limpieza final del ID (Mayúsculas y solo caracteres válidos)
+        qrId = qrId.trim().toUpperCase().replace(/[^A-Z0-9-]/g, "");
 
-        // 1. Obtener info del hardware local
         const info = await Device.getInfo();
         const id = await Device.getId();
 
-        // 2. Referencia al documento en Firebase (Colección: dispositivos)
         const dispositivoRef = doc(db, "dispositivos", qrId);
 
-        // 3. Intercambio: Entregamos hardware al sistema
+        // Actualizamos Firestore
         await updateDoc(dispositivoRef, {
           vinculado: true,
           fechaVinculacion: serverTimestamp(),
@@ -68,30 +73,32 @@ export default function LoginPage() {
           }
         });
 
-        // 4. El sistema nos responde
+        // Obtenemos los datos para confirmar vinculación
         const snap = await getDoc(dispositivoRef);
         if (snap.exists()) {
           const data = snap.data();
+          const instId = data.InstitutoId || "";
+          
           setBindingInfo({
             name: data.asignadoA || 'Usuario no asignado',
             location: data.institutoNombre || 'Sede Principal'
           });
           
+          // GUARDADO CRUCIAL: Usamos Preferences para que Java (MainActivity) pueda leerlo
+          await Preferences.set({ key: 'deviceId', value: qrId });
+          await Preferences.set({ key: 'InstitutoId', value: instId });
+          
+          // También guardamos en localStorage por compatibilidad con la web
           localStorage.setItem('deviceId', qrId);
-          localStorage.setItem('InstitutoId', data.InstitutoId || '');
+          localStorage.setItem('InstitutoId', instId);
         }
       }
     } catch (error: any) {
-      console.error('Error en vinculación:', error);
+      console.error('Error:', error);
       alert("Error de vinculación: " + error.message);
     } finally {
       stopScan();
     }
-  };
-
-  const stopScan = () => {
-    setIsScanning(false);
-    document.body.classList.remove('scanner-active');
   };
 
   return (
@@ -105,7 +112,7 @@ export default function LoginPage() {
               </div>
             </div>
             <h3 className="text-xl font-black text-white uppercase italic mb-2">Hardware Vinculado</h3>
-            <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-6">Identidad Confirmada</p>
+            <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-6 italic">EDUControlPro</p>
             
             <div className="bg-slate-900/50 rounded-2xl p-4 mb-8 border border-slate-800">
               <div className="mb-3 text-left">

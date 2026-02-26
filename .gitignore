@@ -7,5 +7,4 @@ node_modules/
 .next/
 android/app/build/
 android/.gradle/
-public/educontrol-V6.1.apk
 out/
