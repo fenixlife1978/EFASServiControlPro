@@ -37,8 +37,8 @@ export default function SecurityPage() {
           <SecurityRules institutionId={institutoId} />
         ) : (
           <ProfesorView 
-            professorId={user?.uid || ''} 
-            institutoId={institutoId} 
+              
+              
           />
         )}
       </div>
