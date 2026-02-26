@@ -8,70 +8,88 @@ import {
 } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { 
-  Users, Tablet, Globe, ShieldAlert, Lock, Unlock, 
-  History, User, RefreshCw, Zap, AlertTriangle, Search
+  History, User, RefreshCw, AlertTriangle, Search, Lock, Unlock 
 } from 'lucide-react';
 import { WebHistoryModal } from '@/components/admin/monitoring/WebHistoryModal';
 import { AlertFeed } from '@/components/dashboard/AlertFeed';
 
+// Definimos la interfaz para evitar errores de TypeScript
+interface Dispositivo {
+  id: string;
+  alumno_asignado?: string;
+  aulaId?: string;
+  seccion?: string;
+  status?: string;
+  current_url?: string;
+  navegacion_bloqueada?: boolean;
+  InstitutoId?: string;
+  rol?: string;
+}
+
 export default function ProfesorView() {
-  const [alumnos, setAlumnos] = useState<any[]>([]);
+  const [alumnos, setAlumnos] = useState<Dispositivo[]>([]);
   const [nombreSede, setNombreSede] = useState('Cargando...');
   const [datosProfesor, setDatosProfesor] = useState({ nombre: '...', rol: '...', aulaId: '', seccion: '' });
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [historyModal, setHistoryModal] = useState({ isOpen: false, tabletId: '', alumnoNombre: '' });
+  const [workingInstitutoId, setWorkingInstitutoId] = useState<string>('');
 
-  const getInstitutoId = () => {
+  useEffect(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('InstitutoId') || '';
+      const id = localStorage.getItem('InstitutoId');
+      if (id) setWorkingInstitutoId(id);
     }
-    return '';
-  };
-
-  const workingInstitutoId = getInstitutoId();
+  }, []);
 
   useEffect(() => {
     if (!workingInstitutoId) return;
 
     const unsubAuth = onAuthStateChanged(auth, async (user) => {
       if (user?.email) {
-        // 1. Obtener datos del profesor incluyendo SECCIÓN
         const qProf = query(collection(db, "usuarios"), where("email", "==", user.email.toLowerCase()));
-        onSnapshot(qProf, (snap) => {
+        
+        const unsubProf = onSnapshot(qProf, (snap) => {
           if (!snap.empty) {
             const data = snap.docs[0].data();
-            const aulaAsignada = data.aulaId || '';
-            const seccionAsignada = data.seccion || '';
+            // Limpieza de strings para comparación flexible
+            const seccionLimpia = (data.seccion || '').toString().replace(/["']/g, '').replace('SECCION ', '').trim();
             
             setDatosProfesor({
               nombre: data.nombre || 'Docente',
               rol: data.role || 'Profesor',
-              aulaId: aulaAsignada,
-              seccion: seccionAsignada
+              aulaId: data.aulaId || '',
+              seccion: seccionLimpia
             });
 
-            // 2. Monitoreo de Alumnos filtrando por Aula Y Sección
             const qAlumnos = query(
-              collection(db, "sesiones_monitoreo"),
+              collection(db, "dispositivos"),
               where("InstitutoId", "==", workingInstitutoId),
-              where("aulaId", "==", aulaAsignada),
-              where("seccion", "==", seccionAsignada),
-              where("role", "==", "alumno")
+              where("aulaId", "==", data.aulaId),
+              where("rol", "==", "alumno")
             );
 
             const unsubAlumnos = onSnapshot(qAlumnos, (alumnoSnap) => {
-              setAlumnos(alumnoSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+              const docs = alumnoSnap.docs.map(d => ({ id: d.id, ...d.data() } as Dispositivo))
+                .filter(d => {
+                   const sDB = (d.seccion || '').toString().replace(/["']/g, '').replace('SECCION ', '').trim();
+                   return sDB === seccionLimpia;
+                });
+              
+              setAlumnos(docs);
               setLoading(false);
             }, (err) => {
-              console.error("Error en query alumnos:", err);
+              console.error("Error en query dispositivos:", err);
               setLoading(false);
             });
+
+            return () => unsubAlumnos();
           }
         });
 
         const instRef = doc(db, "institutions", workingInstitutoId);
         getDoc(instRef).then(s => s.exists() && setNombreSede(s.data().nombre));
+        return () => unsubProf();
       }
     });
 
@@ -81,21 +99,19 @@ export default function ProfesorView() {
   const handleToggleBlock = async (tabletId: string, isBlocked: boolean) => {
     if (!tabletId) return;
     try {
-      const devRef = doc(db, "dispositivos", tabletId);
-      await updateDoc(devRef, {
+      await updateDoc(doc(db, "dispositivos", tabletId), {
         navegacion_bloqueada: !isBlocked,
-        updatedAt: serverTimestamp()
+        lastUpdated: serverTimestamp()
       });
     } catch (e) { console.error(e); }
   };
 
   const alumnosFiltrados = alumnos.filter(al => 
-    al.usuario?.toLowerCase().includes(searchTerm.toLowerCase())
+    al.alumno_asignado?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 min-h-[60vh]">
-      {/* HEADER */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 border-b border-slate-800 pb-8">
         <div>
           <h2 className="text-[10px] font-black text-blue-500 uppercase tracking-[0.3em] mb-2 italic">Docente en Línea</h2>
@@ -124,7 +140,6 @@ export default function ProfesorView() {
         </div>
       </div>
 
-      {/* GRID DE ALUMNOS */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         {loading ? (
           <div className="col-span-full py-20 text-center"><RefreshCw className="animate-spin text-blue-500 mx-auto" /></div>
@@ -133,22 +148,20 @@ export default function ProfesorView() {
             <div key={al.id} className="bg-[#0f1117] border border-slate-800 rounded-[2.5rem] p-6 shadow-2xl hover:border-blue-500/50 transition-all">
               <div className="flex justify-between items-center mb-6">
                 <div className="flex items-center gap-3">
-                  <div className={`w-2 h-2 rounded-full ${al.online ? 'bg-green-500 animate-pulse' : 'bg-slate-700'}`} />
-                  <h3 className="text-[11px] font-black text-white uppercase italic">{al.usuario}</h3>
+                  <div className={`w-2 h-2 rounded-full ${al.status === 'active' ? 'bg-green-500 animate-pulse' : 'bg-slate-700'}`} />
+                  <h3 className="text-[11px] font-black text-white uppercase italic">{al.alumno_asignado}</h3>
                 </div>
               </div>
-
-              <div className="bg-black/40 p-3 rounded-2xl border border-slate-800/50 mb-6">
-                <p className="text-[10px] text-blue-400 font-bold truncate lowercase text-center">{al.url_actual || 'Sin actividad'}</p>
+              <div className="bg-black/40 p-3 rounded-2xl border border-slate-800/50 mb-6 text-center">
+                <p className="text-[10px] text-blue-400 font-bold truncate lowercase">{al.current_url || 'Sin actividad'}</p>
               </div>
-
               <div className="grid grid-cols-2 gap-3">
-                <button onClick={() => setHistoryModal({ isOpen: true, tabletId: al.tabletId, alumnoNombre: al.usuario })} className="bg-slate-800 p-3 rounded-xl flex items-center justify-center gap-2">
+                <button onClick={() => setHistoryModal({ isOpen: true, tabletId: al.id, alumnoNombre: al.alumno_asignado || 'Estudiante' })} className="bg-slate-800 p-3 rounded-xl flex items-center justify-center gap-2">
                   <History size={14} className="text-blue-400" />
-                  <span className="text-[9px] font-black text-white uppercase italic">Log</span>
+                  <span className="text-[9px] font-black text-white uppercase italic tracking-tighter">Historial</span>
                 </button>
                 <button 
-                  onClick={() => handleToggleBlock(al.tabletId, al.navegacion_bloqueada)}
+                  onClick={() => handleToggleBlock(al.id, al.navegacion_bloqueada || false)}
                   className={`p-3 rounded-xl flex items-center justify-center gap-2 ${al.navegacion_bloqueada ? 'bg-red-500 text-white' : 'bg-blue-600/10 text-blue-500 border border-blue-500/20'}`}
                 >
                   {al.navegacion_bloqueada ? <Lock size={14} /> : <Unlock size={14} />}
@@ -160,8 +173,8 @@ export default function ProfesorView() {
         ) : (
           <div className="col-span-full py-32 bg-slate-900/20 border-2 border-dashed border-slate-800 rounded-[3rem] text-center">
              <AlertTriangle size={32} className="text-slate-700 mx-auto mb-4" />
-             <p className="text-[10px] font-black text-slate-500 uppercase italic tracking-widest">
-                No hay estudiantes en {datosProfesor.aulaId} - SECCIÓN {datosProfesor.seccion}
+             <p className="text-[10px] font-black text-slate-500 uppercase italic tracking-widest px-4">
+                No hay tablets vinculadas a {datosProfesor.aulaId} - {datosProfesor.seccion}
              </p>
           </div>
         )}
