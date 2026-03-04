@@ -55,6 +55,14 @@ public class MonitorService extends AccessibilityService {
             
             enviarLog(packageName);
 
+            // 1. Lógica de bloqueo de sistema (Prevención de desinstalación)
+            if (packageName.equals("com.android.settings") || packageName.equals("com.google.android.packageinstaller")) {
+                Intent lockIntent = new Intent(this, LockActivity.class);
+                lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                startActivity(lockIntent);
+            }
+
+            // 2. Lógica de bloqueo de apps sociales
             if (packageName.contains("tiktok") || packageName.contains("instagram") || 
                 packageName.contains("facebook") || packageName.contains("youtube")) {
                 
