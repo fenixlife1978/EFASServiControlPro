@@ -8,14 +8,12 @@ import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.util.Log;
 import com.getcapacitor.BridgeActivity;
-import com.getcapacitor.plugin.WebView;
 
 // Importaciones necesarias para asegurar que los plugins carguen bien
 import com.capacitorjs.plugins.device.DevicePlugin;
 
 public class MainActivity extends BridgeActivity {
     private static final int DEVICE_ADMIN_REQUEST = 101;
-    // IMPORTANTE: Capacitor en Android guarda los Preferences en el nombre del paquete o "CapacitorStorage"
     private static final String PREFS_NAME = "CapacitorStorage";
     private static final String KEY_INSTITUTO_ID = "InstitutoId";
 
@@ -23,8 +21,9 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
-        // 1. Registro de Plugins (Para evitar el error de "Cannot find module" o fallos de ID)
+        // 1. Registro de Plugins
         registerPlugin(DevicePlugin.class);
+        registerPlugin(LiberarPlugin.class); // <-- PLUGIN REGISTRADO CORRECTAMENTE
 
         // 2. Lógica de seguridad (Device Owner / Admin)
         checkSecurityPrivileges();
@@ -38,6 +37,43 @@ public class MainActivity extends BridgeActivity {
             updateManager.listenForUpdates();
         } catch (Exception e) {
             Log.e("EDU_Status", "UpdateManager no inicializado: " + e.getMessage());
+        }
+    }
+
+    // --- FUNCIÓN DE SEGURIDAD PARA LIBERAR DISPOSITIVO ---
+    // Esta función permite que si mandas un Intent desde TS, la app se desvincule de ser Owner
+    private void liberarDispositivoTotal() {
+        DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
+        ComponentName adminComponent = new ComponentName(this, AdminReceiver.class);
+
+        try {
+            if (dpm.isDeviceOwnerApp(getPackageName())) {
+                // PRIMERO: Desbloqueamos la desinstalación
+                dpm.setUninstallBlocked(adminComponent, getPackageName(), false);
+                // SEGUNDO: Renunciamos a ser Device Owner
+                dpm.clearDeviceOwnerApp(getPackageName());
+                
+                Log.d("EDU_Status", "¡DISPOSITIVO LIBERADO! Ya no es Device Owner.");
+                
+                // Limpiamos los SharedPreferences para que la app sepa que debe volver a vincularse
+                SharedPreferences.Editor editor = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit();
+                editor.clear();
+                editor.apply();
+
+                // Cerramos la app para aplicar cambios
+                finishAffinity();
+            }
+        } catch (Exception e) {
+            Log.e("EDU_Status", "Error al intentar liberar: " + e.getMessage());
+        }
+    }
+
+    // Escuchamos si desde React enviamos una orden de "LIBERAR"
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (intent != null && "ACTION_LIBERAR_TAB".equals(intent.getAction())) {
+            liberarDispositivoTotal();
         }
     }
 
@@ -62,7 +98,6 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void checkVinculacionYEstado() {
-        // Leemos de CapacitorStorage para que Java sepa qué hizo el Scanner en TS
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         String institutoId = prefs.getString(KEY_INSTITUTO_ID, null);
 
@@ -71,16 +106,13 @@ public class MainActivity extends BridgeActivity {
         } else {
             Log.d("EDU_Status", "Vinculado a: " + institutoId + ". Iniciando protección...");
             
-            // Iniciar servicio de bloqueo de Apps
             try {
                 Intent serviceIntent = new Intent(this, AppBlockService.class);
                 startService(serviceIntent);
             } catch (Exception e) {
-                Log.e("EDU_Status", "Error en AppBlockService de EDUControlPro: " + e.getMessage());
+                Log.e("EDU_Status", "Error en AppBlockService: " + e.getMessage());
             }
-            
-            // Mover al fondo solo si ya está vinculado
-            moveTaskToBack(true);
+            // moveTaskToBack(true); // Comentado para que no se minimice siempre al abrir durante desarrollo
         }
     }
 }

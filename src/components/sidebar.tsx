@@ -6,25 +6,27 @@ import { auth, db } from '@/firebase/config';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { NAV_ITEMS } from '@/config/navigation';
+import { ServerConfig } from '@/components/ServerConfig';
 
 export default function Sidebar({ userRole: initialRole }: { userRole: string }) {
   const pathname = usePathname();
   const [displayRole, setDisplayRole] = useState('CARGANDO...');
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
+  
   useEffect(() => {
-    // Escuchamos el estado de autenticación para asegurar que tenemos el email
+    
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user?.email) {
         setUserEmail(user.email);
         
-        // 1. Verificamos si es el Super Admin global
+
         if (user.email === 'vallecondo@gmail.com') {
           setDisplayRole("SUPER ADMIN");
           return;
         }
 
-        // 2. Buscamos directamente en la colección "usuarios" (como en tu imagen)
+
         try {
           const q = query(
             collection(db, "usuarios"), 
@@ -34,8 +36,8 @@ export default function Sidebar({ userRole: initialRole }: { userRole: string })
           const querySnapshot = await getDocs(q);
           
           if (!querySnapshot.empty) {
-            const userData = querySnapshot.docs[0].data();
-            // Validamos si el campo role es exactamente "director"
+           
+           const userData = querySnapshot.docs[0].data();
             if (userData.role === 'director') {
               setDisplayRole("DIRECTOR");
             } else {
@@ -54,7 +56,7 @@ export default function Sidebar({ userRole: initialRole }: { userRole: string })
     return () => unsubscribe();
   }, []);
 
-  // Filtramos los items basándonos en el rol inicial o si es super admin
+
   const isSuperAdmin = userEmail === 'vallecondo@gmail.com';
   const filteredItems = NAV_ITEMS.filter(item => {
     if (isSuperAdmin) return true;
@@ -89,7 +91,12 @@ export default function Sidebar({ userRole: initialRole }: { userRole: string })
         })}
       </nav>
 
-      <div className="mt-auto p-4 bg-slate-800/50 rounded-[2rem] border border-slate-700">
+      {/* Sección del Panel de Configuración integrada */}
+      <div className="mt-4">
+        <ServerConfig />
+      </div>
+
+      <div className="mt-4 p-4 bg-slate-800/50 rounded-[2rem] border border-slate-700">
         <p className="text-[10px] font-black uppercase text-orange-500 mb-1 tracking-[0.2em]">
           {displayRole}
         </p>

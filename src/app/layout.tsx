@@ -1,3 +1,4 @@
+// app/layout.tsx
 import "./globals.css";
 import LockListener from "@/components/security/LockListener";
 
@@ -15,7 +16,6 @@ export default function RootLayout({
     <html lang="es">
       <body className="antialiased">
         {children}
-        {/* El guardián silencioso de la tablet */}
         <LockListener />
       </body>
     </html>

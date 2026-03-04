@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '@/firebase/config';
 import { 
   collection, onSnapshot, query, where, addDoc, serverTimestamp, 
-  orderBy, limit, updateDoc, doc, arrayUnion, arrayRemove, deleteDoc, setDoc, getDocs 
+  orderBy, limit, updateDoc, doc, arrayUnion, arrayRemove, deleteDoc, setDoc, getDocs, getDoc 
 } from 'firebase/firestore';
 import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
 import { QRCodeSVG } from 'qrcode.react';
@@ -134,14 +134,20 @@ export default function SuperAdminView() {
     });
   }, [targetAulaId]);
 
-  // NUEVA LÓGICA DE LISTENER DE VINCULACIÓN SEGÚN INSTRUCCIONES:
+  // Lógica de listener de configuración (Remoto)
   useEffect(() => {
-    if (
-      !isJornadaActive ||
-      !sessionStartTime ||
-      !selectedConfig.instId ||
-      !selectedConfig.aulaId
-    ) return;
+    if (!isJornadaActive || !sessionStartTime || !selectedConfig.instId || !selectedConfig.aulaId) return;
+
+    return onSnapshot(doc(db, "config", "app_settings"), (snapshot) => {
+      if (snapshot.exists()) {
+        console.log("Configuración remota actualizada:", snapshot.data());
+      }
+    });
+  }, [isJornadaActive, sessionStartTime, selectedConfig.instId, selectedConfig.aulaId]);
+
+  // Lógica de detección de dispositivos vinculados
+  useEffect(() => {
+    if (!selectedConfig.instId) return;
     const dispositivosRef = collection(db, "dispositivos");
     const filtros = [
       where("InstitutoId", "==", selectedConfig.instId),
@@ -285,17 +291,31 @@ export default function SuperAdminView() {
         lastUpdated: serverTimestamp(),
       });
 
-      // B. Creamos el usuario
-      await setDoc(doc(collection(db, "usuarios")), {
-        nombre: studentName,
-        rol: selectedRole,
-        InstitutoId: selectedConfig.instId,
-        aulaId: selectedConfig.aulaId,
-        seccion: selectedConfig.seccion,
-        deviceId: lastLinkedDevice.id,
-        status: 'active',
-        createdAt: serverTimestamp()
-      });
+// B. Creamos el usuario con ID personalizado + sufijo único
+// 1. Limpiamos el nombre
+const baseName = studentName
+  .toLowerCase()
+  .trim()
+  .replace(/\s+/g, '_')
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "");
+
+// 2. Extraemos los últimos 4 caracteres del ID del dispositivo para asegurar unicidad
+const suffix = lastLinkedDevice.id.slice(-4);
+const customId = `${baseName}_${suffix}`;
+
+// 3. Guardamos el documento
+await setDoc(doc(db, "usuarios", customId), {
+  nombre: studentName.trim(),
+  rol: selectedRole,
+  InstitutoId: selectedConfig.instId,
+  aulaId: selectedConfig.aulaId,
+  seccion: selectedConfig.seccion,
+  deviceId: lastLinkedDevice.id,
+  id: customId, 
+  status: 'active',
+  createdAt: serverTimestamp()
+});
 
             // C. LÓGICA DE CIERRE SEGÚN MODO
       setLastLinkedDevice(null);
