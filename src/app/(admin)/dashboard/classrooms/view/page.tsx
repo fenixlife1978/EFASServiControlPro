@@ -7,7 +7,8 @@ import { useInstitution } from '../../institution-context';
 import EnrollmentQR from '@/components/admin/EnrollmentQR';
 import AssignStudentModal from '@/components/admin/AssignStudentModal';
 import DirectMessage from '@/components/admin/messaging/DirectMessage';
-import { Tablet, ShieldCheck, ShieldAlert, Wifi, QrCode, X, UserRoundPen, MessageSquare } from 'lucide-react';
+import { Tablet, ShieldCheck, ShieldAlert, Wifi, QrCode, X, UserRoundPen, MessageSquare, ChevronLeft } from 'lucide-react';
+import Link from 'next/link';
 
 function MonitorContent() {
   const searchParams = useSearchParams();
@@ -42,13 +43,21 @@ function MonitorContent() {
   return (
     <div className="p-8 bg-slate-50 min-h-screen">
       <header className="flex justify-between items-start mb-12">
-        <div>
-          <h1 className="text-5xl font-black italic uppercase text-slate-900 tracking-tighter">
-            Monitor <span className="text-orange-500">En Vivo</span>
-          </h1>
-          <p className="text-slate-400 font-bold uppercase text-[10px] tracking-[0.3em] mt-3 italic">
-            EDU ServControlPro • Aula: {aulaId}
-          </p>
+        <div className="flex gap-6 items-start">
+          <Link 
+            href="/dashboard/classrooms" 
+            className="mt-1 bg-white h-12 w-12 flex items-center justify-center rounded-2xl shadow-sm hover:shadow-orange-200 hover:scale-110 transition-all group border border-slate-100"
+          >
+            <ChevronLeft className="text-slate-400 group-hover:text-orange-500" />
+          </Link>
+          <div>
+            <h1 className="text-5xl font-black italic uppercase text-slate-900 tracking-tighter">
+              Monitor <span className="text-orange-500">En Vivo</span>
+            </h1>
+            <p className="text-slate-400 font-bold uppercase text-[10px] tracking-[0.3em] mt-3 italic">
+              EDU ServControlPro • Aula: {aulaId}
+            </p>
+          </div>
         </div>
         <button onClick={() => setShowQR(true)} className="bg-slate-900 hover:bg-orange-500 text-white px-8 py-4 rounded-2xl font-black uppercase italic text-xs transition-all shadow-lg flex items-center gap-3">
           <QrCode className="w-4 h-4" /> Vincular Tablet
