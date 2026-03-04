@@ -109,7 +109,6 @@ export default function InstitutionView() {
     return () => { unsubAulas(); unsubTablets(); unsubAllAlumnos(); };
   }, [institutionId]);
 
-  // Resto de handles (SaveAula, SendMessage, DeleteAula, etc) se mantienen iguales...
   const handleUpdateInstitution = async () => {
     if (!institutionId) return;
     setIsSaving(true);
@@ -128,19 +127,31 @@ export default function InstitutionView() {
   const handleSaveAula = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAula.aulaId || !newAula.seccion || !institutionId) return;
+    setIsSaving(true);
     try {
       const customAulaId = newAula.aulaId.toUpperCase().trim().replace(/\s+/g, '_');
+      
+      // Si estamos editando y el ID cambió, eliminamos el anterior
+      if (editingAula && editingAula.id !== customAulaId) {
+        await deleteDoc(doc(db, `institutions/${institutionId}/Aulas`, editingAula.id));
+      }
+
       const aulaRef = doc(db, "institutions", institutionId, "Aulas", customAulaId);
       await setDoc(aulaRef, {
         aulaId: customAulaId,
         seccion: newAula.seccion.toUpperCase().trim(),
         InstitutoId: institutionId,
         status: 'active',
-        createdAt: serverTimestamp()
+        createdAt: editingAula?.createdAt || serverTimestamp(),
+        updatedAt: serverTimestamp()
       });
+      
       setNewAula({ aulaId: '', seccion: '', status: 'active' });
+      setEditingAula(null);
       setShowModal(false);
+      alert("✅ Aula guardada exitosamente.");
     } catch (e) { console.error(e); }
+    setIsSaving(false);
   };
 
   const handleSendMessage = async () => {
@@ -156,10 +167,13 @@ export default function InstitutionView() {
     setIsSaving(false);
   };
 
-  const handleDeleteAula = async (e: React.MouseEvent, aulaId: string) => {
+  const handleDeleteAula = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (!confirm('¿ELIMINAR ESTA AULA?')) return;
-    try { await deleteDoc(doc(db, `institutions/${institutionId}/Aulas`, aulaId)); } catch (e) { console.error(e); }
+    if (!confirm('¿ELIMINAR ESTA AULA PERMANENTEMENTE?')) return;
+    try { 
+      await deleteDoc(doc(db, `institutions/${institutionId}/Aulas`, id)); 
+      alert("✅ Aula eliminada.");
+    } catch (e) { console.error(e); }
   };
 
   const handleDeleteUser = async (userId: string, tabletId?: string) => {
@@ -220,16 +234,53 @@ export default function InstitutionView() {
                 <>
                   <div className="flex justify-between items-center mb-10">
                     <h2 className="text-4xl font-black italic uppercase text-white tracking-tighter">Mapa <span className="text-orange-500 font-light">de Aulas</span></h2>
-                    <button onClick={() => { setEditingAula(null); setShowModal(true); }} className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase italic flex items-center gap-2"><Plus className="w-4 h-4" /> Nueva Aula</button>
+                    <button onClick={() => { setEditingAula(null); setNewAula({ aulaId: '', seccion: '', status: 'active' }); setShowModal(true); }} className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase italic flex items-center gap-2 shadow-lg shadow-orange-500/20 transition-all active:scale-95">
+                      <Plus className="w-4 h-4" /> Nueva Aula
+                    </button>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {aulas.map((aula) => (
-                      <button key={aula.id} onClick={() => setSelectedAula(aula)} className="bg-slate-900/30 p-8 rounded-[2.5rem] border border-slate-800 hover:border-orange-500 transition-all group text-left relative">
-                        <DoorOpen className="w-8 h-8 text-slate-700 mb-4 group-hover:text-orange-500" />
-                        <h3 className="text-xl font-black italic uppercase text-white">{aula.aulaId}</h3>
-                        <p className="text-[10px] font-bold text-slate-500 uppercase">{aula.seccion || 'GENERAL'}</p>
-                      </button>
+                      <div key={aula.id} className="bg-slate-900/30 p-8 rounded-[2.5rem] border border-slate-800 hover:border-orange-500 transition-all group relative">
+                        {/* BOTONES DE ACCIÓN (MARCADOS EN ROJO EN TU IMAGEN) */}
+                        <div className="absolute top-6 right-6 flex gap-2 z-10">
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingAula(aula);
+                              setNewAula({ aulaId: aula.aulaId, seccion: aula.seccion, status: aula.status });
+                              setShowModal(true);
+                            }}
+                            className="p-3 bg-slate-800 rounded-xl text-slate-400 hover:text-orange-500 hover:bg-orange-500/10 transition-all shadow-lg"
+                            title="Editar Aula"
+                          >
+                            <Edit3 size={16} />
+                          </button>
+                          <button 
+                            onClick={(e) => handleDeleteAula(e, aula.id)}
+                            className="p-3 bg-slate-800 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-500/10 transition-all shadow-lg"
+                            title="Eliminar Aula"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+
+                        <div 
+                          onClick={() => setSelectedAula(aula)}
+                          className="cursor-pointer"
+                        >
+                          <DoorOpen className="w-10 h-10 text-slate-700 mb-4 group-hover:text-orange-500 transition-colors" />
+                          <h3 className="text-2xl font-black italic uppercase text-white tracking-tighter">{aula.aulaId}</h3>
+                          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">SECCIÓN {aula.seccion || 'A'}</p>
+                        </div>
+                      </div>
                     ))}
+                    
+                    {aulas.length === 0 && (
+                      <div className="col-span-full py-20 text-center border-2 border-dashed border-slate-800 rounded-[3rem]">
+                        <DoorOpen className="w-12 h-12 text-slate-800 mx-auto mb-4" />
+                        <p className="text-[10px] font-black text-slate-600 uppercase italic">No hay aulas configuradas en esta sede</p>
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -242,7 +293,7 @@ export default function InstitutionView() {
                 </div>
               )}
 
-              {/* SECCIÓN SETTINGS: AQUÍ ESTÁ EL BOTÓN */}
+              {/* SECCIÓN SETTINGS */}
               {activeSection === 'settings' && (
                 <div className="space-y-10 animate-in fade-in duration-500">
                   <div className="flex justify-between items-center">
@@ -290,7 +341,6 @@ export default function InstitutionView() {
                 </div>
               )}
               
-              {/* Otras secciones... */}
               {activeSection === 'security' && <SecurityRules institutionId={institutionId!} />}
 
             </div>
@@ -298,10 +348,62 @@ export default function InstitutionView() {
         </div>
       </main>
 
-      {/* MODALES */}
+      {/* MODAL DE GESTIÓN DE AULA (AHORA FUNCIONAL) */}
       {showModal && (
-        <div className="fixed inset-0 bg-[#0a0c10]/95 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-           {/* Contenido modal aula... */}
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-300">
+           <div className="bg-[#0f1117] border border-slate-800 rounded-[2.5rem] p-10 w-full max-w-md shadow-2xl overflow-hidden relative">
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 to-transparent"></div>
+              
+              <div className="flex justify-between items-center mb-8">
+                <h2 className="text-2xl font-black italic uppercase text-white tracking-tighter">
+                  {editingAula ? 'Editar' : 'Nueva'} <span className="text-orange-500">Aula</span>
+                </h2>
+                <button onClick={() => { setShowModal(false); setEditingAula(null); }} className="text-slate-500 hover:text-white transition-colors">
+                  <X size={24} />
+                </button>
+              </div>
+              
+              <form onSubmit={handleSaveAula} className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black uppercase text-slate-500 ml-2 italic tracking-widest">Identificador del Aula</label>
+                  <input 
+                    required
+                    className={inputStyle}
+                    placeholder="EJ: 5TO GRADO"
+                    value={newAula.aulaId}
+                    onChange={e => setNewAula({...newAula, aulaId: e.target.value})}
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black uppercase text-slate-500 ml-2 italic tracking-widest">Sección / Letra</label>
+                  <input 
+                    required
+                    className={inputStyle}
+                    placeholder="EJ: A"
+                    value={newAula.seccion}
+                    onChange={e => setNewAula({...newAula, seccion: e.target.value})}
+                  />
+                </div>
+
+                <div className="pt-4 flex gap-3">
+                  <button 
+                    type="button"
+                    onClick={() => { setShowModal(false); setEditingAula(null); }}
+                    className="flex-1 bg-slate-900 text-slate-500 font-black py-5 rounded-2xl text-[10px] uppercase italic transition-all hover:bg-slate-800"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    type="submit"
+                    disabled={isSaving}
+                    className="flex-2 bg-orange-500 hover:bg-orange-600 text-white font-black py-5 px-8 rounded-2xl text-[10px] uppercase italic transition-all shadow-lg shadow-orange-500/20 disabled:opacity-50"
+                  >
+                    {isSaving ? 'Sincronizando...' : (editingAula ? 'Actualizar Cambios' : 'Registrar Aula')}
+                  </button>
+                </div>
+              </form>
+           </div>
         </div>
       )}
 
