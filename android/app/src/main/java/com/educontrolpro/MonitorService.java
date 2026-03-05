@@ -1,7 +1,6 @@
 package com.educontrolpro;
 
 import android.accessibilityservice.AccessibilityService;
-import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -22,15 +21,20 @@ import java.util.Map;
 public class MonitorService extends AccessibilityService {
 
     private FirebaseFirestore db = FirebaseFirestore.getInstance();
-    private String deviceDocId; 
+    
+    // VARIABLES DE IDENTIDAD (Exactas al JSON del QR)
+    private String deviceDocId;      // mapeado de "deviceId"
+    private String InstitutoId;      // mapeado de "InstitutoId"
+    private String aulaId;           // mapeado de "aulaId"
+    private String seccion;          // mapeado de "seccion"
+    private String nombreInstituto;  // mapeado de "nombreInstituto"
     
     private static final String PREFS_NAME = "AdminPrefs";
-    private static final String KEY_DEVICE_ID = "assigned_device_id"; 
+    private static final String CAPACITOR_PREFS = "CapacitorStorage"; 
     private static final String KEY_UNLOCKED = "is_unlocked";
     private static final String KEY_MASTER_PIN = "master_pin"; 
     private static final String CHANNEL_ID = "EDU_Service_Channel";
 
-    // Variables de estado y reglas
     private boolean shieldMode = false;
     private boolean useBlacklist = false;
     private boolean blockAllBrowsing = false;
@@ -60,7 +64,7 @@ public class MonitorService extends AccessibilityService {
     private Notification getNotification() {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("EDUControlPro Activo")
-                .setContentText("Protección de dispositivo activa.")
+                .setContentText("Protección activa en el Instituto")
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true)
@@ -70,18 +74,30 @@ public class MonitorService extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        deviceDocId = prefs.getString(KEY_DEVICE_ID, null);
+        
+        // LEER DESDE EL ALMACENAMIENTO DE CAPACITOR
+        SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
+        
+        // Mapeo exacto según el JSON del QR
+        deviceDocId     = capPrefs.getString("deviceId", null);
+        InstitutoId     = capPrefs.getString("InstitutoId", null);
+        aulaId          = capPrefs.getString("aulaId", null);
+        seccion         = capPrefs.getString("seccion", null);
+        nombreInstituto = capPrefs.getString("nombreInstituto", null);
 
-        if (deviceDocId != null) {
-            iniciarListeners(deviceDocId);
+        if (deviceDocId != null && InstitutoId != null) {
+            Log.d("EDU_Monitor", "VINCULACIÓN EXITOSA:");
+            Log.d("EDU_Monitor", "Inst: " + nombreInstituto + " (" + InstitutoId + ")");
+            Log.d("EDU_Monitor", "Aula/Secc: " + aulaId + " " + seccion);
+            
+            iniciarListeners(deviceDocId, InstitutoId);
         } else {
-            Log.e("EDU_Monitor", "Esperando vinculación por QR...");
+            Log.e("EDU_Monitor", "ERROR: Faltan datos críticos de identidad.");
         }
     }
 
-    private void iniciarListeners(String docId) {
-        // 1. Escucha del Dispositivo
+    private void iniciarListeners(String docId, String instId) {
+        // Escuchar cambios en el dispositivo específico
         db.collection("dispositivos").document(docId).addSnapshotListener((snapshot, e) -> {
             if (snapshot != null && snapshot.exists()) {
                 Boolean adminEnabled = snapshot.getBoolean("admin_mode_enable");
@@ -96,24 +112,41 @@ public class MonitorService extends AccessibilityService {
             }
         });
 
-        // 2. Configuración Global (PIN Maestro)
+        // Escuchar reglas de la institución usando InstitutoId (Ej: P1-001)
+        db.collection("institutions").document(instId).addSnapshotListener((snapshot, e) -> {
+            if (snapshot != null && snapshot.exists()) {
+                useBlacklist = snapshot.getBoolean("useBlacklist") != null ? snapshot.getBoolean("useBlacklist") : false;
+                blockAllBrowsing = snapshot.getBoolean("blockAllBrowsing") != null ? snapshot.getBoolean("blockAllBrowsing") : false;
+                listaNegra = (List<String>) snapshot.get("blacklist");
+                Log.d("EDU_Monitor", "Reglas de bloqueo actualizadas para " + instId);
+            }
+        });
+
+        // Pin Maestro
         db.collection("system_config").document("security").addSnapshotListener((snapshot, e) -> {
             if (snapshot != null && snapshot.exists()) {
                 String pin = snapshot.getString("master_pin");
                 if (pin != null) saveMasterPin(pin);
             }
         });
-
-        // 3. Reglas de Institución (P2-001) - RECUPERADO
-        db.collection("institutions").document("P2-001").addSnapshotListener((snapshot, e) -> {
-            if (snapshot != null && snapshot.exists()) {
-                useBlacklist = snapshot.getBoolean("useBlacklist") != null ? snapshot.getBoolean("useBlacklist") : false;
-                blockAllBrowsing = snapshot.getBoolean("blockAllBrowsing") != null ? snapshot.getBoolean("blockAllBrowsing") : false;
-                listaNegra = (List<String>) snapshot.get("blacklist");
-            }
-        });
     }
 
+    private void enviarLog(String packageName) {
+        if (deviceDocId == null) return;
+        Map<String, Object> log = new HashMap<>();
+        log.put("deviceId", deviceDocId);
+        log.put("InstitutoId", InstitutoId);
+        log.put("aulaId", aulaId);
+        log.put("seccion", seccion);
+        log.put("app", packageName);
+        log.put("timestamp", System.currentTimeMillis());
+        
+        // Se guarda en una colección global de logs
+        db.collection("activity_logs").add(log);
+    }
+
+    // --- EL RESTO DE MÉTODOS (onAccessibilityEvent, analizarContenido, etc) QUEDAN IGUAL ---
+    
     private void saveMasterPin(String pin) {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(KEY_MASTER_PIN, pin).apply();
     }
@@ -126,35 +159,22 @@ public class MonitorService extends AccessibilityService {
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event.getPackageName() == null) return;
         String packageName = event.getPackageName().toString();
-
         if (listaBlancaSistema.contains(packageName)) return; 
-
-        // Registro de actividad - RECUPERADO
         if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             enviarLog(packageName);
         }
-
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         boolean isUnlocked = prefs.getBoolean(KEY_UNLOCKED, false);
-        
         if (isUnlocked && !shieldMode) return;
-
-        // --- LÓGICA DE BLOQUEO RECUPERADA ---
-
-        // 1. Bloqueo de Ajustes o Shield Mode
         if (packageName.equals("com.android.settings") || packageName.equals("com.google.android.settings") || 
            (shieldMode && !packageName.contains("educontrolpro"))) {
             dispararBloqueo();
             return;
         }
-
-        // 2. Bloqueo de Navegadores Global
         if (blockAllBrowsing && esNavegador(packageName)) {
             dispararBloqueo();
             return;
         }
-
-        // 3. Redes Sociales
         List<String> redes = Arrays.asList("tiktok", "instagram", "facebook", "youtube", "twitter");
         for (String social : redes) {
             if (packageName.toLowerCase().contains(social)) {
@@ -162,8 +182,6 @@ public class MonitorService extends AccessibilityService {
                 return;
             }
         }
-
-        // 4. Análisis de Contenido (Blacklist) - RECUPERADO
         if (esNavegador(packageName)) {
             analizarContenido(event.getSource());
         }
@@ -199,15 +217,6 @@ public class MonitorService extends AccessibilityService {
         startActivity(lockIntent);
     }
 
-    private void enviarLog(String packageName) {
-        if (deviceDocId == null) return;
-        Map<String, Object> log = new HashMap<>();
-        log.put("device_id", deviceDocId);
-        log.put("app", packageName);
-        log.put("timestamp", System.currentTimeMillis());
-        db.collection("activity_logs").add(log);
-    }
-
     @Override
     public void onInterrupt() { }
-}                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
+}

@@ -26,19 +26,36 @@ export default function ScannerVincular() {
           return;
         }
 
+        // ========================================================
+        // NUEVO: GUARDAR IDENTIDAD EN MEMORIA LOCAL (PREFERENCES)
+        // Esto permite que el MonitorService sepa quién es la tablet sin internet.
+        // ========================================================
+        await Preferences.set({ key: 'deviceId', value: String(deviceId) });
+        await Preferences.set({ key: 'institutoId', value: String(data.InstitutoId || '') });
+        await Preferences.set({ key: 'aulaId', value: String(data.aulaId || '') });
+        await Preferences.set({ key: 'seccion', value: String(data.seccion || '') });
+        await Preferences.set({ key: 'rol', value: String(data.rol || 'alumno') });
+        // ========================================================
+
         const info = await Device.getInfo();
         const idHardware = await Device.getId();
 
         const deviceRef = doc(db, "dispositivos", deviceId);
+        
+        // Mantener la actualización de Firebase tal cual estaba
         await updateDoc(deviceRef, {
           vinculado: true,
           status: 'active',
           rol: data.rol || 'alumno',
-          hardware: { modelo: info.model, marca: info.manufacturer, uuid: idHardware.identifier },
+          hardware: { 
+            modelo: info.model, 
+            marca: info.manufacturer, 
+            uuid: idHardware.identifier 
+          },
           lastUpdated: serverTimestamp()
         });
 
-        alert("✅ VINCULADO: " + deviceId);
+        alert("✅ VINCULADO Y CONFIGURADO: " + deviceId);
         window.location.href = "/";
       }
     } catch (e: any) {
