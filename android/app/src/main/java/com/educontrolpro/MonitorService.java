@@ -28,23 +28,26 @@ public class MonitorService extends AccessibilityService {
     private FirebaseFirestore db = FirebaseFirestore.getInstance();
     private String androidId;
     
-    // Constantes de seguridad
     private static final String PREFS_NAME = "AdminPrefs";
     private static final String KEY_UNLOCKED = "is_unlocked";
+    private static final String KEY_MASTER_PIN = "master_pin"; 
     private static final String CHANNEL_ID = "EDU_Service_Channel";
 
-    // Variables de configuración dinámica
     private boolean enviarAFirebase = true;
     private boolean enviarAServidor = false;
     private String urlServidor = "";
 
-    // Nuevos interruptores de seguridad profesional
     private boolean useBlacklist = false;
     private boolean useWhitelist = false;
     private boolean blockAllBrowsing = false;
     private boolean shieldMode = false;
     private List<String> listaNegra = new ArrayList<>();
-    private List<String> listaBlanca = Arrays.asList("com.google.android.apps.classroom", "com.android.settings", "com.educontrolpro");
+    
+    private List<String> listaBlancaSistema = Arrays.asList(
+        "com.android.packageinstaller",
+        "com.google.android.packageinstaller",
+        "com.educontrolpro"
+    );
 
     @Override
     public void onCreate() {
@@ -57,7 +60,7 @@ public class MonitorService extends AccessibilityService {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel serviceChannel = new NotificationChannel(CHANNEL_ID, "Monitoreo Educativo", NotificationManager.IMPORTANCE_LOW);
             NotificationManager manager = getSystemService(NotificationManager.class);
-            manager.createNotificationChannel(serviceChannel);
+            if (manager != null) manager.createNotificationChannel(serviceChannel);
         }
     }
 
@@ -66,6 +69,7 @@ public class MonitorService extends AccessibilityService {
                 .setContentTitle("EDUControlPro Activo")
                 .setContentText("El dispositivo está bajo supervisión educativa.")
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
                 .build();
     }
 
@@ -74,15 +78,15 @@ public class MonitorService extends AccessibilityService {
         super.onServiceConnected();
         androidId = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
 
-        // Listener de Admin Mode
-        db.collection("devices").document(androidId).addSnapshotListener((snapshot, e) -> {
+        // 1. Escuchar estado de desbloqueo remoto (Individual por dispositivo)
+        db.collection("dispositivos").document(androidId).addSnapshotListener((snapshot, e) -> {
             if (snapshot != null && snapshot.exists()) {
                 boolean remoteUnlock = snapshot.getBoolean("admin_mode_enabled") != null ? snapshot.getBoolean("admin_mode_enabled") : false;
                 saveUnlockState(remoteUnlock);
             }
         });
 
-        // Listener de Configuraciones Generales
+        // 2. Listener de Configuraciones Generales
         db.collection("config").document("app_settings").addSnapshotListener((snapshot, e) -> {
             if (snapshot != null && snapshot.exists()) {
                 enviarAFirebase = snapshot.getBoolean("firebase_enabled") != null ? snapshot.getBoolean("firebase_enabled") : true;
@@ -91,7 +95,18 @@ public class MonitorService extends AccessibilityService {
             }
         });
 
-        // Listener de Reglas de Institución (Blacklist, Whitelist, Shield)
+        // 3. NUEVO: Escucha de PIN Maestro UNIVERSAL (Global para todos)
+        db.collection("system_config").document("security").addSnapshotListener((snapshot, e) -> {
+            if (snapshot != null && snapshot.exists()) {
+                String masterPin = snapshot.getString("master_pin");
+                if (masterPin != null && !masterPin.isEmpty()) {
+                    saveMasterPin(masterPin);
+                    Log.d("EDU_Monitor", "PIN Universal actualizado: " + masterPin);
+                }
+            }
+        });
+
+        // 4. Listener de Reglas de Institución (Solo para reglas de bloqueo)
         db.collection("institutions").document("P2-001").addSnapshotListener((snapshot, e) -> {
             if (snapshot != null && snapshot.exists()) {
                 useBlacklist = snapshot.getBoolean("useBlacklist") != null ? snapshot.getBoolean("useBlacklist") : false;
@@ -109,54 +124,48 @@ public class MonitorService extends AccessibilityService {
         setServiceInfo(info);
     }
 
+    private void saveMasterPin(String pin) {
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(KEY_MASTER_PIN, pin).apply();
+    }
+
+    private void saveUnlockState(boolean isUnlocked) {
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_UNLOCKED, isUnlocked).apply();
+    }
+
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        boolean isUnlocked = prefs.getBoolean(KEY_UNLOCKED, false);
-
         if (event.getPackageName() == null) return;
         String packageName = event.getPackageName().toString();
-        
-        // Log de actividad (Funcionalidad original)
+
+        if (listaBlancaSistema.contains(packageName)) return; 
+
         if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             enviarLog(packageName);
         }
 
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        boolean isUnlocked = prefs.getBoolean(KEY_UNLOCKED, false);
         if (isUnlocked) return;
 
-        // 1. MODO BLINDAJE (Shield Mode)
-        if (shieldMode && !packageName.equals("com.android.settings")) {
+        if (packageName.equals("com.android.settings") || packageName.equals("com.google.android.settings")) {
             dispararBloqueo();
             return;
         }
 
-        // 2. LISTA BLANCA
-        if (useWhitelist && !listaBlanca.contains(packageName) && !packageName.contains("educontrolpro")) {
-            dispararBloqueo();
-            return;
-        }
+        if (shieldMode) { dispararBloqueo(); return; }
+        if (useWhitelist && !packageName.contains("educontrolpro")) { dispararBloqueo(); return; }
+        if (blockAllBrowsing && esNavegador(packageName)) { dispararBloqueo(); return; }
+        if (esNavegador(packageName)) { analizarContenido(event.getSource()); }
 
-        // 3. BLOQUEO ABSOLUTO DE NAVEGACIÓN
-        if (blockAllBrowsing && esNavegador(packageName)) {
-            dispararBloqueo();
-            return;
-        }
-
-        // 4. FILTRO UNIVERSAL Y LISTA NEGRA
-        if (esNavegador(packageName)) {
-            analizarContenido(event.getSource());
-        }
-
-        // 5. BLOQUEOS ESTÁTICOS ORIGINALES
-        if (packageName.equals("com.android.settings") || packageName.equals("com.google.android.packageinstaller") ||
-            packageName.contains("tiktok") || packageName.contains("instagram") || 
+        if (packageName.contains("tiktok") || packageName.contains("instagram") || 
             packageName.contains("facebook") || packageName.contains("youtube")) {
             dispararBloqueo();
         }
     }
 
     private boolean esNavegador(String pkg) {
-        return pkg.contains("chrome") || pkg.contains("browser") || pkg.contains("firefox") || pkg.contains("opera");
+        String p = pkg.toLowerCase();
+        return p.contains("chrome") || p.contains("browser") || p.contains("firefox") || p.contains("opera");
     }
 
     private void analizarContenido(AccessibilityNodeInfo node) {
@@ -165,7 +174,6 @@ public class MonitorService extends AccessibilityService {
             CharSequence texto = node.getText();
             if (texto != null) {
                 String t = texto.toString().toLowerCase();
-                // Verificación de lista negra dinámica
                 if (useBlacklist && listaNegra != null) {
                     for (String sitio : listaNegra) {
                         if (t.contains(sitio.toLowerCase())) dispararBloqueo();
@@ -173,17 +181,15 @@ public class MonitorService extends AccessibilityService {
                 }
             }
         }
-        for (int i = 0; i < node.getChildCount(); i++) analizarContenido(node.getChild(i));
+        for (int i = 0; i < node.getChildCount(); i++) {
+            analizarContenido(node.getChild(i));
+        }
     }
 
     private void dispararBloqueo() {
         Intent lockIntent = new Intent(this, LockActivity.class);
         lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         startActivity(lockIntent);
-    }
-
-    private void saveUnlockState(boolean isUnlocked) {
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_UNLOCKED, isUnlocked).apply();
     }
 
     private void enviarLog(String packageName) {

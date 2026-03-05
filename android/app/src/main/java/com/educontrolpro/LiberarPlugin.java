@@ -12,17 +12,29 @@ public class LiberarPlugin extends Plugin {
 
     @PluginMethod
     public void ejecutarLiberacion(PluginCall call) {
-        // Esta es la señal que el MainActivity está esperando
+        // Orden de LIBERACIÓN TOTAL (Device Owner)
         Intent intent = new Intent(getContext(), MainActivity.class);
         intent.setAction("ACTION_LIBERAR_TAB");
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         
-        // Enviamos la orden al MainActivity
         getContext().startActivity(intent);
 
-        // Le avisamos a React que todo salió bien
         JSObject ret = new JSObject();
-        ret.put("status", "comando_enviado");
+        ret.put("status", "comando_liberacion_enviado");
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void ejecutarRebloqueo(PluginCall call) {
+        // Orden de RE-ACTIVAR BLOQUEO ALUMNO (Cerrar sesión admin)
+        Intent intent = new Intent(getContext(), MainActivity.class);
+        intent.setAction("ACTION_REBLOQUEAR_TAB");
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        
+        getContext().startActivity(intent);
+
+        JSObject ret = new JSObject();
+        ret.put("status", "comando_rebloqueo_enviado");
         call.resolve(ret);
     }
 }
