@@ -7,12 +7,17 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.util.Log;
 import android.widget.Toast;
 
 import com.getcapacitor.BridgeActivity;
 import com.capacitorjs.plugins.device.DevicePlugin;
+import com.google.firebase.firestore.FieldValue;
 import com.google.firebase.firestore.FirebaseFirestore;
+
+import java.util.HashMap;
+import java.util.Map;
 
 public class MainActivity extends BridgeActivity {
     private static final int DEVICE_ADMIN_REQUEST = 101;
@@ -22,6 +27,11 @@ public class MainActivity extends BridgeActivity {
     // Constantes para sincronizar con MonitorService
     private static final String ADMIN_PREFS = "AdminPrefs";
     private static final String KEY_UNLOCKED = "is_unlocked";
+
+    // --- VARIABLES PARA EL LATIDO (HEARTBEAT) ---
+    private Handler heartbeatHandler = new Handler();
+    private Runnable heartbeatRunnable;
+    private static final int HEARTBEAT_INTERVAL = 45000; // 45 segundos
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -48,16 +58,43 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception e) {
             Log.e("EDU_Status", "UpdateManager no inicializado: " + e.getMessage());
         }
+
+        // 5. Iniciar el reporte de actividad (Heartbeat)
+        startHeartbeat();
+    }
+
+    // --- NUEVA FUNCIÓN: REPORTE DE ACTIVIDAD HACIA DASHBOARD ---
+    private void startHeartbeat() {
+        heartbeatRunnable = new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String androidId = android.provider.Settings.Secure.getString(getContentResolver(), android.provider.Settings.Secure.ANDROID_ID);
+                    FirebaseFirestore db = FirebaseFirestore.getInstance();
+                    
+                    Map<String, Object> update = new HashMap<>();
+                    update.put("lastSeen", FieldValue.serverTimestamp());
+                    update.put("vinculado", true); // Aseguramos que el Dashboard lo vea activo
+
+                    db.collection("dispositivos").document(androidId)
+                        .update(update)
+                        .addOnSuccessListener(aVoid -> Log.d("EDU_Heartbeat", "Pulso enviado correctamente"))
+                        .addOnFailureListener(e -> Log.e("EDU_Heartbeat", "Error al enviar pulso: " + e.getMessage()));
+
+                } catch (Exception e) {
+                    Log.e("EDU_Heartbeat", "Error en ciclo de vida: " + e.getMessage());
+                }
+                heartbeatHandler.postDelayed(this, HEARTBEAT_INTERVAL);
+            }
+        };
+        heartbeatHandler.postDelayed(heartbeatRunnable, 5000); // Primer pulso a los 5 segundos
     }
 
     // --- NUEVA FUNCIÓN: RE-ACTIVAR BLOQUEO DE ALUMNO ---
-    // Llámala desde tu interfaz (Ionic/React) cuando termines el mantenimiento
     public void reactivarSeguridad() {
-        // 1. Volvemos a bloquear localmente
         SharedPreferences prefs = getSharedPreferences(ADMIN_PREFS, MODE_PRIVATE);
         prefs.edit().putBoolean(KEY_UNLOCKED, false).apply();
         
-        // 2. Sincronizamos con Firebase si es posible
         try {
             String androidId = android.provider.Settings.Secure.getString(getContentResolver(), android.provider.Settings.Secure.ANDROID_ID);
             FirebaseFirestore.getInstance().collection("dispositivos")
@@ -81,6 +118,7 @@ public class MainActivity extends BridgeActivity {
                 dpm.clearDeviceOwnerApp(getPackageName());
                 
                 stopService(new Intent(this, MonitorService.class));
+                if (heartbeatRunnable != null) heartbeatHandler.removeCallbacks(heartbeatRunnable);
 
                 Log.d("EDU_Status", "¡DISPOSITIVO LIBERADO!");
                 Toast.makeText(this, "Dispositivo Liberado. Reiniciando...", Toast.LENGTH_LONG).show();
@@ -149,6 +187,14 @@ public class MainActivity extends BridgeActivity {
             } catch (Exception e) {
                 Log.e("EDU_Status", "Error al iniciar MonitorService: " + e.getMessage());
             }
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (heartbeatHandler != null && heartbeatRunnable != null) {
+            heartbeatHandler.removeCallbacks(heartbeatRunnable);
         }
     }
 }
