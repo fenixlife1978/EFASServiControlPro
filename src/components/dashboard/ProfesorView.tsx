@@ -8,7 +8,7 @@ import {
 } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { 
-  History, User, RefreshCw, AlertTriangle, Search, Lock, Unlock 
+  History, User, RefreshCw, AlertTriangle, Search, Lock, Unlock, Globe, ShieldAlert
 } from 'lucide-react';
 import { WebHistoryModal } from '@/components/admin/monitoring/WebHistoryModal';
 import { AlertFeed } from '@/components/dashboard/AlertFeed';
@@ -21,7 +21,11 @@ interface Dispositivo {
   seccion?: string;
   status?: string;
   current_url?: string;
-  navegacion_bloqueada?: boolean;
+  ultimaUrl?: string; // Campo real que usa la APK
+  cortarNavegacion?: boolean; // Campo real que usa la APK
+  shieldMode?: boolean;
+  online?: boolean;
+  ultimoAcceso?: any;
   InstitutoId?: string;
   rol?: string;
 }
@@ -96,14 +100,25 @@ export default function ProfesorView() {
     return () => unsubAuth();
   }, [workingInstitutoId]);
 
+  // CORREGIDO: Usar los campos reales de la APK
   const handleToggleBlock = async (tabletId: string, isBlocked: boolean) => {
     if (!tabletId) return;
     try {
       await updateDoc(doc(db, "dispositivos", tabletId), {
-        navegacion_bloqueada: !isBlocked,
+        cortarNavegacion: !isBlocked, // Campo real que usa la APK
+        blockAllBrowsing: !isBlocked, // Sincronizar ambos para compatibilidad
         lastUpdated: serverTimestamp()
       });
     } catch (e) { console.error(e); }
+  };
+
+  // Función para verificar estado online
+  const checkIsOnline = (ultimoAcceso: any) => {
+    if (!ultimoAcceso) return false;
+    const lastSeenDate = ultimoAcceso.toDate ? ultimoAcceso.toDate() : new Date(ultimoAcceso);
+    const now = new Date();
+    const diff = now.getTime() - lastSeenDate.getTime();
+    return diff < 60000; // 60 segundos de tolerancia
   };
 
   const alumnosFiltrados = alumnos.filter(al => 
@@ -144,32 +159,53 @@ export default function ProfesorView() {
         {loading ? (
           <div className="col-span-full py-20 text-center"><RefreshCw className="animate-spin text-blue-500 mx-auto" /></div>
         ) : alumnosFiltrados.length > 0 ? (
-          alumnosFiltrados.map((al) => (
-            <div key={al.id} className="bg-[#0f1117] border border-slate-800 rounded-[2.5rem] p-6 shadow-2xl hover:border-blue-500/50 transition-all">
-              <div className="flex justify-between items-center mb-6">
-                <div className="flex items-center gap-3">
-                  <div className={`w-2 h-2 rounded-full ${al.status === 'active' ? 'bg-green-500 animate-pulse' : 'bg-slate-700'}`} />
-                  <h3 className="text-[11px] font-black text-white uppercase italic">{al.alumno_asignado}</h3>
+          alumnosFiltrados.map((al) => {
+            const online = checkIsOnline(al.ultimoAcceso);
+            const urlActual = al.ultimaUrl || al.current_url || 'Sin actividad';
+            
+            return (
+              <div key={al.id} className="bg-[#0f1117] border border-slate-800 rounded-[2.5rem] p-6 shadow-2xl hover:border-blue-500/50 transition-all">
+                <div className="flex justify-between items-center mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${online ? 'bg-green-500 animate-pulse' : 'bg-slate-700'}`} />
+                    <h3 className="text-[11px] font-black text-white uppercase italic">{al.alumno_asignado}</h3>
+                  </div>
+                  {al.shieldMode && (
+                    <ShieldAlert size={14} className="text-orange-500" />
+                  )}
+                </div>
+                
+                <div className="bg-black/40 p-3 rounded-2xl border border-slate-800/50 mb-4 flex items-center gap-2">
+                  <Globe size={12} className="text-slate-600" />
+                  <p className="text-[10px] text-blue-400 font-bold truncate lowercase flex-1">{urlActual}</p>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <button 
+                    onClick={() => setHistoryModal({ isOpen: true, tabletId: al.id, alumnoNombre: al.alumno_asignado || 'Estudiante' })} 
+                    className="bg-slate-800 hover:bg-slate-700 p-3 rounded-xl flex items-center justify-center gap-2 transition-all"
+                  >
+                    <History size={14} className="text-blue-400" />
+                    <span className="text-[9px] font-black text-white uppercase italic tracking-tighter">Historial</span>
+                  </button>
+                  
+                  <button 
+                    onClick={() => handleToggleBlock(al.id, al.cortarNavegacion || false)}
+                    className={`p-3 rounded-xl flex items-center justify-center gap-2 transition-all ${
+                      al.cortarNavegacion 
+                        ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' 
+                        : 'bg-blue-600/10 text-blue-500 border border-blue-500/20 hover:bg-blue-500 hover:text-white'
+                    }`}
+                  >
+                    {al.cortarNavegacion ? <Lock size={14} /> : <Unlock size={14} />}
+                    <span className="text-[9px] font-black uppercase italic">
+                      {al.cortarNavegacion ? 'Bloqueado' : 'Bloquear'}
+                    </span>
+                  </button>
                 </div>
               </div>
-              <div className="bg-black/40 p-3 rounded-2xl border border-slate-800/50 mb-6 text-center">
-                <p className="text-[10px] text-blue-400 font-bold truncate lowercase">{al.current_url || 'Sin actividad'}</p>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <button onClick={() => setHistoryModal({ isOpen: true, tabletId: al.id, alumnoNombre: al.alumno_asignado || 'Estudiante' })} className="bg-slate-800 p-3 rounded-xl flex items-center justify-center gap-2">
-                  <History size={14} className="text-blue-400" />
-                  <span className="text-[9px] font-black text-white uppercase italic tracking-tighter">Historial</span>
-                </button>
-                <button 
-                  onClick={() => handleToggleBlock(al.id, al.navegacion_bloqueada || false)}
-                  className={`p-3 rounded-xl flex items-center justify-center gap-2 ${al.navegacion_bloqueada ? 'bg-red-500 text-white' : 'bg-blue-600/10 text-blue-500 border border-blue-500/20'}`}
-                >
-                  {al.navegacion_bloqueada ? <Lock size={14} /> : <Unlock size={14} />}
-                  <span className="text-[9px] font-black uppercase italic">{al.navegacion_bloqueada ? 'Locked' : 'Block'}</span>
-                </button>
-              </div>
-            </div>
-          ))
+            );
+          })
         ) : (
           <div className="col-span-full py-32 bg-slate-900/20 border-2 border-dashed border-slate-800 rounded-[3rem] text-center">
              <AlertTriangle size={32} className="text-slate-700 mx-auto mb-4" />
@@ -181,7 +217,12 @@ export default function ProfesorView() {
       </div>
 
       <AlertFeed aulaId={datosProfesor.aulaId} institutoId={workingInstitutoId} />
-      <WebHistoryModal isOpen={historyModal.isOpen} onClose={() => setHistoryModal({ ...historyModal, isOpen: false })} tabletId={historyModal.tabletId} alumnoNombre={historyModal.alumnoNombre} />
+      <WebHistoryModal 
+        isOpen={historyModal.isOpen} 
+        onClose={() => setHistoryModal({ ...historyModal, isOpen: false })} 
+        tabletId={historyModal.tabletId} 
+        alumnoNombre={historyModal.alumnoNombre} 
+      />
     </div>
   );
 }

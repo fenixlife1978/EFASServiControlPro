@@ -40,11 +40,11 @@ export default function InstitutionView() {
 
   const inputStyle = "w-full bg-slate-900 border border-slate-800 p-4 rounded-xl text-white font-bold text-xs uppercase outline-none focus:border-orange-500 transition-all";
 
-  // --- LÓGICA DE ESTADO ONLINE REAL CORREGIDA ---
-  const checkIsOnline = (lastSeen: any) => {
-    if (!lastSeen) return "no_data"; 
+  // --- LÓGICA DE ESTADO ONLINE REAL CORREGIDA (usa ultimoAcceso) ---
+  const checkIsOnline = (ultimoAcceso: any) => {
+    if (!ultimoAcceso) return "no_data"; 
     
-    const lastSeenDate = lastSeen.toDate ? lastSeen.toDate() : new Date(lastSeen);
+    const lastSeenDate = ultimoAcceso.toDate ? ultimoAcceso.toDate() : new Date(ultimoAcceso);
     const now = new Date();
     // Tolerancia de 60 segundos para considerar Online
     const diff = now.getTime() - lastSeenDate.getTime();
@@ -238,7 +238,8 @@ export default function InstitutionView() {
                       </div>
                     ) : (
                       alumnos.map((alumno) => {
-                        const status = checkIsOnline(alumno.lastSeen);
+                        // CORREGIDO: Usar ultimoAcceso en lugar de lastSeen
+                        const status = checkIsOnline(alumno.ultimoAcceso);
                         return (
                           <div key={alumno.id} className="bg-slate-900/40 border border-slate-800 p-6 rounded-[2rem] flex items-center justify-between group">
                             <div className="flex items-center gap-5">

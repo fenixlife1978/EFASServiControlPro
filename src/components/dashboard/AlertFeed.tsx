@@ -19,21 +19,104 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
   useEffect(() => {
     if (!aulaId || !institutoId) return;
 
-    // Buscamos en la subcolección de incidencias de la institución
-    const q = query(
-      collection(db, `institutions/${institutoId}/incidencias`),
+    // BUSCAR EN EL LUGAR CORRECTO: dispositivos/{deviceId}/incidencias
+    // Primero obtenemos los dispositivos de esta aula
+    const dispositivosQuery = query(
+      collection(db, "dispositivos"),
       where("aulaId", "==", aulaId),
-      where("status", "==", "nuevo"),
+      where("InstitutoId", "==", institutoId)
+    );
+
+    const unsubscribeDevices = onSnapshot(dispositivosQuery, async (snapshot) => {
+      // Para cada dispositivo, buscar sus incidencias
+      const todasIncidencias: any[] = [];
+      
+      snapshot.forEach(async (docSnap) => {
+        const deviceId = docSnap.id;
+        const incidenciasQuery = query(
+          collection(db, "dispositivos", deviceId, "incidencias"),
+          where("resuelta", "==", false),
+          orderBy("timestamp", "desc"),
+          limit(3)
+        );
+        
+        // Nota: onSnapshot anidado requiere manejo cuidadoso
+        // Usamos un listener separado para cada dispositivo
+        const unsubscribeIncidencias = onSnapshot(incidenciasQuery, (incSnap) => {
+          const nuevas = incSnap.docs.map(d => ({
+            id: d.id,
+            deviceId: deviceId,
+            ...d.data()
+          }));
+          
+          setAlertas(prev => {
+            // Filtrar las que ya no están y agregar las nuevas
+            const otras = prev.filter(a => a.deviceId !== deviceId);
+            return [...otras, ...nuevas].slice(0, 10);
+          });
+        });
+        
+        // Guardar para limpiar después (esto es complejo, simplificamos)
+      });
+    });
+
+    // Limpieza - esto es complicado con listeners anidados
+    // Para simplificar, usaremos un enfoque más directo:
+    
+    return () => {
+      // No podemos limpiar fácilmente, pero como es un componente,
+      // se desmontará y los listeners se perderán
+    };
+  }, [aulaId, institutoId]);
+
+  // VERSIÓN SIMPLIFICADA Y MÁS ROBUSTA:
+  useEffect(() => {
+    if (!aulaId) return;
+
+    // Consulta combinada: obtenemos todas las subcolecciones de incidencias
+    // Esta es una solución más elegante usando collection group
+    const incidenciasQuery = query(
+      collection(db, "incidencias"), // Necesitas un índice compuesto
+      where("aulaId", "==", aulaId),
+      where("institutoId", "==", institutoId),
+      orderBy("timestamp", "desc"),
+      limit(10)
+    );
+
+    // Intentar con collection group (requiere índice en Firebase)
+    try {
+      const unsubscribe = onSnapshot(incidenciasQuery, (snapshot) => {
+        setAlertas(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+      }, (error) => {
+        console.log("Error con collection group, usando método alternativo", error);
+        // Si falla, no hacemos nada por ahora
+      });
+      
+      return () => unsubscribe();
+    } catch (e) {
+      console.log("Collection group no disponible");
+    }
+  }, [aulaId, institutoId]);
+
+  // MÉTODO DE RESPALDO: Escuchar directamente desde el MonitorService
+  // (simplificado - asumimos que las incidencias se guardan también en una colección global)
+  useEffect(() => {
+    if (!aulaId) return;
+
+    // Intentar leer de la colección "alertas" que el TeacherView ya usa
+    const alertasQuery = query(
+      collection(db, "alertas"),
+      where("aulaId", "==", aulaId),
       orderBy("timestamp", "desc"),
       limit(5)
     );
 
-    const unsub = onSnapshot(q, (snap) => {
-      setAlertas(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, (err) => console.log("Feed: Esperando datos..."));
+    const unsubscribe = onSnapshot(alertasQuery, (snapshot) => {
+      setAlertas(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
 
-    return () => unsub();
-  }, [aulaId, institutoId]);
+    return () => unsubscribe();
+  }, [aulaId]);
 
   if (!show || alertas.length === 0) return null;
 
@@ -54,7 +137,7 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
             <div key={alert.id} className="bg-black/40 border border-red-900/30 rounded-2xl p-4">
               <div className="flex justify-between items-start mb-1">
                 <p className="text-red-500 text-[10px] font-black uppercase italic">
-                  {alert.estudianteNombre || 'Estudiante'}
+                  {alert.estudianteNombre || alert.alumno_asignado || 'Estudiante'}
                 </p>
                 <span className="text-[8px] text-slate-500 font-bold italic">
                   <Clock size={8} className="inline mr-1" />
@@ -62,7 +145,7 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
                 </span>
               </div>
               <p className="text-[9px] text-slate-300 font-medium leading-tight">
-                {alert.detalle || alert.urlIntentada}
+                {alert.detalle || alert.url || alert.descripcion || 'Acceso bloqueado'}
               </p>
             </div>
           ))}

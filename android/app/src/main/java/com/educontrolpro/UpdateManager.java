@@ -14,7 +14,7 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.content.FileProvider;
 import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.FirebaseFirestore;
-import com.google.firebase.firestore.FieldValue; // Requerido para timestamps
+import com.google.firebase.firestore.FieldValue;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
@@ -29,13 +29,25 @@ public class UpdateManager {
     private FirebaseFirestore db = FirebaseFirestore.getInstance();
     private static final String CHANNEL_ID = "update_channel";
     
-    private static final String PREFS_NAME = "CapacitorStorage";
-    private static final String KEY_MASTER_PIN = "master_pin";
+    // Preferencias correctas
+    private static final String CAPACITOR_PREFS = "CapacitorStorage";
     private static final String ADMIN_PREFS = "AdminPrefs";
     private static final String KEY_UNLOCKED = "is_unlocked";
+    private static final String KEY_DEVICE_ID = "deviceId";
+    private static final String KEY_BLOQUEO_PIN = "bloqueo_pin";
+
+    private String deviceId = null;
 
     public UpdateManager(Context context) {
         this.context = context;
+        
+        // Obtener deviceId desde CapacitorStorage
+        SharedPreferences capPrefs = context.getSharedPreferences(CAPACITOR_PREFS, Context.MODE_PRIVATE);
+        deviceId = capPrefs.getString(KEY_DEVICE_ID, null);
+        
+        if (deviceId == null) {
+            Log.w(TAG, "No hay deviceId disponible aún (dispositivo no vinculado)");
+        }
     }
 
     public void listenForUpdates() {
@@ -48,75 +60,95 @@ public class UpdateManager {
                 }
             });
 
-        // 2. Escuchar cambios en el PIN Maestro
-        listenForSecurityChanges();
+        // 2. Escuchar cambios en el PIN de BLOQUEO (específico del dispositivo)
+        listenForPinChanges();
 
-        // 3. NUEVO: Escuchar comandos de Bloqueo/Re-bloqueo por dispositivo
+        // 3. Escuchar comandos de Bloqueo/Re-bloqueo por dispositivo
         listenForDeviceCommands();
     }
 
     private void listenForDeviceCommands() {
-        String androidId = android.provider.Settings.Secure.getString(context.getContentResolver(), android.provider.Settings.Secure.ANDROID_ID);
+        if (deviceId == null) return;
         
-        db.collection("dispositivos").document(androidId)
+        db.collection("dispositivos").document(deviceId)
             .addSnapshotListener((snapshot, e) -> {
                 if (e != null || snapshot == null || !snapshot.exists()) return;
 
-                // Si en el Dashboard pones "admin_mode_enabled" en false, re-bloqueamos la tablet
-                Boolean adminEnabled = snapshot.getBoolean("admin_mode_enabled");
+                // Si en el Dashboard ponen "admin_mode_enable" en false, re-bloqueamos
+                Boolean adminEnabled = snapshot.getBoolean("admin_mode_enable");
+                Boolean bloquearComando = snapshot.getBoolean("bloquear");
+                
                 if (adminEnabled != null && !adminEnabled) {
-                    ejecutarRebloqueoLocal();
+                    ejecutarRebloqueoLocal("admin_mode_desactivado");
+                }
+                
+                // Comando de bloqueo inmediato
+                if (bloquearComando != null && bloquearComando) {
+                    ejecutarRebloqueoLocal("comando_bloquear");
+                    
+                    // Resetear el comando después de 2 segundos
+                    new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                        if (deviceId != null) {
+                            db.collection("dispositivos").document(deviceId)
+                                .update("bloquear", false);
+                        }
+                    }, 2000);
                 }
             });
     }
 
-    private void ejecutarRebloqueoLocal() {
+    private void listenForPinChanges() {
+        if (deviceId == null) return;
+        
+        db.collection("dispositivos").document(deviceId)
+            .addSnapshotListener((snapshot, e) -> {
+                if (e != null || snapshot == null || !snapshot.exists()) return;
+                
+                String newPin = snapshot.getString("pinBloqueo");
+                if (newPin != null && !newPin.isEmpty()) {
+                    updateLocalPin(newPin);
+                }
+            });
+    }
+
+    private void ejecutarRebloqueoLocal(String razon) {
         SharedPreferences adminPrefs = context.getSharedPreferences(ADMIN_PREFS, Context.MODE_PRIVATE);
         boolean actualmenteDesbloqueado = adminPrefs.getBoolean(KEY_UNLOCKED, false);
 
         if (actualmenteDesbloqueado) {
             adminPrefs.edit().putBoolean(KEY_UNLOCKED, false).apply();
-            Log.d(TAG, "🔒 Re-bloqueo ejecutado desde Dashboard");
+            Log.d(TAG, "🔒 Re-bloqueo ejecutado: " + razon);
             
-            // Generar LOG de actividad automáticamente
-            registrarActividad("SEGURIDAD_RESTAURADA", "El administrador bloqueó el dispositivo remotamente");
+            // Registrar actividad
+            registrarActividad("SEGURIDAD_RESTAURADA", "Bloqueo remoto: " + razon);
+            
+            // Forzar el inicio de LockActivity si es necesario
+            Intent lockIntent = new Intent(context, LockActivity.class);
+            lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(lockIntent);
         }
     }
 
     public void registrarActividad(String tipo, String descripcion) {
-        String androidId = android.provider.Settings.Secure.getString(context.getContentResolver(), android.provider.Settings.Secure.ANDROID_ID);
+        if (deviceId == null) return;
         
         Map<String, Object> log = new HashMap<>();
         log.put("tipo", tipo);
         log.put("descripcion", descripcion);
         log.put("timestamp", FieldValue.serverTimestamp());
-        log.put("deviceId", androidId);
+        log.put("deviceId", deviceId);
 
-        // Esto creará la colección 'activity_logs' que no veías antes
         db.collection("activity_logs").add(log)
             .addOnSuccessListener(documentReference -> Log.d(TAG, "Log registrado"))
             .addOnFailureListener(e -> Log.e(TAG, "Error al crear log: " + e.getMessage()));
     }
 
-    private void listenForSecurityChanges() {
-        db.collection("system_config").document("security")
-            .addSnapshotListener((snapshot, e) -> {
-                if (e != null) return;
-                if (snapshot != null && snapshot.exists()) {
-                    String newPin = snapshot.getString("master_pin");
-                    if (newPin != null) updateLocalPin(newPin);
-                }
-            });
-    }
-
     private void updateLocalPin(String newPin) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        prefs.edit().putString(KEY_MASTER_PIN, newPin).apply();
-        Log.d(TAG, "PIN Maestro sincronizado");
+        SharedPreferences prefs = context.getSharedPreferences(ADMIN_PREFS, Context.MODE_PRIVATE);
+        prefs.edit().putString(KEY_BLOQUEO_PIN, newPin).apply();
+        Log.d(TAG, "PIN de bloqueo sincronizado: " + newPin);
     }
 
-    // ... (Mantén aquí abajo tus funciones checkVersion, startDownload y showUpdateNotification igual que antes)
-    
     private void checkVersion(DocumentSnapshot data) {
         try {
             Long cloudVersionLong = data.getLong("versionCode");

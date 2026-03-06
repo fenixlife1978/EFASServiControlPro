@@ -21,17 +21,10 @@ import java.util.Map;
 
 public class MainActivity extends BridgeActivity {
     private static final int DEVICE_ADMIN_REQUEST = 101;
-    private static final String PREFS_NAME = "CapacitorStorage";
-    private static final String KEY_INSTITUTO_ID = "InstitutoId";
-    
-    // Constantes para sincronizar con MonitorService
+    private static final String CAPACITOR_PREFS = "CapacitorStorage";
     private static final String ADMIN_PREFS = "AdminPrefs";
     private static final String KEY_UNLOCKED = "is_unlocked";
-
-    // --- VARIABLES PARA EL LATIDO (HEARTBEAT) ---
-    private Handler heartbeatHandler = new Handler();
-    private Runnable heartbeatRunnable;
-    private static final int HEARTBEAT_INTERVAL = 45000; // 45 segundos
+    private static final String KEY_DEVICE_ID = "deviceId";
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -48,7 +41,7 @@ public class MainActivity extends BridgeActivity {
         // 2. Lógica de seguridad (Device Owner / Admin)
         checkSecurityPrivileges();
 
-        // 3. Verificar vinculación
+        // 3. Verificar vinculación e iniciar MonitorService
         checkVinculacionYEstado();
 
         // 4. Monitor de actualizaciones
@@ -58,52 +51,31 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception e) {
             Log.e("EDU_Status", "UpdateManager no inicializado: " + e.getMessage());
         }
-
-        // 5. Iniciar el reporte de actividad (Heartbeat)
-        startHeartbeat();
     }
 
-    // --- NUEVA FUNCIÓN: REPORTE DE ACTIVIDAD HACIA DASHBOARD ---
-    private void startHeartbeat() {
-        heartbeatRunnable = new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    String androidId = android.provider.Settings.Secure.getString(getContentResolver(), android.provider.Settings.Secure.ANDROID_ID);
-                    FirebaseFirestore db = FirebaseFirestore.getInstance();
-                    
-                    Map<String, Object> update = new HashMap<>();
-                    update.put("lastSeen", FieldValue.serverTimestamp());
-                    update.put("vinculado", true); // Aseguramos que el Dashboard lo vea activo
-
-                    db.collection("dispositivos").document(androidId)
-                        .update(update)
-                        .addOnSuccessListener(aVoid -> Log.d("EDU_Heartbeat", "Pulso enviado correctamente"))
-                        .addOnFailureListener(e -> Log.e("EDU_Heartbeat", "Error al enviar pulso: " + e.getMessage()));
-
-                } catch (Exception e) {
-                    Log.e("EDU_Heartbeat", "Error en ciclo de vida: " + e.getMessage());
-                }
-                heartbeatHandler.postDelayed(this, HEARTBEAT_INTERVAL);
-            }
-        };
-        heartbeatHandler.postDelayed(heartbeatRunnable, 5000); // Primer pulso a los 5 segundos
-    }
-
-    // --- NUEVA FUNCIÓN: RE-ACTIVAR BLOQUEO DE ALUMNO ---
+    // --- RE-ACTIVAR BLOQUEO DE ALUMNO ---
     public void reactivarSeguridad() {
         SharedPreferences prefs = getSharedPreferences(ADMIN_PREFS, MODE_PRIVATE);
         prefs.edit().putBoolean(KEY_UNLOCKED, false).apply();
         
-        try {
-            String androidId = android.provider.Settings.Secure.getString(getContentResolver(), android.provider.Settings.Secure.ANDROID_ID);
-            FirebaseFirestore.getInstance().collection("dispositivos")
-                .document(androidId).update("admin_mode_enabled", false);
-        } catch (Exception e) {
-            Log.e("EDU_Status", "No se pudo actualizar Firebase, pero el bloqueo local es efectivo.");
+        // Obtener deviceId desde CapacitorStorage
+        SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
+        String deviceId = capPrefs.getString(KEY_DEVICE_ID, null);
+        
+        if (deviceId != null) {
+            try {
+                FirebaseFirestore.getInstance().collection("dispositivos")
+                    .document(deviceId)
+                    .update("admin_mode_enable", false);
+            } catch (Exception e) {
+                Log.e("EDU_Status", "No se pudo actualizar Firebase, pero el bloqueo local es efectivo.");
+            }
         }
 
         Toast.makeText(this, "Seguridad activada: Ajustes bloqueados", Toast.LENGTH_LONG).show();
+        
+        // Reiniciar MonitorService para aplicar cambios
+        reiniciarMonitorService();
     }
 
     // --- FUNCIÓN PARA LIBERAR DISPOSITIVO TOTALMENTE ---
@@ -118,12 +90,11 @@ public class MainActivity extends BridgeActivity {
                 dpm.clearDeviceOwnerApp(getPackageName());
                 
                 stopService(new Intent(this, MonitorService.class));
-                if (heartbeatRunnable != null) heartbeatHandler.removeCallbacks(heartbeatRunnable);
 
                 Log.d("EDU_Status", "¡DISPOSITIVO LIBERADO!");
                 Toast.makeText(this, "Dispositivo Liberado. Reiniciando...", Toast.LENGTH_LONG).show();
                 
-                SharedPreferences.Editor editor = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit();
+                SharedPreferences.Editor editor = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE).edit();
                 editor.clear();
                 editor.apply();
 
@@ -134,6 +105,16 @@ public class MainActivity extends BridgeActivity {
             }
         } catch (Exception e) {
             Log.e("EDU_Status", "Error al liberar: " + e.getMessage());
+        }
+    }
+
+    private void reiniciarMonitorService() {
+        stopService(new Intent(this, MonitorService.class));
+        Intent serviceIntent = new Intent(this, MonitorService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent);
+        } else {
+            startService(serviceIntent);
         }
     }
 
@@ -169,13 +150,14 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void checkVinculacionYEstado() {
-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        String institutoId = prefs.getString(KEY_INSTITUTO_ID, null);
+        SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
+        String deviceId = capPrefs.getString(KEY_DEVICE_ID, null);
+        String institutoId = capPrefs.getString("InstitutoId", null);
 
-        if (institutoId == null) {
+        if (deviceId == null || institutoId == null) {
             Log.d("EDU_Status", "Dispositivo NO vinculado.");
         } else {
-            Log.d("EDU_Status", "Vinculado a: " + institutoId);
+            Log.d("EDU_Status", "Vinculado a: " + institutoId + " con ID: " + deviceId);
             
             try {
                 Intent serviceIntent = new Intent(this, MonitorService.class);
@@ -190,12 +172,9 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
-    // CORRECCIÓN: Se cambió de protected a public para coincidir con BridgeActivity
     @Override
     public void onDestroy() {
         super.onDestroy();
-        if (heartbeatHandler != null && heartbeatRunnable != null) {
-            heartbeatHandler.removeCallbacks(heartbeatRunnable);
-        }
+        // No detenemos nada aquí porque MonitorService se maneja solo
     }
 }
