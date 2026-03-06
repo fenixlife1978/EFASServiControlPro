@@ -190,8 +190,9 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    // CORRECCIÓN: Se cambió de protected a public para coincidir con BridgeActivity
     @Override
-    protected void onDestroy() {
+    public void onDestroy() {
         super.onDestroy();
         if (heartbeatHandler != null && heartbeatRunnable != null) {
             heartbeatHandler.removeCallbacks(heartbeatRunnable);
