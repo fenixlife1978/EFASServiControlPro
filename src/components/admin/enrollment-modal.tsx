@@ -55,12 +55,15 @@ export function EnrollmentModal({
     setError(null);
 
     try {
+      // 🔥 CORREGIDO: Añadidos aulaId y seccion
       await confirmEnrollment({
         firestore,
         enrollmentId,
         pendingData: pendingEnrollment,
         studentName: data.nombre_alumno,
-        institutionId: institutionId
+        institutionId: institutionId,
+        aulaId: (pendingEnrollment as any).aulaId || pendingEnrollment.classroomId || '',
+        seccion: (pendingEnrollment as any).seccion || ''
       });
       onConfirmed();
       reset();
@@ -94,7 +97,8 @@ export function EnrollmentModal({
                     <div className="text-sm">
                         <p><strong>Modelo:</strong> "Dispositivo EDUControl"</p>
                         <p><strong>MAC:</strong> {(pendingEnrollment as any).deviceId}</p>
-                        <p><strong>Aula:</strong> {(pendingEnrollment as any).aulaId}</p>
+                        <p><strong>Aula:</strong> {(pendingEnrollment as any).aulaId || pendingEnrollment.classroomId}</p>
+                        <p><strong>Sección:</strong> {(pendingEnrollment as any).seccion || 'A'}</p>
                     </div>
                 </AlertDescription>
             </Alert>

@@ -1,14 +1,20 @@
 import React, { useState } from 'react';
 
 export const ServerConfig = () => {
+  // 🔥 CORREGIDO: Verificar que window existe antes de leer localStorage
   const [settings, setSettings] = useState(() => {
-    return JSON.parse(localStorage.getItem('app_config') || '{"mode":"firebase","url":""}');
+    if (typeof window !== 'undefined') {
+      return JSON.parse(localStorage.getItem('app_config') || '{"mode":"firebase","url":""}');
+    }
+    return { mode: 'firebase', url: '' };
   });
 
   const handleUpdate = () => {
-    localStorage.setItem('app_config', JSON.stringify(settings));
-    alert("Configuración guardada. La app usará esta conexión.");
-    window.location.reload(); // Recarga para aplicar cambios inmediatamente
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('app_config', JSON.stringify(settings));
+      alert("Configuración guardada. La app usará esta conexión.");
+      window.location.reload(); // Recarga para aplicar cambios inmediatamente
+    }
   };
 
   return (

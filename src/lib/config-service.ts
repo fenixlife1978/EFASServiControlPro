@@ -9,18 +9,18 @@ export const subscribeToMasterKey = (callback: (key: string) => void) => {
     if (snapshot.exists()) {
       const data = snapshot.data();
       
-      // Verificamos que el campo master_key exista en el documento
-      if (data && data.master_key) {
-        callback(data.master_key);
-        console.log("Configuración de seguridad de EDU sincronizada");
+      // 🔥 CORREGIDO: El campo es 'master_pin', no 'master_key'
+      if (data && data.master_pin) {
+        callback(data.master_pin);
+        console.log("✅ PIN maestro sincronizado desde Firebase");
       } else {
-        console.warn("El documento existe pero el campo 'master_key' está vacío o falta.");
+        console.warn("⚠️ El documento existe pero el campo 'master_pin' está vacío o falta.");
       }
     } else {
-      console.warn("No se encontró el documento de seguridad en la ruta /system_config/security");
+      console.warn("⚠️ No se encontró el documento de seguridad en /system_config/security");
     }
   }, (error) => {
     // Esto es vital para evitar el error de "Cloud Firestore backend could not be reached"
-    console.error("Error de conexión con Firestore en el servicio de seguridad:", error);
+    console.error("❌ Error de conexión con Firestore en el servicio de seguridad:", error);
   });
 };

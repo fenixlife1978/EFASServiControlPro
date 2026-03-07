@@ -8,18 +8,21 @@ export default function HomePage() {
   const { user, loading } = useAuth();
   const router = useRouter();
   
-  // Estado para saber si ya se eligió un modo (Local/Nube)
-  const [dbMode, setDbMode] = useState<string | null>(null);
   const [checkingConfig, setCheckingConfig] = useState(true);
+  const [hasConfig, setHasConfig] = useState(false);
 
   useEffect(() => {
-    // 1. Verificamos la configuración en la memoria del PC
-    const savedMode = localStorage.getItem('edu_db_mode');
-    setDbMode(savedMode);
+    // 🔥 CORREGIDO: Leer de app_config (no de edu_db_mode)
+    const config = localStorage.getItem('app_config');
+    const setupCompleted = localStorage.getItem('setup_completed');
+    
+    // Si existe configuración o ya completó el setup, consideramos que ya eligió modo
+    const configExists = !!(config || setupCompleted);
+    setHasConfig(configExists);
     setCheckingConfig(false);
 
-    // 2. Solo si ya hay una configuración, procedemos con el login/dashboard
-    if (savedMode && !loading) {
+    // Solo redirigir si ya hay configuración
+    if (configExists && !loading) {
       if (user) {
         router.push('/dashboard');
       } else {
@@ -37,8 +40,8 @@ export default function HomePage() {
     );
   }
 
-  // SI NO HAY CONFIGURACIÓN: Mostramos la pantalla de "Selección de Base de Datos"
-  if (!dbMode) {
+  // 🔥 CORREGIDO: Si NO HAY CONFIGURACIÓN, mostramos el selector
+  if (!hasConfig) {
     return <DatabaseSelector />;
   }
 

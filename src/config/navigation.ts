@@ -4,25 +4,31 @@ export const NAV_ITEMS = [
   {
     title: 'Dashboard',
     path: '/dashboard',
-    icon: '📊',
-    roles: ['super-admin', 'director']
+    icon: LayoutDashboard,
+    roles: ['super-admin', 'director', 'profesor']
   },
   {
     title: 'Institutos',
     path: '/dashboard/institutions',
-    icon: '🏫',
+    icon: School,
     roles: ['super-admin']
   },
   {
     title: 'Personal',
     path: '/dashboard/users',
-    icon: '��',
+    icon: Users,
     roles: ['super-admin']
   },
   {
     title: 'Aulas',
     path: '/dashboard/classrooms',
-    icon: '🏫',
+    icon: Tablet,
+    roles: ['super-admin', 'director', 'profesor']
+  },
+  {
+    title: 'Seguridad',
+    path: '/dashboard/security',
+    icon: Settings,
     roles: ['super-admin', 'director']
   }
 ];

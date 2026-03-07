@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { SecurityRules } from '@/components/admin/config/SecurityRules';
-import  ProfesorView from '@/components/dashboard/ProfesorView';
+import ProfesorView from '@/components/dashboard/ProfesorView';
 import { useAuth } from '@/hooks/use-auth';
 
 export default function SecurityPage() {
@@ -36,10 +36,8 @@ export default function SecurityPage() {
         {hasAdminPrivileges ? (
           <SecurityRules institutionId={institutoId} />
         ) : (
-          <ProfesorView 
-              
-              
-          />
+          // 🔥 CORREGIDO: ProfesorView no recibe props, usa useAuth internamente
+          <ProfesorView />
         )}
       </div>
     </div>

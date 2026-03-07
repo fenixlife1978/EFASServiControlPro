@@ -12,20 +12,18 @@ export default function Sidebar({ userRole: initialRole }: { userRole: string })
   const pathname = usePathname();
   const [displayRole, setDisplayRole] = useState('CARGANDO...');
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [currentRole, setCurrentRole] = useState(initialRole);
 
-  
   useEffect(() => {
-    
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user?.email) {
         setUserEmail(user.email);
-        
 
         if (user.email === 'vallecondo@gmail.com') {
           setDisplayRole("SUPER ADMIN");
+          setCurrentRole('super-admin');
           return;
         }
-
 
         try {
           const q = query(
@@ -36,8 +34,9 @@ export default function Sidebar({ userRole: initialRole }: { userRole: string })
           const querySnapshot = await getDocs(q);
           
           if (!querySnapshot.empty) {
-           
-           const userData = querySnapshot.docs[0].data();
+            const userData = querySnapshot.docs[0].data();
+            setCurrentRole(userData.role || 'profesor');
+            
             if (userData.role === 'director') {
               setDisplayRole("DIRECTOR");
             } else {
@@ -56,12 +55,25 @@ export default function Sidebar({ userRole: initialRole }: { userRole: string })
     return () => unsubscribe();
   }, []);
 
-
   const isSuperAdmin = userEmail === 'vallecondo@gmail.com';
+  
+  // Filtrar items según el rol
   const filteredItems = NAV_ITEMS.filter(item => {
     if (isSuperAdmin) return true;
-    return item.roles.includes(initialRole);
+    return item.roles.includes(currentRole);
   });
+
+  const handleLogout = async () => {
+    try {
+      await auth.signOut();
+      document.cookie = "__session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;";
+      
+      // 🔥 CORREGIDO: No borrar localStorage, solo redirigir
+      window.location.replace('/login');
+    } catch (error) {
+      console.error("Error al cerrar sesión:", error);
+    }
+  };
 
   return (
     <aside className="w-72 h-[calc(100vh-2rem)] m-4 p-6 bg-slate-900 rounded-[3rem] flex flex-col shadow-2xl border border-slate-800">
@@ -74,6 +86,8 @@ export default function Sidebar({ userRole: initialRole }: { userRole: string })
       <nav className="flex-1 space-y-2 overflow-y-auto pr-2 custom-scrollbar">
         {filteredItems.map((item) => {
           const isActive = pathname === item.path;
+          const IconComponent = item.icon;
+          
           return (
             <Link 
               key={item.path} 
@@ -84,17 +98,22 @@ export default function Sidebar({ userRole: initialRole }: { userRole: string })
                   : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
               }`}
             >
-              <span className="text-xl not-italic">{item.icon}</span>
+              {/* 🔥 CORREGIDO: Renderizar como componente, no como string */}
+              <span className="text-xl not-italic">
+                <IconComponent size={20} />
+              </span>
               {item.title}
             </Link>
           );
         })}
       </nav>
 
-      {/* Sección del Panel de Configuración integrada */}
-      <div className="mt-4">
-        <ServerConfig />
-      </div>
+      {/* ServerConfig solo para super-admin */}
+      {isSuperAdmin && (
+        <div className="mt-4">
+          <ServerConfig />
+        </div>
+      )}
 
       <div className="mt-4 p-4 bg-slate-800/50 rounded-[2rem] border border-slate-700">
         <p className="text-[10px] font-black uppercase text-orange-500 mb-1 tracking-[0.2em]">
@@ -104,7 +123,7 @@ export default function Sidebar({ userRole: initialRole }: { userRole: string })
           {userEmail || 'Iniciando...'}
         </p>
         <button 
-          onClick={() => auth.signOut()}
+          onClick={handleLogout}
           className="mt-4 w-full py-2 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-xl text-[10px] font-black uppercase transition-all border border-red-500/20"
         >
           Cerrar Sesión

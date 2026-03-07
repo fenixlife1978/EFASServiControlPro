@@ -6,10 +6,10 @@ const COLLECTION_ROUTES = {
   firebase: [
     'dispositivos',
     'usuarios', 
-    'users',              // ← AÑADIDA: colección del superadmin
+    'users',
     'system_config',
     'institutions',
-    'config'              // ← AÑADIDA: para app_settings y app_status
+    'config'
   ],
   local: [
     'heartbeats',
@@ -56,8 +56,8 @@ export const dbService = {
       return await this.fetchExternal(url, collectionName);
     }
     
-    // Modo Híbrido (inteligente)
-    if (mode === 'hibrido') {
+    // 🔥 CORREGIDO: Acepta tanto 'hibrido' (español) como 'hybrid' (inglés)
+    if (mode === 'hibrido' || mode === 'hybrid') {
       return await this.fetchHybrid(collectionName, url);
     }
     
@@ -132,7 +132,8 @@ export const dbService = {
       return { success: true, mode: 'local' };
     }
     
-    if (mode === 'hibrido') {
+    // 🔥 CORREGIDO: Acepta ambos nombres para híbrido
+    if (mode === 'hibrido' || mode === 'hybrid') {
       if (COLLECTION_ROUTES.firebase.includes(collectionName)) {
         return { success: true, mode: 'firebase' };
       } else {
@@ -143,3 +144,8 @@ export const dbService = {
     return { success: false, mode: 'unknown' };
   }
 };
+
+// 🔥 AÑADIDO: Exponer dbService globalmente para depuración
+if (typeof window !== 'undefined') {
+  (window).dbService = dbService;
+}

@@ -14,9 +14,9 @@
     },
     {
       "id": "efas-logo",
-      "description": "EFAS ServiControlPro Logo",
-      "imageUrl": "https://storage.googleapis.com/gweb-aip-dev.appspot.com/work-storage/2h3XJ-i-PjJ9mQ0YV9T-bA",
-      "imageHint": "efas logo"
+      "description": "EDUControlPro Logo",
+      "imageUrl": "/downloads/logo/efas.png",
+      "imageHint": "EDUControlPro logo"
     }
   ]
 }

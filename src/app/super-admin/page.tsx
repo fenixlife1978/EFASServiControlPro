@@ -54,20 +54,28 @@ export default function SuperAdminDashboard() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await auth.signOut();
+      document.cookie = "__session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;";
+      
+      // 🔥 CORREGIDO: Solo eliminar claves de sesión, NO la configuración
+      localStorage.removeItem('userRole');
+      // Mantener app_config y setup_completed
+      
+      window.location.replace("/login");
+    } catch (error) {
+      console.error("Error al cerrar sesión:", error);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-black text-white p-8">
       <div className="max-w-6xl mx-auto">
         <div className="flex justify-between items-center mb-12">
           <Logo className="h-12" />
           <Button 
-            onClick={() => { 
-              auth.signOut().then(() => { 
-                document.cookie = "__session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;"; 
-                localStorage.clear(); 
-                sessionStorage.clear(); 
-                window.location.replace("/login"); 
-              }); 
-            }} 
+            onClick={handleLogout}
             variant="destructive" 
             size="sm" 
             className="bg-red-900/20 hover:bg-red-900/40 text-red-500 border border-red-900/50 italic font-black rounded-lg px-6 transition-all"

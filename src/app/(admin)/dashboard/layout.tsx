@@ -15,7 +15,7 @@ import { useUser } from '@/firebase';
 import { Skeleton } from '@/components/ui/skeleton';
 import { InstitutionProvider } from './institution-context';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
-import { DatabaseSelector } from '@/components/DatabaseSelector'; // ← IMPORTAR
+import { DatabaseSelector } from '@/components/DatabaseSelector';
 
 const AdminNavbar = () => {
   const pathname = usePathname();
@@ -24,8 +24,17 @@ const AdminNavbar = () => {
   const handleLogout = () => {
     auth.signOut().then(() => {
       document.cookie = "__session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;";
-      localStorage.clear();
+      
+      // 🔥 CORREGIDO: No usar localStorage.clear() ni sessionStorage.clear()
+      // Solo eliminar las claves de sesión, mantener la configuración
+      localStorage.removeItem('userRole');
+      localStorage.removeItem('InstitutoId');
+      localStorage.removeItem('deviceId');
+      // No borrar app_config ni setup_completed
+      
+      // sessionStorage se puede limpiar sin problema porque no guarda configuración persistente
       sessionStorage.clear();
+      
       window.location.replace("/login");
     });
   };
@@ -139,7 +148,7 @@ function AdminLayoutComponent({ children }: { children: React.ReactNode }) {
           </p>
         </footer>
       </div>
-      <DatabaseSelector /> {/* ← AÑADIDO: Selector flotante */}
+      <DatabaseSelector />
     </InstitutionProvider>
   );
 }

@@ -23,13 +23,16 @@ export default function LoginForm() {
   const [resetMode, setResetMode] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
   const [currentMode, setCurrentMode] = useState<'cloud' | 'local' | 'hybrid'>('cloud');
+  const [modeLoaded, setModeLoaded] = useState(false);
 
   const { toast } = useToast();
 
-  // Leer modo SOLO en el cliente (después de montar)
+  // Leer modo UNA SOLA VEZ al montar el componente
   useEffect(() => {
     const { mode } = dbService.getSettings();
     setCurrentMode(mode);
+    setModeLoaded(true);
+    console.log('📌 Modo cargado en LoginForm:', mode);
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -40,7 +43,7 @@ export default function LoginForm() {
     const cleanEmail = email.trim().toLowerCase();
     const cleanInstId = institutoId.trim();
 
-    // 🔥 VALIDACIÓN MEJORADA - PRIMER INTENTO
+    // Leer configuración actual (ya está en currentMode)
     const { mode, url } = dbService.getSettings();
     
     // Caso 1: Modo híbrido sin URL → Auto-corregir a nube
@@ -60,11 +63,6 @@ export default function LoginForm() {
       return;
     }
 
-    // Caso 3: Modo híbrido válido (con URL)
-    if (mode === 'hybrid' && url) {
-      console.log('Modo HÍBRIDO: Usando Firebase para autenticación');
-    }
-
     try {
       const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
       const user = userCredential.user;
@@ -73,9 +71,6 @@ export default function LoginForm() {
         const idToken = await user.getIdToken(true);
         document.cookie = "__session=" + idToken + "; path=/; samesite=lax; max-age=3600; secure";
         localStorage.setItem('userRole', 'super-admin');
-        
-        sessionStorage.removeItem('setup_required');
-        sessionStorage.setItem('setup_completed', 'true');
       } else {
         const q = query(
           collection(db, "usuarios"), 
@@ -127,7 +122,6 @@ export default function LoginForm() {
     
     const { mode, url } = dbService.getSettings();
     
-    // Validación también para reset password
     if (mode === 'hybrid' && !url) {
       dbService.saveSettings('cloud');
       setError('Configuración inválida. Se ha restablecido a modo NUBE. Intenta nuevamente.');
@@ -180,8 +174,8 @@ export default function LoginForm() {
           </form>
         ) : (
           <form className="grid gap-4" onSubmit={handleLogin}>
-            {/* Indicador del modo actual (solo se muestra después de montar) */}
-            {currentMode && (
+            {/* Indicador del modo actual - AHORA CON CONDICIÓN PARA EVITAR DESTELLO */}
+            {modeLoaded && currentMode && (
               <div className="mb-2 p-2 bg-slate-900/30 rounded-lg border border-slate-800 flex items-center gap-2">
                 <AlertCircle size={12} className="text-orange-500" />
                 <span className="text-[8px] text-slate-500 uppercase font-bold">

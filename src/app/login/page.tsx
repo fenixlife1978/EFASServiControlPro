@@ -7,11 +7,18 @@ import { Device } from '@capacitor/device';
 import { Preferences } from '@capacitor/preferences';
 import { db } from '@/firebase/config';
 import { doc, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
-import { dbService } from '@/lib/dbService'; // ← IMPORTAR
+import { dbService } from '@/lib/dbService';
 
 export default function LoginPage() {
   const [isScanning, setIsScanning] = useState(false);
   const [bindingInfo, setBindingInfo] = useState<{name: string, location: string} | null>(null);
+  const [currentMode, setCurrentMode] = useState<'cloud' | 'local' | 'hybrid' | null>(null);
+
+  // 🔥 Leer modo UNA SOLA VEZ al cargar la página
+  useEffect(() => {
+    const { mode } = dbService.getSettings();
+    setCurrentMode(mode);
+  }, []);
 
   useEffect(() => {
     const handleStartScan = () => startScan();
@@ -57,8 +64,6 @@ export default function LoginPage() {
         // Obtener modo actual
         const { mode, url } = dbService.getSettings();
 
-        // Si es modo local o híbrido, deberías enviar a tu servidor
-        // Por ahora, mantenemos Firebase para vinculación
         const dispositivoRef = doc(db, "dispositivos", qrId);
 
         await updateDoc(dispositivoRef, {

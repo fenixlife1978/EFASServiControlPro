@@ -2,49 +2,58 @@
 
 import React, { useEffect, useState } from 'react';
 import { db } from '@/firebase';
-import { collection, query, where, onSnapshot, updateDoc, doc, limit } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, updateDoc, doc, limit, getDoc } from 'firebase/firestore';
 import { ShieldAlert, MessageSquare, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface SecurityAlertListenerProps {
   institutionId: string;
-  studentId: string; // El ID que el alumno tiene asignado (ej: EST-2024)
+  deviceId: string; // Cambiado de studentId a deviceId para que coincida con la estructura real
 }
 
-export function SecurityAlertListener({ institutionId, studentId }: SecurityAlertListenerProps) {
+export function SecurityAlertListener({ institutionId, deviceId }: SecurityAlertListenerProps) {
   const [activeAlert, setActiveAlert] = useState<any>(null);
 
   useEffect(() => {
-    if (!institutionId || !studentId) return;
+    if (!institutionId || !deviceId) return;
 
-    // Escuchamos mensajes directos para este estudiante específico que no hayan sido vistos
-    const q = query(
-      collection(db, `institutions/${institutionId}/mensajes_directos`),
-      where("targetId", "==", studentId),
-      where("visto", "==", false),
-      limit(1)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      if (!snapshot.empty) {
-        const alertData = {
-          id: snapshot.docs[0].id,
-          ...snapshot.docs[0].data()
-        };
-        setActiveAlert(alertData);
+    // 🔥 CORREGIDO: Escuchar directamente el documento del dispositivo
+    const deviceRef = doc(db, 'dispositivos', deviceId);
+    
+    const unsubscribe = onSnapshot(deviceRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        
+        // Verificar si hay un mensaje pendiente
+        if (data.pending_message && !data.message_viewed) {
+          setActiveAlert({
+            id: snapshot.id,
+            mensaje: data.pending_message,
+            timestamp: data.message_timestamp,
+            sender: data.message_sender
+          });
+        } else {
+          setActiveAlert(null);
+        }
       } else {
         setActiveAlert(null);
       }
+    }, (error) => {
+      console.error("Error escuchando mensajes:", error);
     });
 
     return () => unsubscribe();
-  }, [institutionId, studentId]);
+  }, [institutionId, deviceId]);
 
   const markAsRead = async () => {
     if (!activeAlert) return;
+    
     try {
-      const docRef = doc(db, `institutions/${institutionId}/mensajes_directos`, activeAlert.id);
-      await updateDoc(docRef, { visto: true, readAt: new Date() });
+      const deviceRef = doc(db, 'dispositivos', deviceId);
+      await updateDoc(deviceRef, { 
+        message_viewed: true,
+        message_readAt: new Date()
+      });
       setActiveAlert(null);
     } catch (error) {
       console.error("Error al confirmar lectura:", error);
@@ -75,6 +84,11 @@ export function SecurityAlertListener({ institutionId, studentId }: SecurityAler
           <p className="text-lg text-slate-200 font-medium leading-relaxed">
             "{activeAlert.mensaje}"
           </p>
+          {activeAlert.sender && (
+            <p className="text-xs text-slate-500 mt-2 italic">
+              Remitente: {activeAlert.sender}
+            </p>
+          )}
         </div>
 
         <div className="pt-4">

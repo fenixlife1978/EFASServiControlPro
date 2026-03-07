@@ -5,6 +5,9 @@ import {
   Firestore,
   collection,
   getDocs,
+  query,
+  where,
+  serverTimestamp,
 } from 'firebase/firestore';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
@@ -16,6 +19,8 @@ interface ConfirmEnrollmentParams {
   pendingData: PendingEnrollment;
   studentName: string;
   institutionId: string;
+  aulaId: string;
+  seccion: string;
 }
 
 export async function confirmEnrollment({
@@ -24,58 +29,75 @@ export async function confirmEnrollment({
   pendingData,
   studentName,
   institutionId,
+  aulaId,
+  seccion,
 }: ConfirmEnrollmentParams): Promise<void> {
   const batch = writeBatch(firestore);
 
-  // Calculate the next device number
-  const alumnosRef = collection(firestore, 'institutions', institutionId, 'Aulas', pendingData.classroomId, 'Alumnos');
-  const snapshot = await getDocs(alumnosRef).catch(e => {
-    // Handle potential permission error on getDocs
-     const permissionError = new FirestorePermissionError({
-      path: alumnosRef.path,
+  // 🔥 CORREGIDO: Calcular número de equipo basado en dispositivos existentes
+  const dispositivosRef = collection(firestore, 'dispositivos');
+  const dispositivosQuery = query(dispositivosRef, where("InstitutoId", "==", institutionId));
+  const snapshot = await getDocs(dispositivosQuery).catch(e => {
+    const permissionError = new FirestorePermissionError({
+      path: dispositivosRef.path,
       operation: 'list',
     });
     errorEmitter.emit('permission-error', permissionError);
     throw e;
   });
+  
   const nextNumber = snapshot.size + 1;
-  const nroEquipo = nextNumber.toString().padStart(2, '0');
+  const nroEquipo = nextNumber.toString().padStart(3, '0');
+  
+  // Generar ID único para el usuario basado en el nombre
+  const baseName = studentName.toLowerCase().trim().replace(/\s+/g, '_').normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const suffix = enrollmentId.slice(-4);
+  const customId = `${baseName}_${suffix}`;
 
-  // 1. Define the reference to the document in /pending_enrollments
-  const pendingDocRef = doc(firestore, 'pending_enrollments', enrollmentId);
-
-  // 2. Define the reference for the new document in the nested devices subcollection
-  const newDeviceRef = doc(
-    firestore, 
-    'institutions', institutionId, 
-    'Aulas', pendingData.classroomId, 
-    'Alumnos', enrollmentId
-  );
-
-  // 3. Create the new device data object
-  const newDeviceData: Omit<Alumno, 'id'> = {
-    nombre_alumno: studentName,
-    classroomId: pendingData.classroomId,
-    institutionId: institutionId,
-    macAddress: pendingData.deviceInfo.macAddress,
-    modelo: pendingData.deviceInfo.model,
+  // 🔥 CORREGIDO: Guardar en colección "usuarios" (no en subcolección Alumnos)
+  const userRef = doc(firestore, 'usuarios', customId);
+  
+  // Datos del nuevo alumno
+  const newUserData = {
+    id: customId,
+    nombre: studentName.trim(),
+    rol: 'alumno',
+    InstitutoId: institutionId,
+    aulaId: aulaId,
+    seccion: seccion,
+    deviceId: enrollmentId, // El ID del dispositivo pendiente
     nro_equipo: nroEquipo,
+    macAddress: pendingData.deviceInfo?.macAddress || '',
+    modelo: pendingData.deviceInfo?.model || '',
+    status: 'active',
+    createdAt: serverTimestamp()
   };
 
-  // 4. Add operations to the batch
-  batch.set(newDeviceRef, newDeviceData);
-  batch.delete(pendingDocRef);
+  // 🔥 CORREGIDO: Actualizar el dispositivo existente
+  const deviceRef = doc(firestore, 'dispositivos', enrollmentId);
+  
+  // Operaciones en el batch
+  batch.set(userRef, newUserData);
+  batch.update(deviceRef, {
+    alumno_asignado: studentName.trim(),
+    status: 'active',
+    vinculado: true,
+    lastUpdated: serverTimestamp()
+  });
 
-  // 5. Commit the batch
+  // Si existe pending_enrollments, eliminarlo
+  if (enrollmentId) {
+    const pendingDocRef = doc(firestore, 'pending_enrollments', enrollmentId);
+    batch.delete(pendingDocRef);
+  }
+
   return batch.commit().catch(async (serverError) => {
-    // If the batch fails, it's likely a permissions issue.
     const permissionError = new FirestorePermissionError({
-      path: `batch write (Alumnos collection and pending_enrollments)`,
+      path: `batch write (usuarios and dispositivos)`,
       operation: 'write',
-      requestResourceData: { newDevice: newDeviceData, deletedId: enrollmentId },
+      requestResourceData: { newUser: newUserData, deviceId: enrollmentId },
     });
     errorEmitter.emit('permission-error', permissionError);
-    // Re-throw the original error to be caught by the caller
     throw serverError;
   });
 }
