@@ -3,8 +3,8 @@ import { useEffect, useState } from 'react';
 import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
 import InstitutionView from '@/components/dashboard/InstitutionView';
 import SuperAdminView from '@/components/dashboard/SuperAdminView';
-import DirectorView from '@/components/dashboard/DirectorView';      // ← RUTA ORIGINAL
-import ProfesorView from '@/components/dashboard/ProfesorView';      // ← RUTA ORIGINAL
+import DirectorView from '@/components/dashboard/DirectorView';
+import ProfesorView from '@/components/dashboard/ProfesorView';
 import { IncidentsTable } from '@/components/security/IncidentsTable';
 import { useAuth } from '@/hooks/use-auth';
 import { LayoutDashboard, ShieldAlert } from 'lucide-react';
@@ -23,16 +23,35 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<'monitor' | 'seguridad'>('monitor');
   const [isMounted, setIsMounted] = useState(false);
 
-  // Obtener rol desde userData (Firebase)
+  // Obtener rol desde múltiples fuentes
   useEffect(() => {
+    // 1. Prioridad: userData de Firebase
     if (userData?.role) {
+      console.log('Rol desde userData:', userData.role);
       setRole(userData.role);
+    } 
+    // 2. Fallback: localStorage
+    else {
+      const savedRole = localStorage.getItem('userRole');
+      if (savedRole) {
+        console.log('Rol desde localStorage:', savedRole);
+        setRole(savedRole);
+      }
     }
     setIsMounted(true);
   }, [userData]);
 
+  // 3. Verificación directa por email (super-admin)
+  useEffect(() => {
+    if (user?.email === 'vallecondo@gmail.com') {
+      console.log('Super-admin detectado por email');
+      setRole('super-admin');
+      localStorage.setItem('userRole', 'super-admin');
+    }
+  }, [user]);
+
   // Cargando
-  if (!isMounted || !role) {
+  if (!isMounted) {
     return (
       <div className="min-h-screen bg-[#0a0c10] flex flex-col items-center justify-center gap-4">
         <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
@@ -41,8 +60,8 @@ export default function DashboardPage() {
     );
   }
 
-  // 1. SUPER ADMIN
-  if (role === 'super-admin') {
+  // SUPER ADMIN (por rol o por email)
+  if (role === 'super-admin' || user?.email === 'vallecondo@gmail.com') {
     if (institutionId) {
       return (
         <main className="min-h-screen bg-[#0a0c10]">
@@ -57,9 +76,8 @@ export default function DashboardPage() {
     );
   }
 
-  // 2. DIRECTOR (con pestañas)
+  // DIRECTOR
   if (role === 'director') {
-    // Obtener ID de institución (prioridad: userData -> institutionId -> vacío)
     const workingInstId = userData?.InstitutoId || institutionId || '';
     
     return (
@@ -96,7 +114,7 @@ export default function DashboardPage() {
     );
   }
 
-  // 3. PROFESOR
+  // PROFESOR
   if (role === 'profesor') {
     return (
       <main className="min-h-screen bg-[#0a0c10] p-6 lg:p-10">
@@ -105,7 +123,7 @@ export default function DashboardPage() {
     );
   }
 
-  // 4. CASO POR DEFECTO
+  // ROL DESCONOCIDO
   return (
     <main className="min-h-screen bg-[#0a0c10] flex items-center justify-center">
       <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest">

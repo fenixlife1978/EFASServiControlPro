@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -11,7 +11,8 @@ import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/aut
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Mail, Lock, Building2, Loader2, ArrowLeft } from 'lucide-react';
+import { Mail, Lock, Building2, Loader2, ArrowLeft, AlertCircle } from 'lucide-react';
+import { dbService } from '@/lib/dbService';
 
 export default function LoginForm() {
   const [email, setEmail] = useState('');
@@ -21,8 +22,15 @@ export default function LoginForm() {
   const [loading, setLoading] = useState(false);
   const [resetMode, setResetMode] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
-  
+  const [currentMode, setCurrentMode] = useState<'cloud' | 'local' | 'hybrid'>('cloud');
+
   const { toast } = useToast();
+
+  // Leer modo SOLO en el cliente (después de montar)
+  useEffect(() => {
+    const { mode } = dbService.getSettings();
+    setCurrentMode(mode);
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,18 +40,31 @@ export default function LoginForm() {
     const cleanEmail = email.trim().toLowerCase();
     const cleanInstId = institutoId.trim();
 
+    // Leer configuración de base de datos
+    const { mode, url } = dbService.getSettings();
+    
+    if (mode === 'local') {
+      setError('Modo LOCAL activo. El login solo es posible con servidor propio.');
+      setLoading(false);
+      return;
+    }
+
+    if (mode === 'hybrid') {
+      console.log('Modo HÍBRIDO: Usando Firebase para autenticación');
+    }
+
     try {
-      // 1. Intentar Login en Firebase Auth
       const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
       const user = userCredential.user;
       
-      // 2. Si es el Super Admin, entra sin más validaciones
       if (user.email === 'vallecondo@gmail.com') {
         const idToken = await user.getIdToken(true);
         document.cookie = "__session=" + idToken + "; path=/; samesite=lax; max-age=3600; secure";
         localStorage.setItem('userRole', 'super-admin');
+        
+        sessionStorage.removeItem('setup_required');
+        sessionStorage.setItem('setup_completed', 'true');
       } else {
-        // 3. Para Profesores/Otros: Buscar en la colección raíz "usuarios"
         const q = query(
           collection(db, "usuarios"), 
           where("email", "==", cleanEmail)
@@ -60,7 +81,6 @@ export default function LoginForm() {
 
         const userData = snap.docs[0].data();
 
-        // VALIDACIÓN CRUCIAL: Comparar el InstitutoId (Exacto como en Firestore)
         if (userData.InstitutoId !== cleanInstId) {
           await auth.signOut();
           setError('El ID de Instituto no es correcto para este usuario.');
@@ -68,7 +88,6 @@ export default function LoginForm() {
           return;
         }
         
-        // Guardar sesión y roles
         const idToken = await user.getIdToken(true);
         document.cookie = "__session=" + idToken + "; path=/; samesite=lax; max-age=3600; secure";
         
@@ -81,7 +100,6 @@ export default function LoginForm() {
 
     } catch (err: any) {
       console.error("Login Error:", err);
-      // Manejar errores específicos de Auth
       if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
         setError('Email o contraseña incorrectos.');
       } else {
@@ -94,13 +112,23 @@ export default function LoginForm() {
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) { setError('Ingresa tu email.'); return; }
+    
+    const { mode } = dbService.getSettings();
+    if (mode === 'local') {
+      setError('Modo LOCAL: Recuperación no disponible.');
+      return;
+    }
+    
     setResetLoading(true);
     try {
       await sendPasswordResetEmail(auth, email.trim().toLowerCase());
       toast({ title: 'Correo enviado', description: 'Revisa tu bandeja de entrada.' });
       setResetMode(false);
-    } catch (err: any) { setError('Error al enviar correo.'); }
-    finally { setResetLoading(false); }
+    } catch (err: any) { 
+      setError('Error al enviar correo.'); 
+    } finally { 
+      setResetLoading(false); 
+    }
   };
 
   if (loading) return (
@@ -132,6 +160,16 @@ export default function LoginForm() {
           </form>
         ) : (
           <form className="grid gap-4" onSubmit={handleLogin}>
+            {/* Indicador del modo actual (solo se muestra después de montar) */}
+            {currentMode && (
+              <div className="mb-2 p-2 bg-slate-900/30 rounded-lg border border-slate-800 flex items-center gap-2">
+                <AlertCircle size={12} className="text-orange-500" />
+                <span className="text-[8px] text-slate-500 uppercase font-bold">
+                  Modo: {currentMode === 'cloud' ? 'NUBE' : currentMode === 'local' ? 'LOCAL' : 'HÍBRIDO'}
+                </span>
+              </div>
+            )}
+
             <div className="grid gap-1.5 relative">
               <Mail className="absolute left-4 top-10 text-slate-500 h-4 w-4" />
               <Label className="text-[9px] uppercase font-black ml-1 text-slate-500 italic">Email</Label>
