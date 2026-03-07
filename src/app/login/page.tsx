@@ -7,6 +7,7 @@ import { Device } from '@capacitor/device';
 import { Preferences } from '@capacitor/preferences';
 import { db } from '@/firebase/config';
 import { doc, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
+import { dbService } from '@/lib/dbService'; // ← IMPORTAR
 
 export default function LoginPage() {
   const [isScanning, setIsScanning] = useState(false);
@@ -38,7 +39,6 @@ export default function LoginPage() {
 
       if (barcodes.length > 0) {
         const rawValue = barcodes[0].displayValue;
-        // Limpieza de caracteres de escape y saltos de línea
         let cleanValue = rawValue.replace(/[\n\r]/g, "").replace(/\\/g, "");
         
         let qrId = "";
@@ -49,15 +49,18 @@ export default function LoginPage() {
           qrId = cleanValue;
         }
         
-        // Limpieza final del ID (Mayúsculas y solo caracteres válidos)
         qrId = qrId.trim().toUpperCase().replace(/[^A-Z0-9-]/g, "");
 
         const info = await Device.getInfo();
         const id = await Device.getId();
 
+        // Obtener modo actual
+        const { mode, url } = dbService.getSettings();
+
+        // Si es modo local o híbrido, deberías enviar a tu servidor
+        // Por ahora, mantenemos Firebase para vinculación
         const dispositivoRef = doc(db, "dispositivos", qrId);
 
-        // Actualizamos Firestore
         await updateDoc(dispositivoRef, {
           vinculado: true,
           fechaVinculacion: serverTimestamp(),
@@ -73,7 +76,6 @@ export default function LoginPage() {
           }
         });
 
-        // Obtenemos los datos para confirmar vinculación
         const snap = await getDoc(dispositivoRef);
         if (snap.exists()) {
           const data = snap.data();
@@ -84,11 +86,9 @@ export default function LoginPage() {
             location: data.institutoNombre || 'Sede Principal'
           });
           
-          // GUARDADO CRUCIAL: Usamos Preferences para que Java (MainActivity) pueda leerlo
           await Preferences.set({ key: 'deviceId', value: qrId });
           await Preferences.set({ key: 'InstitutoId', value: instId });
           
-          // También guardamos en localStorage por compatibilidad con la web
           localStorage.setItem('deviceId', qrId);
           localStorage.setItem('InstitutoId', instId);
         }

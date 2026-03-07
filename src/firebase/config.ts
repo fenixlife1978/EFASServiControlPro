@@ -22,34 +22,53 @@ const storage = getStorage(app);
 // Tipos de modo de conexión
 export type DbMode = 'cloud' | 'local' | 'hybrid';
 
-// Funciones de configuración
+// ====================================================
+// FUNCIONES CORREGIDAS (usando app_config)
+// ====================================================
+
 export const getDbMode = (): DbMode => {
   if (typeof window !== "undefined") {
-    return (localStorage.getItem("edu_db_mode") as DbMode) || "cloud";
+    const config = localStorage.getItem('app_config');
+    if (config) {
+      try {
+        const { mode } = JSON.parse(config);
+        return (mode as DbMode) || "cloud";
+      } catch (e) {
+        return "cloud";
+      }
+    }
   }
   return "cloud";
 };
 
 export const getLocalServerUrl = (): string => {
   if (typeof window !== "undefined") {
-    return localStorage.getItem("edu_local_url") || "http://localhost:5000";
+    const config = localStorage.getItem('app_config');
+    if (config) {
+      try {
+        const { url } = JSON.parse(config);
+        return url || "http://localhost:5000";
+      } catch (e) {
+        return "http://localhost:5000";
+      }
+    }
   }
   return "http://localhost:5000";
 };
 
 export const setDbMode = (mode: DbMode, localUrl?: string) => {
   if (typeof window !== "undefined") {
-    localStorage.setItem("edu_db_mode", mode);
-    if (localUrl) {
-      localStorage.setItem("edu_local_url", localUrl);
-    }
+    localStorage.setItem('app_config', JSON.stringify({ mode, url: localUrl }));
   }
 };
 
-// Cliente API para servidor propio
+// ====================================================
+// API CLIENT (sin cambios)
+// ====================================================
+
 export const createApiClient = (baseUrl: string) => {
   return {
-    // Dispositivos
+    
     getDispositivos: async () => {
       const res = await fetch(`${baseUrl}/api/dispositivos`);
       return res.json();
@@ -66,20 +85,18 @@ export const createApiClient = (baseUrl: string) => {
       });
       return res.json();
     },
-    
-    // Usuarios
-    getUsuarios: async () => {
+
+  getUsuarios: async () => {
       const res = await fetch(`${baseUrl}/api/usuarios`);
       return res.json();
     },
-    
-    // Alertas
+  
     getAlertas: async () => {
       const res = await fetch(`${baseUrl}/api/alertas`);
       return res.json();
     },
-    
-    // Web History
+
+  
     getWebHistory: async (deviceId: string) => {
       const res = await fetch(`${baseUrl}/api/web-history/${deviceId}`);
       return res.json();
@@ -87,6 +104,6 @@ export const createApiClient = (baseUrl: string) => {
   };
 };
 
-// Exportamos Firestore como "db" por compatibilidad
+
 export const db = firestore;
 export { auth, storage, app };
