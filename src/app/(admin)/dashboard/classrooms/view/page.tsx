@@ -17,7 +17,20 @@ function MonitorContent() {
   const [showQR, setShowQR] = useState(false);
   const [editingDevice, setEditingDevice] = useState<any>(null);
   const [messagingDevice, setMessagingDevice] = useState<any>(null);
+  const [aulaSeccion, setAulaSeccion] = useState<string>('');
   const aulaId = searchParams.get('id');
+
+  // Obtener la sección del aula
+  useEffect(() => {
+    if (!institutionId || !aulaId) return;
+    const aulaRef = doc(db, "institutions", institutionId, "Aulas", aulaId);
+    const unsub = onSnapshot(aulaRef, (snap) => {
+      if (snap.exists()) {
+        setAulaSeccion(snap.data().seccion || '');
+      }
+    });
+    return () => unsub();
+  }, [institutionId, aulaId]);
 
   useEffect(() => {
     if (!institutionId || !aulaId) return;
@@ -55,7 +68,7 @@ function MonitorContent() {
               Monitor <span className="text-orange-500">En Vivo</span>
             </h1>
             <p className="text-slate-400 font-bold uppercase text-[10px] tracking-[0.3em] mt-3 italic">
-              EDU ServControlPro • Aula: {aulaId}
+              EDU ServControlPro • Aula: {aulaId} {aulaSeccion && `(Secc. ${aulaSeccion})`}
             </p>
           </div>
         </div>
@@ -125,6 +138,7 @@ function MonitorContent() {
           deviceId={editingDevice.id} 
           InstitutoId={institutionId || ""}
           aulaId={aulaId || ""}
+          seccion={aulaSeccion}  // ← AGREGADO: sección del aula
           onClose={() => setEditingDevice(null)} 
         />
       )}
@@ -133,7 +147,7 @@ function MonitorContent() {
         <DirectMessage 
           deviceId={messagingDevice.id}
           alumnoNombre={messagingDevice.alumno_asignado}
-          userRole="director" // Forzamos el rol para este panel
+          userRole="director"
           onClose={() => setMessagingDevice(null)}
         />
       )}

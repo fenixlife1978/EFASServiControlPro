@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { db } from '@/firebase/config';
-import { collection, setDoc, doc, onSnapshot, query } from 'firebase/firestore';
+import { collection, setDoc, doc, onSnapshot, query, serverTimestamp } from 'firebase/firestore';
 import { Loader2, UserPlus, ShieldCheck } from 'lucide-react';
 
 export default function UserManagement() {
@@ -58,9 +58,10 @@ export default function UserManagement() {
         email: formData.email.toLowerCase().trim(),
         role: formData.role,
         InstitutoId: formData.InstitutoId,
-        aulaId: formData.aulaId,
-        seccion: formData.seccion,
-        createdAt: new Date(),
+        aulaId: formData.aulaId || '',
+        aula_asignada: formData.aulaId || '', // ← Campo adicional para compatibilidad
+        seccion: formData.seccion || '',
+        createdAt: serverTimestamp(),
         status: 'active'
       });
       

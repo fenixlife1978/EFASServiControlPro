@@ -24,10 +24,11 @@ export default function DirectMessage({ deviceId, alumnoNombre, userRole, onClos
 
     setSending(true);
     try {
+      // ✅ CORREGIDO: Usar 'pending_message' como espera la APK
       await updateDoc(doc(db, "dispositivos", deviceId), {
-        mensaje_alerta: mensaje.trim(),
-        mensaje_timestamp: serverTimestamp(),
-        mensaje_remitente: userRole.toUpperCase()
+        pending_message: mensaje.trim(),          // ← CAMBIADO de mensaje_alerta
+        message_timestamp: serverTimestamp(),      // ← Este campo ya estaba bien
+        message_sender: userRole.toUpperCase()     // ← Este campo ya estaba bien
       });
       setMensaje('');
       onClose();

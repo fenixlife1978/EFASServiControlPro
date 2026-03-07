@@ -15,6 +15,7 @@ import { useUser } from '@/firebase';
 import { Skeleton } from '@/components/ui/skeleton';
 import { InstitutionProvider } from './institution-context';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
+import { DatabaseSelector } from '@/components/DatabaseSelector'; // ← IMPORTAR
 
 const AdminNavbar = () => {
   const pathname = usePathname();
@@ -138,6 +139,7 @@ function AdminLayoutComponent({ children }: { children: React.ReactNode }) {
           </p>
         </footer>
       </div>
+      <DatabaseSelector /> {/* ← AÑADIDO: Selector flotante */}
     </InstitutionProvider>
   );
 }

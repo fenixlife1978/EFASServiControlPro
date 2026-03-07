@@ -25,10 +25,10 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
     if (!isOpen || !tabletId) return;
 
     setLoading(true);
-    // Buscamos en la colección 'web_history' filtrando por la tablet específica
+    // ✅ CORREGIDO: Cambiado 'tabletId' por 'deviceId' (como guarda la APK)
     const q = query(
       collection(db, 'web_history'),
-      where('tabletId', '==', tabletId),
+      where('deviceId', '==', tabletId),  // ← ÚNICO CAMBIO
       orderBy('timestamp', 'desc'),
       limit(20)
     );
@@ -39,6 +39,9 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
         ...doc.data()
       })) as WebHistory[];
       setHistory(docs);
+      setLoading(false);
+    }, (error) => {
+      console.error("Error cargando historial:", error);
       setLoading(false);
     });
 
