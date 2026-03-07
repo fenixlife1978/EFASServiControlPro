@@ -63,12 +63,11 @@ export const setDbMode = (mode: DbMode, localUrl?: string) => {
 };
 
 // ====================================================
-// API CLIENT (sin cambios)
+// API CLIENT (corregido - llaves bien cerradas)
 // ====================================================
 
 export const createApiClient = (baseUrl: string) => {
   return {
-    
     getDispositivos: async () => {
       const res = await fetch(`${baseUrl}/api/dispositivos`);
       return res.json();
@@ -85,18 +84,14 @@ export const createApiClient = (baseUrl: string) => {
       });
       return res.json();
     },
-
-  getUsuarios: async () => {
+    getUsuarios: async () => {
       const res = await fetch(`${baseUrl}/api/usuarios`);
       return res.json();
     },
-  
     getAlertas: async () => {
       const res = await fetch(`${baseUrl}/api/alertas`);
       return res.json();
     },
-
-  
     getWebHistory: async (deviceId: string) => {
       const res = await fetch(`${baseUrl}/api/web-history/${deviceId}`);
       return res.json();
