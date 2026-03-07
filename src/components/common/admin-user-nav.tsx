@@ -26,17 +26,14 @@ export function AdminUserNav() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Escuchamos cambios de auth. Cada vez que el usuario cambie, este efecto se dispara.
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        // IMPORTANTE: Si el email cambió respecto al estado anterior, forzamos carga
         const email = user.email || '';
         
         try {
           if (email === 'vallecondo@gmail.com') {
             setUserData({ nombre: "Super Admin", role: "SUPER ADMIN", email });
           } else {
-            // Buscamos SIEMPRE en la colección usuarios con el email actual
             const q = query(collection(db, "usuarios"), where("email", "==", email), limit(1));
             const snap = await getDocs(q);
             
@@ -62,13 +59,20 @@ export function AdminUserNav() {
     });
 
     return () => unsubscribe();
-  }, []); // El array vacío es correcto porque onAuthStateChanged es un listener activo
+  }, []);
 
   const handleLogout = async () => {
     setLoading(true);
-    await auth.signOut(); document.cookie = "__session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;"; window.localStorage.clear(); window.location.replace("/login");
-    // Limpieza manual extra para evitar el error del "segundo intento"
-    window.localStorage.clear();
+    
+    // 🔥 CORREGIDO: Eliminados todos los localStorage.clear()
+    // Solo cerramos sesión en Firebase y eliminamos la cookie
+    await auth.signOut();
+    document.cookie = "__session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;";
+    
+    // ✅ Mantenemos app_config y setup_completed en localStorage
+    // No los borramos
+    
+    // Redirigir
     router.refresh();
     router.push('/login');
   };
@@ -99,7 +103,10 @@ export function AdminUserNav() {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => { auth.signOut().then(() => { document.cookie = "__session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;"; localStorage.clear(); sessionStorage.clear(); window.location.replace("/login"); }); }} className="text-red-600 font-bold uppercase text-[10px] cursor-pointer">
+        <DropdownMenuItem 
+          onClick={handleLogout} 
+          className="text-red-600 font-bold uppercase text-[10px] cursor-pointer"
+        >
           <LogOut className="mr-2 h-4 w-4" /> Cerrar sesión
         </DropdownMenuItem>
       </DropdownMenuContent>
