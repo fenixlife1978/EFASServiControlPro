@@ -39,11 +39,22 @@ export const DatabaseSelector = () => {
       return;
     }
 
+    // Verificar que dbService existe
+    if (!dbService || typeof dbService.saveSettings !== 'function') {
+      console.error('❌ dbService no está disponible');
+      alert('Error interno: dbService no disponible');
+      return;
+    }
+
     // Guardar en localStorage usando dbService
     dbService.saveSettings(mode, url);
     
     // Marcar como configurado (persistente entre sesiones)
     localStorage.setItem('setup_completed', 'true');
+    
+    // Verificar que se guardó
+    console.log('✅ Config guardada:', { mode, url });
+    console.log('localStorage app_config:', localStorage.getItem('app_config'));
     
     // Mostrar mensaje de éxito
     alert(`✅ Modo ${mode} configurado correctamente`);
@@ -389,3 +400,8 @@ export const DatabaseSelector = () => {
     </div>
   );
 };
+
+// 🔥 AÑADIDO PARA DEPURACIÓN: Hace dbService accesible en consola
+if (typeof window !== 'undefined') {
+  (window as any).dbService = dbService;
+}
