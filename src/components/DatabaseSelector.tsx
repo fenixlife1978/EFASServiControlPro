@@ -1,28 +1,47 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { setDbMode, getDbMode, getLocalServerUrl } from '@/firebase/config';
-import { dbService } from '@/lib/dbService';  // ← SOLO ESTO CAMBIÓ
+import { dbService } from '@/lib/dbService';
+import { useAuth } from '@/hooks/use-auth';
+import { useRouter } from 'next/navigation';
 
 export const DatabaseSelector = () => {
   const [serverUrl, setServerUrl] = useState('http://localhost:5000');
   const [showIpInput, setShowIpInput] = useState(false);
   const [selectedMode, setSelectedMode] = useState<'cloud' | 'local' | 'hybrid' | null>(null);
   const [isOpen, setIsOpen] = useState(false);
+  const [isFirstRun, setIsFirstRun] = useState(true);
+  const { user, userData } = useAuth();
+  const router = useRouter();
+
+  // Detectar si es primera ejecución (no hay configuración guardada)
+  useEffect(() => {
+    const config = localStorage.getItem('app_config');
+    if (config) {
+      setIsFirstRun(false);
+    }
+  }, []);
 
   // Cargar configuración actual al iniciar
   useEffect(() => {
     setServerUrl(getLocalServerUrl());
   }, []);
 
-  const saveConfig = async (mode: 'cloud' | 'local' | 'hybrid', url?: string) => {
+  const saveConfig = (mode: 'cloud' | 'local' | 'hybrid', url?: string) => {
     // Guardar en localStorage usando dbService
     dbService.saveSettings(mode, url);
     
     // Mostrar mensaje de éxito
     alert(`✅ Modo ${mode} configurado correctamente`);
     
-    // Opcional: recargar para aplicar cambios en todos los componentes
-    window.location.reload();
+    // Redirigir según el caso
+    if (isFirstRun) {
+      // Primera ejecución: ir a login
+      window.location.href = '/login';
+    } else {
+      // Ya hay usuario: recargar para aplicar cambios
+      window.location.reload();
+    }
   };
 
   const handleLocalClick = () => {
@@ -43,7 +62,157 @@ export const DatabaseSelector = () => {
     }
   };
 
-  // Versión flotante
+  // REGLAS DE VISIBILIDAD:
+  // - Si es primera ejecución → MOSTRAR SIEMPRE (pantalla completa)
+  // - Si hay usuario y es super-admin → MOSTRAR (botón flotante)
+  // - Si hay usuario y otro rol → NO MOSTRAR
+  const shouldShow = isFirstRun || (user && userData?.role === 'super-admin');
+
+  if (!shouldShow) return null;
+
+  // PANTALLA COMPLETA PARA PRIMERA INSTALACIÓN
+  if (isFirstRun) {
+    return (
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: '#0a0c10',
+        zIndex: 9999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '16px'
+      }}>
+        <div style={{
+          backgroundColor: '#0f1117',
+          border: '1px solid #1e293b',
+          borderRadius: '24px',
+          padding: '32px',
+          width: '100%',
+          maxWidth: '400px',
+          color: 'white'
+        }}>
+          <h2 style={{
+            fontSize: '24px',
+            fontWeight: 'bold',
+            marginBottom: '16px',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em'
+          }}>
+            ⚙️ CONFIGURACIÓN INICIAL
+          </h2>
+          <p style={{ color: '#94a3b8', marginBottom: '24px' }}>
+            Selecciona el modo de conexión:
+          </p>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
+            <button
+              onClick={() => saveConfig('cloud')}
+              style={{
+                padding: '16px',
+                cursor: 'pointer',
+                borderRadius: '12px',
+                border: '1px solid #1e293b',
+                backgroundColor: '#1a1d26',
+                color: 'white',
+                textAlign: 'left',
+                transition: 'all 0.2s'
+              }}
+            >
+              <strong>☁️ Solo Nube</strong><br />
+              <span style={{ fontSize: '12px', color: '#94a3b8' }}>Firebase Online</span>
+            </button>
+
+            <button
+              onClick={handleLocalClick}
+              style={{
+                padding: '16px',
+                cursor: 'pointer',
+                borderRadius: '12px',
+                border: '1px solid #1e293b',
+                backgroundColor: '#1a1d26',
+                color: 'white',
+                textAlign: 'left'
+              }}
+            >
+              <strong>🖥️ Servidor Local</strong><br />
+              <span style={{ fontSize: '12px', color: '#94a3b8' }}>Escuela (Físico)</span>
+            </button>
+
+            <button
+              onClick={handleHybridClick}
+              style={{
+                padding: '16px',
+                cursor: 'pointer',
+                borderRadius: '12px',
+                border: '1px solid #1e293b',
+                backgroundColor: '#1a1d26',
+                color: 'white',
+                textAlign: 'left'
+              }}
+            >
+              <strong>⚡ Modo Híbrido</strong><br />
+              <span style={{ fontSize: '12px', color: '#94a3b8' }}>Nube + Local</span>
+            </button>
+          </div>
+
+          {showIpInput && (
+            <div style={{
+              borderTop: '1px solid #1e293b',
+              paddingTop: '16px'
+            }}>
+              <p style={{
+                fontSize: '14px',
+                color: '#f97316',
+                fontWeight: 'bold',
+                marginBottom: '8px'
+              }}>
+                Dirección del Servidor:
+              </p>
+              <input
+                type="text"
+                value={serverUrl}
+                onChange={(e) => setServerUrl(e.target.value)}
+                placeholder="http://192.168.1.50:5000"
+                style={{
+                  padding: '12px',
+                  width: '100%',
+                  borderRadius: '8px',
+                  border: '1px solid #1e293b',
+                  backgroundColor: '#0a0c10',
+                  color: 'white',
+                  fontSize: '14px',
+                  marginBottom: '12px'
+                }}
+              />
+              <button
+                onClick={handleConnect}
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  backgroundColor: '#f97316',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '14px',
+                  textTransform: 'uppercase'
+                }}
+              >
+                Conectar Ahora
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // VERSIÓN FLOTANTE (solo para super-admin)
   if (!isOpen) {
     return (
       <button
@@ -83,7 +252,6 @@ export const DatabaseSelector = () => {
       zIndex: 1000,
       color: 'white'
     }}>
-      {/* Botón cerrar */}
       <button
         onClick={() => setIsOpen(false)}
         style={{
