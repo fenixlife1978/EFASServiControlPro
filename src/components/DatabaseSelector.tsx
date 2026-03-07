@@ -16,9 +16,14 @@ export const DatabaseSelector = () => {
 
   // Detectar si es primera ejecución (no hay configuración guardada)
   useEffect(() => {
+    // Verificar tanto la configuración como la bandera de completado
     const config = localStorage.getItem('app_config');
-    if (config) {
+    const setupCompleted = localStorage.getItem('setup_completed');
+    
+    if (config || setupCompleted) {
       setIsFirstRun(false);
+    } else {
+      setIsFirstRun(true);
     }
   }, []);
 
@@ -28,20 +33,23 @@ export const DatabaseSelector = () => {
   }, []);
 
   const saveConfig = (mode: 'cloud' | 'local' | 'hybrid', url?: string) => {
+    // Validar: modo híbrido requiere URL
+    if (mode === 'hybrid' && !url) {
+      alert('❌ Modo híbrido requiere una URL de servidor');
+      return;
+    }
+
     // Guardar en localStorage usando dbService
     dbService.saveSettings(mode, url);
+    
+    // Marcar como configurado (persistente entre sesiones)
+    localStorage.setItem('setup_completed', 'true');
     
     // Mostrar mensaje de éxito
     alert(`✅ Modo ${mode} configurado correctamente`);
     
-    // Redirigir según el caso
-    if (isFirstRun) {
-      // Primera ejecución: ir a login
-      window.location.href = '/login';
-    } else {
-      // Ya hay usuario: recargar para aplicar cambios
-      window.location.reload();
-    }
+    // 🔥 FLUJO CORREGIDO: Ir directamente al dashboard (no al login)
+    window.location.href = '/dashboard';
   };
 
   const handleLocalClick = () => {

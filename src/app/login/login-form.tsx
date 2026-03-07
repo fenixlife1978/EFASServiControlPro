@@ -40,16 +40,28 @@ export default function LoginForm() {
     const cleanEmail = email.trim().toLowerCase();
     const cleanInstId = institutoId.trim();
 
-    // Leer configuración de base de datos
+    // 🔥 VALIDACIÓN MEJORADA - PRIMER INTENTO
     const { mode, url } = dbService.getSettings();
     
+    // Caso 1: Modo híbrido sin URL → Auto-corregir a nube
+    if (mode === 'hybrid' && !url) {
+      console.warn('⚠️ Modo híbrido sin URL detectado - Auto-corrigiendo a modo nube');
+      dbService.saveSettings('cloud');
+      setCurrentMode('cloud');
+      setError('Configuración inválida detectada. Se ha restablecido a modo NUBE. Intenta nuevamente.');
+      setLoading(false);
+      return;
+    }
+
+    // Caso 2: Modo local → No se puede usar Firebase
     if (mode === 'local') {
       setError('Modo LOCAL activo. El login solo es posible con servidor propio.');
       setLoading(false);
       return;
     }
 
-    if (mode === 'hybrid') {
+    // Caso 3: Modo híbrido válido (con URL)
+    if (mode === 'hybrid' && url) {
       console.log('Modo HÍBRIDO: Usando Firebase para autenticación');
     }
 
@@ -113,7 +125,15 @@ export default function LoginForm() {
     e.preventDefault();
     if (!email) { setError('Ingresa tu email.'); return; }
     
-    const { mode } = dbService.getSettings();
+    const { mode, url } = dbService.getSettings();
+    
+    // Validación también para reset password
+    if (mode === 'hybrid' && !url) {
+      dbService.saveSettings('cloud');
+      setError('Configuración inválida. Se ha restablecido a modo NUBE. Intenta nuevamente.');
+      return;
+    }
+    
     if (mode === 'local') {
       setError('Modo LOCAL: Recuperación no disponible.');
       return;

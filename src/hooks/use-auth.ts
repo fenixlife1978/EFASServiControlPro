@@ -13,12 +13,35 @@ export const useAuth = () => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         setUser(firebaseUser);
-        // Intentar obtener datos extra del usuario (como su rol e InstitutoId)
-        const docRef = doc(db, "users", firebaseUser.uid);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          setUserData(docSnap.data());
+        
+        let data = null;
+        
+        // 1. Si es super-admin, buscar en colección "users"
+        if (firebaseUser.email === 'vallecondo@gmail.com') {
+          const docRef = doc(db, "users", firebaseUser.uid);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            data = docSnap.data();
+            data.role = 'super-admin'; // Asegurar rol
+          } else {
+            // Si no existe, crear datos por defecto
+            data = { 
+              role: 'super-admin',
+              email: firebaseUser.email,
+              nombre: 'Super Admin'
+            };
+          }
+        } 
+        // 2. Para otros roles, buscar en colección "usuarios"
+        else {
+          const docRef = doc(db, "usuarios", firebaseUser.uid);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            data = docSnap.data();
+          }
         }
+        
+        setUserData(data);
       } else {
         setUser(null);
         setUserData(null);
@@ -29,5 +52,10 @@ export const useAuth = () => {
     return () => unsubscribe();
   }, []);
 
-  return { user, userData, loading, isSuperAdmin: user?.email === 'vallecondo@gmail.com' };
+  return { 
+    user, 
+    userData, 
+    loading, 
+    isSuperAdmin: user?.email === 'vallecondo@gmail.com' 
+  };
 };
