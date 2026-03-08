@@ -12,7 +12,6 @@ public class LiberarPlugin extends Plugin {
 
     @PluginMethod
     public void ejecutarLiberacion(PluginCall call) {
-        // Orden de LIBERACIÓN TOTAL (Device Owner)
         Intent intent = new Intent(getContext(), MainActivity.class);
         intent.setAction("ACTION_LIBERAR_TAB");
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -26,7 +25,6 @@ public class LiberarPlugin extends Plugin {
 
     @PluginMethod
     public void ejecutarRebloqueo(PluginCall call) {
-        // Orden de RE-ACTIVAR BLOQUEO ALUMNO (Cerrar sesión admin)
         Intent intent = new Intent(getContext(), MainActivity.class);
         intent.setAction("ACTION_REBLOQUEAR_TAB");
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);

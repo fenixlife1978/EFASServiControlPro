@@ -15,7 +15,6 @@ public class AdminReceiver extends DeviceAdminReceiver {
         super.onEnabled(context, intent);
         Log.d("EDU_Admin", "Admin habilitado");
         
-        // Al activarse, aseguramos que el sistema reconozca las políticas
         DevicePolicyManager dpm = (DevicePolicyManager) context.getSystemService(Context.DEVICE_POLICY_SERVICE);
         ComponentName adminComponent = new ComponentName(context, AdminReceiver.class);
         
@@ -31,7 +30,6 @@ public class AdminReceiver extends DeviceAdminReceiver {
     
     @Override
     public CharSequence onDisableRequested(Context context, Intent intent) {
-        // Este mensaje aparece cuando alguien intenta desactivar el Admin desde ajustes
         return "Si desactiva la protección, el dispositivo perderá acceso a las funciones de EDUControlPro.";
     }
 }

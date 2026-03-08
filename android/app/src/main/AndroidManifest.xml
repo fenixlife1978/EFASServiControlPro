@@ -58,7 +58,6 @@
             <intent-filter> 
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
                 <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
-                <!-- QUITADO BOOT_COMPLETED de aquí porque ya está en BootReceiver -->
             </intent-filter> 
         </receiver>
 
@@ -78,6 +77,9 @@
             android:label="Servicio de Monitoreo EDUControlPro"
             android:exported="true"
             android:foregroundServiceType="specialUse">
+            <!-- 🔥 PROPERTY AÑADIDA PARA ANDROID 10+ -->
+            <property android:name="android.foreground_service_type_special_use"
+                android:value="health" />
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
             </intent-filter>
@@ -108,8 +110,6 @@
             android:excludeFromRecents="true"
             android:showWhenLocked="true"
             android:turnScreenOn="true" />
-
-        <!-- ⚠️ ELIMINADO: AppBlockService (redundante) -->
 
     </application>
 </manifest>
