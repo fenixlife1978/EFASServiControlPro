@@ -146,19 +146,24 @@ public class MonitorService extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
-        Log.d("EDU_Monitor", "✅ onServiceConnected: Servicio conectado correctamente");
+        Log.d("EDU_Monitor", "✅ onServiceConnected: Servicio conectado");
         
-        if (deviceDocId != null && InstitutoId != null) {
-            Log.d("EDU_Monitor", "✅ VINCULACIÓN EXITOSA:");
-            Log.d("EDU_Monitor", "Inst: " + nombreInstituto + " (" + InstitutoId + ")");
-            Log.d("EDU_Monitor", "Aula/Secc: " + aulaId + " " + seccion);
-            
-            iniciarListeners(deviceDocId, InstitutoId);
-            iniciarHeartbeat();
-            reportarEstadoInicial();
-            
-        } else {
-            Log.e("EDU_Monitor", "❌ ERROR: Faltan datos críticos de identidad.");
+        // 🔥 TRY-CATCH AÑADIDO PARA EVITAR QUE EL SERVICIO MUERA
+        try {
+            if (deviceDocId != null && InstitutoId != null) {
+                Log.d("EDU_Monitor", "✅ VINCULACIÓN EXITOSA:");
+                Log.d("EDU_Monitor", "Inst: " + nombreInstituto + " (" + InstitutoId + ")");
+                Log.d("EDU_Monitor", "Aula/Secc: " + aulaId + " " + seccion);
+                
+                iniciarListeners(deviceDocId, InstitutoId);
+                iniciarHeartbeat();
+                reportarEstadoInicial();
+                
+            } else {
+                Log.e("EDU_Monitor", "❌ ERROR: Faltan datos críticos de identidad.");
+            }
+        } catch (Exception e) {
+            Log.e("EDU_Monitor", "❌ Error en onServiceConnected", e);
         }
     }
 
