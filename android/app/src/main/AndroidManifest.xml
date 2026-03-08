@@ -12,8 +12,9 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     
-    <!-- Permisos de servicio en primer plano (sin tipo específico) -->
+    <!-- Permisos de servicio en primer plano -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     
     <!-- Permiso para estadísticas de uso (necesario para UsageStatsManager) -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
@@ -57,6 +58,7 @@
             <intent-filter> 
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
                 <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
+                <!-- QUITADO BOOT_COMPLETED de aquí porque ya está en BootReceiver -->
             </intent-filter> 
         </receiver>
 
@@ -70,13 +72,12 @@
             </intent-filter>
         </receiver>
 
-        <!-- MonitorService (AccessibilityService) sin foregroundServiceType -->
+        <!-- MonitorService (AccessibilityService) -->
         <service android:name=".MonitorService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:label="Servicio de Monitoreo EDUControlPro"
             android:exported="true"
-            android:enabled="true"
-            android:stopWithTask="false">
+            android:foregroundServiceType="specialUse">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
             </intent-filter>
@@ -107,6 +108,8 @@
             android:excludeFromRecents="true"
             android:showWhenLocked="true"
             android:turnScreenOn="true" />
+
+        <!-- ⚠️ ELIMINADO: AppBlockService (redundante) -->
 
     </application>
 </manifest>
