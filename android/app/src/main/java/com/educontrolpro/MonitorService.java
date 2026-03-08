@@ -72,6 +72,21 @@ public class MonitorService extends AccessibilityService {
     
     private BroadcastReceiver closeLockReceiver;
 
+    // Método para guardar errores en Firestore
+    private void guardarErrorEnFirestore(String lugar, Exception e) {
+        if (deviceDocId == null) return;
+        
+        Map<String, Object> errorData = new HashMap<>();
+        errorData.put("deviceId", deviceDocId);
+        errorData.put("lugar", lugar);
+        errorData.put("mensaje", e.getMessage());
+        errorData.put("stacktrace", Log.getStackTraceString(e));
+        errorData.put("timestamp", FieldValue.serverTimestamp());
+        
+        db.collection("error_logs").add(errorData)
+            .addOnFailureListener(err -> Log.e("EDU_Monitor", "No se pudo guardar error en Firestore", err));
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -93,6 +108,7 @@ public class MonitorService extends AccessibilityService {
             cargarIdentidad();
         } catch (Exception e) {
             Log.e("EDU_Monitor", "❌ Error en onCreate", e);
+            guardarErrorEnFirestore("onCreate", e);
         }
     }
 
@@ -128,14 +144,17 @@ public class MonitorService extends AccessibilityService {
                             }
                         } catch (Exception e) {
                             Log.e("EDU_Monitor", "❌ Error en callback de alumno", e);
+                            guardarErrorEnFirestore("cargarIdentidad/callbackAlumno", e);
                         }
                     })
                     .addOnFailureListener(e -> {
                         Log.e("EDU_Monitor", "❌ Error obteniendo alumno", e);
+                        guardarErrorEnFirestore("cargarIdentidad/getAlumno", e);
                     });
             }
         } catch (Exception e) {
             Log.e("EDU_Monitor", "❌ Error en cargarIdentidad", e);
+            guardarErrorEnFirestore("cargarIdentidad", e);
         }
     }
 
@@ -148,6 +167,7 @@ public class MonitorService extends AccessibilityService {
             }
         } catch (Exception e) {
             Log.e("EDU_Monitor", "❌ Error creando canal de notificación", e);
+            guardarErrorEnFirestore("createNotificationChannel", e);
         }
     }
 
@@ -162,6 +182,7 @@ public class MonitorService extends AccessibilityService {
                     .build();
         } catch (Exception e) {
             Log.e("EDU_Monitor", "❌ Error creando notificación", e);
+            guardarErrorEnFirestore("getNotification", e);
             return null;
         }
     }
@@ -183,9 +204,11 @@ public class MonitorService extends AccessibilityService {
                 
             } else {
                 Log.e("EDU_Monitor", "❌ ERROR: Faltan datos críticos de identidad.");
+                guardarErrorEnFirestore("onServiceConnected/sinIdentidad", new Exception("Faltan datos críticos"));
             }
         } catch (Exception e) {
             Log.e("EDU_Monitor", "❌ Error en onServiceConnected", e);
+            guardarErrorEnFirestore("onServiceConnected", e);
         }
     }
 
@@ -200,9 +223,13 @@ public class MonitorService extends AccessibilityService {
             
             db.collection("dispositivos").document(deviceDocId)
                 .update(estadoInicial)
-                .addOnFailureListener(e -> Log.e("EDU_Monitor", "Error reportando estado inicial", e));
+                .addOnFailureListener(e -> {
+                    Log.e("EDU_Monitor", "Error reportando estado inicial", e);
+                    guardarErrorEnFirestore("reportarEstadoInicial", e);
+                });
         } catch (Exception e) {
             Log.e("EDU_Monitor", "❌ Error en reportarEstadoInicial", e);
+            guardarErrorEnFirestore("reportarEstadoInicial", e);
         }
     }
 
@@ -219,10 +246,14 @@ public class MonitorService extends AccessibilityService {
                             
                             db.collection("dispositivos").document(deviceDocId)
                                 .update(heartbeat)
-                                .addOnFailureListener(e -> Log.e("EDU_Monitor", "Error en heartbeat", e));
+                                .addOnFailureListener(e -> {
+                                    Log.e("EDU_Monitor", "Error en heartbeat", e);
+                                    guardarErrorEnFirestore("heartbeat", e);
+                                });
                         }
                     } catch (Exception e) {
                         Log.e("EDU_Monitor", "❌ Error en heartbeat run", e);
+                        guardarErrorEnFirestore("heartbeat/run", e);
                     } finally {
                         heartbeatHandler.postDelayed(this, HEARTBEAT_INTERVAL);
                     }
@@ -232,6 +263,7 @@ public class MonitorService extends AccessibilityService {
             Log.d("EDU_Monitor", "💓 Heartbeat iniciado");
         } catch (Exception e) {
             Log.e("EDU_Monitor", "❌ Error iniciando heartbeat", e);
+            guardarErrorEnFirestore("iniciarHeartbeat", e);
         }
     }
 
@@ -241,6 +273,7 @@ public class MonitorService extends AccessibilityService {
                 .addSnapshotListener((snapshot, e) -> {
                     if (e != null) {
                         Log.e("EDU_Monitor", "Error en listener de dispositivo", e);
+                        guardarErrorEnFirestore("deviceListener", e);
                         return;
                     }
                     try {
@@ -250,6 +283,7 @@ public class MonitorService extends AccessibilityService {
                         }
                     } catch (Exception ex) {
                         Log.e("EDU_Monitor", "❌ Error procesando cambio dispositivo", ex);
+                        guardarErrorEnFirestore("deviceListener/procesar", ex);
                     }
                 });
 
@@ -257,6 +291,7 @@ public class MonitorService extends AccessibilityService {
                 .addSnapshotListener((snapshot, e) -> {
                     if (e != null) {
                         Log.e("EDU_Monitor", "Error en listener de institución", e);
+                        guardarErrorEnFirestore("institutionListener", e);
                         return;
                     }
                     try {
@@ -266,6 +301,7 @@ public class MonitorService extends AccessibilityService {
                         }
                     } catch (Exception ex) {
                         Log.e("EDU_Monitor", "❌ Error procesando cambio institución", ex);
+                        guardarErrorEnFirestore("institutionListener/procesar", ex);
                     }
                 });
 
@@ -273,6 +309,7 @@ public class MonitorService extends AccessibilityService {
                 .addSnapshotListener((snapshot, e) -> {
                     if (e != null) {
                         Log.e("EDU_Monitor", "Error en listener de seguridad", e);
+                        guardarErrorEnFirestore("securityListener", e);
                         return;
                     }
                     try {
@@ -284,12 +321,14 @@ public class MonitorService extends AccessibilityService {
                         }
                     } catch (Exception ex) {
                         Log.e("EDU_Monitor", "❌ Error procesando cambio seguridad", ex);
+                        guardarErrorEnFirestore("securityListener/procesar", ex);
                     }
                 });
             
             Log.d("EDU_Monitor", "👂 Listeners iniciados");
         } catch (Exception e) {
             Log.e("EDU_Monitor", "❌ Error iniciando listeners", e);
+            guardarErrorEnFirestore("iniciarListeners", e);
         }
     }
 
@@ -328,6 +367,7 @@ public class MonitorService extends AccessibilityService {
                         }
                     } catch (Exception ex) {
                         Log.e("EDU_Monitor", "Error reseteando comando bloquear", ex);
+                        guardarErrorEnFirestore("procesarCambiosDispositivo/resetBloquear", ex);
                     }
                 }, 2000);
             }
@@ -337,6 +377,7 @@ public class MonitorService extends AccessibilityService {
             }
         } catch (Exception e) {
             Log.e("EDU_Monitor", "❌ Error en procesarCambiosDispositivo", e);
+            guardarErrorEnFirestore("procesarCambiosDispositivo", e);
         }
     }
 
@@ -355,6 +396,7 @@ public class MonitorService extends AccessibilityService {
             }
         } catch (Exception e) {
             Log.e("EDU_Monitor", "❌ Error en procesarCambiosInstitucion", e);
+            guardarErrorEnFirestore("procesarCambiosInstitucion", e);
         }
     }
 
@@ -366,6 +408,7 @@ public class MonitorService extends AccessibilityService {
                 .apply();
         } catch (Exception e) {
             Log.e("EDU_Monitor", "Error guardando PIN", e);
+            guardarErrorEnFirestore("saveUnlockPin", e);
         }
     }
 
@@ -374,6 +417,7 @@ public class MonitorService extends AccessibilityService {
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(KEY_MASTER_PIN, pin).apply();
         } catch (Exception e) {
             Log.e("EDU_Monitor", "Error guardando master PIN", e);
+            guardarErrorEnFirestore("saveMasterPin", e);
         }
     }
 
@@ -382,6 +426,7 @@ public class MonitorService extends AccessibilityService {
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_UNLOCKED, isUnlocked).apply();
         } catch (Exception e) {
             Log.e("EDU_Monitor", "Error guardando estado unlock", e);
+            guardarErrorEnFirestore("saveUnlockState", e);
         }
     }
 
@@ -404,9 +449,13 @@ public class MonitorService extends AccessibilityService {
             
             db.collection("activity_logs").add(log)
                 .addOnSuccessListener(ref -> Log.d("EDU_Monitor", "✅ Log guardado en activity_logs"))
-                .addOnFailureListener(e -> Log.e("EDU_Monitor", "❌ Error guardando log", e));
+                .addOnFailureListener(e -> {
+                    Log.e("EDU_Monitor", "❌ Error guardando log", e);
+                    guardarErrorEnFirestore("enviarLog", e);
+                });
         } catch (Exception e) {
             Log.e("EDU_Monitor", "Error en enviarLog", e);
+            guardarErrorEnFirestore("enviarLog", e);
         }
     }
 
@@ -422,7 +471,10 @@ public class MonitorService extends AccessibilityService {
             
             db.collection("dispositivos").document(deviceDocId)
                 .update(urlData)
-                .addOnFailureListener(e -> Log.e("EDU_Monitor", "Error reportando URL", e));
+                .addOnFailureListener(e -> {
+                    Log.e("EDU_Monitor", "Error reportando URL", e);
+                    guardarErrorEnFirestore("reportarUrlActual/update", e);
+                });
             
             Map<String, Object> history = new HashMap<>();
             history.put("deviceId", deviceDocId);
@@ -433,9 +485,13 @@ public class MonitorService extends AccessibilityService {
             history.put("alumno", alumnoAsignado);
             
             db.collection("web_history").add(history)
-                .addOnFailureListener(e -> Log.e("EDU_Monitor", "Error guardando historial", e));
+                .addOnFailureListener(e -> {
+                    Log.e("EDU_Monitor", "Error guardando historial", e);
+                    guardarErrorEnFirestore("reportarUrlActual/history", e);
+                });
         } catch (Exception e) {
             Log.e("EDU_Monitor", "Error en reportarUrlActual", e);
+            guardarErrorEnFirestore("reportarUrlActual", e);
         }
     }
 
@@ -453,11 +509,15 @@ public class MonitorService extends AccessibilityService {
             db.collection("dispositivos").document(deviceDocId)
                 .collection("incidencias")
                 .add(incidencia)
-                .addOnFailureListener(e -> Log.e("EDU_Monitor", "Error reportando incidencia", e));
+                .addOnFailureListener(e -> {
+                    Log.e("EDU_Monitor", "Error reportando incidencia", e);
+                    guardarErrorEnFirestore("reportarIncidencia", e);
+                });
             
             reportarAlertaGlobal(tipo, descripcion, url);
         } catch (Exception e) {
             Log.e("EDU_Monitor", "Error en reportarIncidencia", e);
+            guardarErrorEnFirestore("reportarIncidencia", e);
         }
     }
 
@@ -479,9 +539,13 @@ public class MonitorService extends AccessibilityService {
             alerta.put("status", "nuevo");
             
             db.collection("alertas").add(alerta)
-                .addOnFailureListener(e -> Log.e("EDU_Monitor", "Error reportando alerta global", e));
+                .addOnFailureListener(e -> {
+                    Log.e("EDU_Monitor", "Error reportando alerta global", e);
+                    guardarErrorEnFirestore("reportarAlertaGlobal", e);
+                });
         } catch (Exception e) {
             Log.e("EDU_Monitor", "Error en reportarAlertaGlobal", e);
+            guardarErrorEnFirestore("reportarAlertaGlobal", e);
         }
     }
 
@@ -504,11 +568,13 @@ public class MonitorService extends AccessibilityService {
                         Log.d("EDU_Monitor", "🔓 PANTALLA DE BLOQUEO CERRADA AUTOMÁTICAMENTE");
                     } catch (Exception ex) {
                         Log.e("EDU_Monitor", "Error enviando cierre de lock", ex);
+                        guardarErrorEnFirestore("dispararBloqueoConDuracion/cierre", ex);
                     }
                 }, duracionMs);
             }
         } catch (Exception e) {
             Log.e("EDU_Monitor", "Error en dispararBloqueoConDuracion", e);
+            guardarErrorEnFirestore("dispararBloqueoConDuracion", e);
         }
     }
 
@@ -568,6 +634,7 @@ public class MonitorService extends AccessibilityService {
             }
         } catch (Exception e) {
             Log.e("EDU_Monitor", "❌ Error en onAccessibilityEvent", e);
+            guardarErrorEnFirestore("onAccessibilityEvent", e);
         }
     }
 
@@ -579,6 +646,7 @@ public class MonitorService extends AccessibilityService {
                    (p.contains("samsung") && p.contains("browser"));
         } catch (Exception e) {
             Log.e("EDU_Monitor", "Error en esNavegador", e);
+            guardarErrorEnFirestore("esNavegador", e);
             return false;
         }
     }
@@ -614,6 +682,7 @@ public class MonitorService extends AccessibilityService {
             }
         } catch (Exception e) {
             Log.e("EDU_Monitor", "Error en analizarContenido", e);
+            guardarErrorEnFirestore("analizarContenido", e);
         }
     }
 
@@ -636,6 +705,7 @@ public class MonitorService extends AccessibilityService {
                     unregisterReceiver(closeLockReceiver);
                 } catch (Exception e) {
                     Log.e("EDU_Monitor", "Error al desregistrar receiver", e);
+                    guardarErrorEnFirestore("onDestroy/unregisterReceiver", e);
                 }
             }
             
@@ -645,10 +715,14 @@ public class MonitorService extends AccessibilityService {
                 offline.put("ultimoAcceso", FieldValue.serverTimestamp());
                 db.collection("dispositivos").document(deviceDocId)
                     .update(offline)
-                    .addOnFailureListener(e -> Log.e("EDU_Monitor", "Error reportando offline", e));
+                    .addOnFailureListener(e -> {
+                        Log.e("EDU_Monitor", "Error reportando offline", e);
+                        guardarErrorEnFirestore("onDestroy/offline", e);
+                    });
             }
         } catch (Exception e) {
             Log.e("EDU_Monitor", "Error en onDestroy", e);
+            guardarErrorEnFirestore("onDestroy", e);
         }
     }
 
