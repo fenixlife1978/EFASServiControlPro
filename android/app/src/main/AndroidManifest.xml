@@ -14,7 +14,7 @@
     
     <!-- Permisos de servicio en primer plano -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     
     <!-- Permiso para estadísticas de uso (necesario para UsageStatsManager) -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
@@ -71,15 +71,12 @@
             </intent-filter>
         </receiver>
 
-        <!-- MonitorService (AccessibilityService) -->
+        <!-- 🔥 CORREGIDO: MonitorService con foregroundServiceType correcto -->
         <service android:name=".MonitorService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:label="Servicio de Monitoreo EDUControlPro"
             android:exported="true"
-            android:foregroundServiceType="specialUse">
-            <!-- 🔥 PROPERTY AÑADIDA PARA ANDROID 10+ -->
-            <property android:name="android.foreground_service_type_special_use"
-                android:value="health" />
+            android:foregroundServiceType="connectedDevice">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
             </intent-filter>
