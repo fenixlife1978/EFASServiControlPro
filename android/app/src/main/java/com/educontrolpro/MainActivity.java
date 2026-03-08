@@ -30,12 +30,28 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
-        // 1. Registro de Plugins
+        // 1. Registro de Plugins (siempre necesario)
         registerPlugin(DevicePlugin.class);
         try {
             registerPlugin(LiberarPlugin.class); 
         } catch (Exception e) {
             Log.e("EDU_Status", "Error al registrar LiberarPlugin: " + e.getMessage());
+        }
+
+        // ==========================================================
+        // AUTODEFENSA: Si el dispositivo está bloqueado, cerrar y reportar
+        // ==========================================================
+        SharedPreferences prefs = getSharedPreferences(ADMIN_PREFS, MODE_PRIVATE);
+        boolean isUnlocked = prefs.getBoolean(KEY_UNLOCKED, false);
+        if (!isUnlocked) {
+            Log.d("EDU_Status", "🚫 Intento de abrir app bloqueada - Cerrando");
+            Toast.makeText(this, "Acceso no permitido", Toast.LENGTH_SHORT).show();
+            
+            // Reportar el intento como incidencia en Firestore
+            reportarIntentoApertura();
+
+            finish(); // Cierra la actividad inmediatamente
+            return;   // Sale del método para que no ejecute nada más
         }
 
         // 2. Lógica de seguridad (Device Owner / Admin)
@@ -50,6 +66,50 @@ public class MainActivity extends BridgeActivity {
             updateManager.listenForUpdates();
         } catch (Exception e) {
             Log.e("EDU_Status", "UpdateManager no inicializado: " + e.getMessage());
+        }
+    }
+
+    // --- NUEVO: Reportar intento de apertura cuando está bloqueado ---
+    private void reportarIntentoApertura() {
+        SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
+        String deviceId = capPrefs.getString(KEY_DEVICE_ID, "unknown");
+        String institutoId = capPrefs.getString("InstitutoId", "unknown");
+
+        try {
+            FirebaseFirestore db = FirebaseFirestore.getInstance();
+
+            // Crear incidencia en subcolección del dispositivo
+            Map<String, Object> incidencia = new HashMap<>();
+            incidencia.put("tipo", "APERTURA_BLOQUEADA");
+            incidencia.put("descripcion", "Intento de abrir la app estando bloqueado");
+            incidencia.put("timestamp", FieldValue.serverTimestamp());
+            incidencia.put("resuelta", false);
+            incidencia.put("deviceId", deviceId);
+            incidencia.put("InstitutoId", institutoId);
+
+            if (!"unknown".equals(deviceId)) {
+                db.collection("dispositivos").document(deviceId)
+                    .collection("incidencias")
+                    .add(incidencia)
+                    .addOnFailureListener(e -> Log.e("EDU_Status", "Error guardando incidencia", e));
+            }
+
+            // También guardar en colección global "alertas" para el dashboard
+            Map<String, Object> alerta = new HashMap<>();
+            alerta.put("tipo", "APERTURA_BLOQUEADA");
+            alerta.put("descripcion", "Intento de abrir la app estando bloqueado");
+            alerta.put("timestamp", FieldValue.serverTimestamp());
+            alerta.put("deviceId", deviceId);
+            alerta.put("InstitutoId", institutoId);
+            alerta.put("alumno_asignado", "Desconocido");
+            alerta.put("estudianteNombre", "Desconocido");
+            alerta.put("status", "nuevo");
+
+            db.collection("alertas").add(alerta)
+                .addOnFailureListener(e -> Log.e("EDU_Status", "Error guardando alerta global", e));
+
+        } catch (Exception e) {
+            Log.e("EDU_Status", "Error al reportar intento de apertura", e);
         }
     }
 

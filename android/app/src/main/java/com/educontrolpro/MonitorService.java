@@ -21,6 +21,7 @@ import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.ListenerRegistration;
 import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.FieldValue;
+import com.google.firebase.firestore.Query;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -51,6 +52,7 @@ public class MonitorService extends AccessibilityService {
     private List<String> whitelist = new ArrayList<>();
     private List<String> blacklist = new ArrayList<>();
     
+    // Apps educativas permitidas SIEMPRE (sin Play Store)
     private List<String> appsEducativas = Arrays.asList(
         "com.microsoft.office.word",
         "com.microsoft.office.excel",
@@ -60,7 +62,6 @@ public class MonitorService extends AccessibilityService {
         "com.google.android.apps.photos",
         "com.android.chrome",
         "org.mozilla.firefox",
-        "com.android.vending",
         "com.google.android.gm",
         "com.google.android.calendar",
         "com.google.android.apps.maps",
@@ -73,6 +74,7 @@ public class MonitorService extends AccessibilityService {
         "com.khanacademy.android"
     );
 
+    // Apps del sistema permitidas SIEMPRE
     private List<String> appsSistema = Arrays.asList(
         "com.android.packageinstaller",
         "com.google.android.packageinstaller",
@@ -87,25 +89,42 @@ public class MonitorService extends AccessibilityService {
         "com.android.providers.downloads"
     );
 
+    // APPS PROHIBIDAS DE NACIMIENTO (incluye Play Store)
     private List<String> appsProhibidas = Arrays.asList(
+        // Play Store y tiendas de apps
+        "com.android.vending",
+        
+        // Redes sociales
         "tiktok", "instagram", "facebook", "youtube", "twitter", 
         "whatsapp", "telegram", "snapchat", "messenger", "discord",
         "linkedin", "pinterest", "reddit", "tumblr", "wechat",
         "line", "viber", "signal", "skype", "zoom",
+        
+        // Juegos
         "game", "candy", "subway", "clash", "among", "minecraft", 
         "roblox", "fortnite", "pokemon", "freefire", "pubg",
         "callofduty", "cod", "gta", "fifa", "pes", "nfl",
         "madden", "sims", "simulator", "racing", "asphalt",
         "angrybirds", "plantsvszombies", "templerun", "jetpack",
+        
+        // Apuestas y casino
         "bet", "casino", "poker", "slot", "ruleta", "blackjack",
         "lotería", "loteria", "apuesta", "betting", "gambling",
+        
+        // Pornografía y contenido adulto
         "porn", "xxx", "adult", "hentai", "onlyfans", "sex",
         "erotic", "cam", "playboy", "desnudo", "nude",
+        
+        // Apps deportivas
         "espn", "foxsports", "nbcsports", "daZN", "futbol", 
         "soccer", "basketball", "nba", "nfl", "mlb", "nhl",
         "laliga", "premierleague", "championsleague",
+        
+        // Apps de espectáculos y entretenimiento
         "netflix", "spotify", "deezer", "amazonprime", "hulu",
         "disneyplus", "hbomax", "paramount", "peacock", "twitch",
+        
+        // Apps de citas
         "tinder", "badoo", "grindr", "hinge", "bumble"
     );
 
@@ -118,6 +137,8 @@ public class MonitorService extends AccessibilityService {
     private static final long HEARTBEAT_INTERVAL = 30000;
 
     private String ultimaUrlReportada = "";
+    private List<String> historialUrls = new ArrayList<>();
+    private static final int MAX_HISTORIAL = 20;
     
     private BroadcastReceiver closeLockReceiver = new BroadcastReceiver() {
         @Override
@@ -128,7 +149,7 @@ public class MonitorService extends AccessibilityService {
         }
     };
 
-    // Método ultra seguro para guardar logs
+    // Método para guardar logs (ultra seguro)
     private void guardarLog(String coleccion, Map<String, Object> datos) {
         try {
             if (db == null) {
@@ -148,11 +169,9 @@ public class MonitorService extends AccessibilityService {
         Log.d("EDU_Monitor", "✅ onCreate: Servicio creado");
         
         try {
-            // Inicializar Firebase (por si acaso)
             FirebaseApp.initializeApp(this);
             db = FirebaseFirestore.getInstance();
             
-            // Registrar evento de arranque
             Map<String, Object> bootLog = new HashMap<>();
             bootLog.put("evento", "onCreate");
             bootLog.put("timestamp", FieldValue.serverTimestamp());
@@ -411,6 +430,7 @@ public class MonitorService extends AccessibilityService {
             Boolean bloquearCmd = snapshot.getBoolean("bloquear");
             String pinCmd = snapshot.getString("pinBloqueo");
             String nuevoAlumno = snapshot.getString("alumno_asignado");
+            String mensajePendiente = snapshot.getString("pending_message");
             
             if (nuevoAlumno != null && !nuevoAlumno.isEmpty()) {
                 alumnoAsignado = nuevoAlumno;
@@ -424,11 +444,28 @@ public class MonitorService extends AccessibilityService {
                 Log.d("EDU_Monitor", "PIN actualizado: " + pinCmd);
             }
             
+            // 📨 Mensajería directa
+            if (mensajePendiente != null && !mensajePendiente.isEmpty()) {
+                Log.d("EDU_Monitor", "📨 Mensaje pendiente: " + mensajePendiente);
+                mostrarAlertaMensaje(mensajePendiente);
+                
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    try {
+                        if (deviceDocId != null) {
+                            db.collection("dispositivos").document(deviceDocId)
+                                .update("pending_message", FieldValue.delete());
+                        }
+                    } catch (Exception ex) {
+                        Log.e("EDU_Monitor", "Error eliminando mensaje pendiente", ex);
+                    }
+                }, 5000);
+            }
+            
             saveUnlockState(adminEnabled != null && adminEnabled);
             
             if (bloquearCmd != null && bloquearCmd) {
                 Log.d("EDU_Monitor", "Comando BLOQUEAR recibido");
-                dispararBloqueoConDuracion(7000);
+                dispararBloqueoConDuracion(5000); // 5 segundos
                 new Handler(Looper.getMainLooper()).postDelayed(() -> {
                     try {
                         if (deviceDocId != null) {
@@ -506,6 +543,10 @@ public class MonitorService extends AccessibilityService {
         }
     }
 
+    private void mostrarAlertaMensaje(String mensaje) {
+        Log.d("EDU_Monitor", "📢 ALERTA: " + mensaje);
+    }
+
     private void enviarLog(String packageName) {
         if (deviceDocId == null) return;
         try {
@@ -535,6 +576,7 @@ public class MonitorService extends AccessibilityService {
         if (deviceDocId == null || url.equals(ultimaUrlReportada)) return;
         ultimaUrlReportada = url;
         try {
+            // Actualizar URL en tiempo real en el documento del dispositivo
             Map<String, Object> urlData = new HashMap<>();
             urlData.put("ultimaUrl", url);
             urlData.put("ultimaUrlTimestamp", FieldValue.serverTimestamp());
@@ -547,6 +589,7 @@ public class MonitorService extends AccessibilityService {
                     guardarLog("error_logs", error);
                 });
             
+            // Guardar en historial global
             Map<String, Object> history = new HashMap<>();
             history.put("deviceId", deviceDocId);
             history.put("url", url);
@@ -555,6 +598,7 @@ public class MonitorService extends AccessibilityService {
             history.put("aulaId", aulaId);
             history.put("alumno", alumnoAsignado);
             db.collection("web_history").add(history)
+                .addOnSuccessListener(ref -> mantenerUltimas20Urls())
                 .addOnFailureListener(e -> {
                     Map<String, Object> error = new HashMap<>();
                     error.put("lugar", "reportarUrlActual/history");
@@ -567,6 +611,21 @@ public class MonitorService extends AccessibilityService {
             error.put("error", e.toString());
             guardarLog("error_logs", error);
         }
+    }
+
+    private void mantenerUltimas20Urls() {
+        db.collection("dispositivos").document(deviceDocId)
+            .collection("historial_web")
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .get()
+            .addOnSuccessListener(querySnapshot -> {
+                int count = querySnapshot.size();
+                if (count > MAX_HISTORIAL) {
+                    for (int i = MAX_HISTORIAL; i < count; i++) {
+                        querySnapshot.getDocuments().get(i).getReference().delete();
+                    }
+                }
+            });
     }
 
     private void reportarIncidencia(String tipo, String descripcion, String url) {
@@ -680,7 +739,7 @@ public class MonitorService extends AccessibilityService {
                 if (packageName.toLowerCase().contains(prohibida)) {
                     Log.d("EDU_Monitor", "⛔ App prohibida detectada: " + packageName);
                     reportarIncidencia("APP_PROHIBIDA", "Intento de abrir: " + packageName, packageName);
-                    dispararBloqueoConDuracion(7000);
+                    dispararBloqueoConDuracion(5000);
                     return;
                 }
             }
@@ -689,7 +748,7 @@ public class MonitorService extends AccessibilityService {
                 if (cortarNavegacion) {
                     Log.d("EDU_Monitor", "⛔ Navegador bloqueado por cortarNavegacion");
                     reportarIncidencia("NAVEGADOR_BLOQUEADO", "Navegador no permitido", packageName);
-                    dispararBloqueoConDuracion(7000);
+                    dispararBloqueoConDuracion(5000);
                     return;
                 }
                 analizarContenido(event.getSource());
@@ -738,7 +797,7 @@ public class MonitorService extends AccessibilityService {
                             if (!permitido) {
                                 Log.d("EDU_Monitor", "⛔ Sitio no permitido por whitelist: " + url);
                                 reportarIncidencia("SITIO_NO_PERMITIDO", "Acceso a sitio no autorizado", url);
-                                dispararBloqueoConDuracion(7000);
+                                dispararBloqueoConDuracion(5000);
                                 return;
                             }
                         }
@@ -748,7 +807,7 @@ public class MonitorService extends AccessibilityService {
                                 if (url.toLowerCase().contains(sitio.toLowerCase())) {
                                     Log.d("EDU_Monitor", "⛔ Sitio bloqueado por blacklist: " + sitio);
                                     reportarIncidencia("BLOQUEO_LISTA_NEGRA", "Intento de acceso a sitio bloqueado", url);
-                                    dispararBloqueoConDuracion(7000);
+                                    dispararBloqueoConDuracion(5000);
                                     return;
                                 }
                             }
