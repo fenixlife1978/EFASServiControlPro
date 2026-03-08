@@ -3,27 +3,12 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.educontrolpro">
 
-    <!-- Permisos de red y almacenamiento -->
+    <!-- Permisos básicos -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" /> 
-
-    <!-- Permisos para instalación y arranque -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    
-    <!-- Permisos de servicio en primer plano -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
-    
-    <!-- Permiso para estadísticas de uso (necesario para UsageStatsManager) -->
-    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
-    
-    <!-- Permisos de cámara para escáner QR -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
-
-    <!-- Permiso para reordenar tareas (bloqueo) -->
     <uses-permission android:name="android.permission.REORDER_TASKS" />
 
     <application
@@ -31,11 +16,9 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
-        android:supportsRtl="true"
-        android:theme="@style/AppTheme"
-        android:hardwareAccelerated="true">
+        android:theme="@style/AppTheme">
 
-        <!-- FileProvider para actualizaciones -->
+        <!-- Provider para actualizaciones -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.provider"
@@ -45,40 +28,34 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
-        
-        <!-- Dependencias de ML Kit para escáner QR -->
-        <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="barcode" />
 
-        <!-- AdminReceiver para Device Policy Manager -->
-        <receiver android:name=".AdminReceiver" 
-            android:permission="android.permission.BIND_DEVICE_ADMIN" 
-            android:exported="true"> 
+        <!-- AdminReceiver -->
+        <receiver android:name=".AdminReceiver"
+            android:permission="android.permission.BIND_DEVICE_ADMIN"
+            android:exported="true">
             <meta-data android:name="android.app.device_admin"
-                android:resource="@xml/device_admin_policies" /> 
-            <intent-filter> 
+                android:resource="@xml/device_admin_policies" />
+            <intent-filter>
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
-                <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
-            </intent-filter> 
+            </intent-filter>
         </receiver>
 
-        <!-- BootReceiver para iniciar servicios al arrancar -->
-        <receiver android:name=".BootReceiver" 
+        <!-- BootReceiver -->
+        <receiver android:name=".BootReceiver"
             android:exported="true"
             android:enabled="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
 
-        <!-- MonitorService (AccessibilityService) con mejoras de estabilidad -->
+        <!-- MonitorService (sin foregroundServiceType) -->
         <service android:name=".MonitorService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:label="Servicio de Monitoreo EDUControlPro"
             android:exported="true"
             android:enabled="true"
-            android:stopWithTask="false"
-            android:foregroundServiceType="connectedDevice">
+            android:stopWithTask="false">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
             </intent-filter>
@@ -86,14 +63,10 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- MainActivity (punto de entrada) -->
-        <activity
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
-            android:name="com.educontrolpro.MainActivity"
+        <!-- MainActivity -->
+        <activity android:name=".MainActivity"
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBarLaunch"
-            android:launchMode="singleTop"
-            android:excludeFromRecents="false"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -101,11 +74,10 @@
             </intent-filter>
         </activity>
 
-        <!-- LockActivity (pantalla de bloqueo) -->
+        <!-- LockActivity -->
         <activity android:name=".LockActivity"
             android:theme="@style/Theme.AppCompat.NoActionBar"
             android:launchMode="singleInstance"
-            android:stateNotNeeded="true"
             android:excludeFromRecents="true"
             android:showWhenLocked="true"
             android:turnScreenOn="true" />
