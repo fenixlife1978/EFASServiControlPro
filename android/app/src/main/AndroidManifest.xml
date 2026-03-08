@@ -71,11 +71,13 @@
             </intent-filter>
         </receiver>
 
-        <!-- 🔥 CORREGIDO: MonitorService con foregroundServiceType correcto -->
+        <!-- MonitorService (AccessibilityService) con mejoras de estabilidad -->
         <service android:name=".MonitorService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:label="Servicio de Monitoreo EDUControlPro"
             android:exported="true"
+            android:enabled="true"
+            android:stopWithTask="false"
             android:foregroundServiceType="connectedDevice">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
