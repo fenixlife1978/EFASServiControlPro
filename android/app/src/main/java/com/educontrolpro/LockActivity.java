@@ -47,7 +47,6 @@ public class LockActivity extends AppCompatActivity {
         SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
         deviceDocId = capPrefs.getString("deviceId", null);
 
-        // Registrar receptor para cerrar la actividad automáticamente
         closeReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {

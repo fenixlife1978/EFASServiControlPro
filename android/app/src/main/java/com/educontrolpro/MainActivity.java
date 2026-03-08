@@ -30,6 +30,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
+        // 1. Registro de Plugins
         registerPlugin(DevicePlugin.class);
         try {
             registerPlugin(LiberarPlugin.class); 
@@ -37,9 +38,13 @@ public class MainActivity extends BridgeActivity {
             Log.e("EDU_Status", "Error al registrar LiberarPlugin: " + e.getMessage());
         }
 
+        // 2. Lógica de seguridad (Device Owner / Admin)
         checkSecurityPrivileges();
+
+        // 3. Verificar vinculación e iniciar MonitorService
         checkVinculacionYEstado();
 
+        // 4. Monitor de actualizaciones
         try {
             UpdateManager updateManager = new UpdateManager(this);
             updateManager.listenForUpdates();
@@ -48,10 +53,12 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    // --- RE-ACTIVAR BLOQUEO DE ALUMNO ---
     public void reactivarSeguridad() {
         SharedPreferences prefs = getSharedPreferences(ADMIN_PREFS, MODE_PRIVATE);
         prefs.edit().putBoolean(KEY_UNLOCKED, false).apply();
         
+        // Obtener deviceId desde CapacitorStorage
         SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
         String deviceId = capPrefs.getString(KEY_DEVICE_ID, null);
         
@@ -66,9 +73,12 @@ public class MainActivity extends BridgeActivity {
         }
 
         Toast.makeText(this, "Seguridad activada: Ajustes bloqueados", Toast.LENGTH_LONG).show();
+        
+        // Reiniciar MonitorService para aplicar cambios
         reiniciarMonitorService();
     }
 
+    // --- FUNCIÓN PARA LIBERAR DISPOSITIVO TOTALMENTE ---
     public void liberarDispositivoTotal() {
         DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
         ComponentName adminComponent = new ComponentName(this, AdminReceiver.class);
@@ -165,5 +175,6 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        // No detenemos nada aquí porque MonitorService se maneja solo
     }
 }
