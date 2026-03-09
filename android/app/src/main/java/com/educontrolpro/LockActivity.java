@@ -11,12 +11,9 @@ import android.graphics.Color;
 import android.view.Gravity;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.BroadcastReceiver;
-import android.content.Context;
-import android.content.IntentFilter;
 import android.widget.Toast;
 import android.provider.Settings;
-import android.util.Log; // ← IMPORTANTE: añadido
+import android.util.Log;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.FieldValue;
 import java.util.HashMap;
@@ -29,11 +26,9 @@ public class LockActivity extends AppCompatActivity {
     private static final String KEY_UNLOCKED = "is_unlocked";
     private static final String KEY_BLOQUEO_PIN = "bloqueo_pin";
     private static final String KEY_MASTER_PIN = "master_pin";
-    private static final String ACTION_CLOSE_LOCK = "ACTION_CLOSE_LOCK"; // ← AÑADIDO
 
     private FirebaseFirestore db = FirebaseFirestore.getInstance();
     private String deviceDocId = null;
-    private BroadcastReceiver closeReceiver; // ← AÑADIDO
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -46,20 +41,6 @@ public class LockActivity extends AppCompatActivity {
 
         SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
         deviceDocId = capPrefs.getString("deviceId", null);
-
-        // ====================================================
-        // BroadcastReceiver para cierre automático
-        // ====================================================
-        closeReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                if (ACTION_CLOSE_LOCK.equals(intent.getAction())) {
-                    Log.d("LockActivity", "Recibida orden de cierre automático");
-                    finish();
-                }
-            }
-        };
-        registerReceiver(closeReceiver, new IntentFilter(ACTION_CLOSE_LOCK));
 
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
@@ -76,7 +57,7 @@ public class LockActivity extends AppCompatActivity {
         tvTitle.setPadding(0, 0, 0, 30);
 
         TextView tvMessage = new TextView(this);
-        tvMessage.setText("EDUControlPro ha bloqueado este acceso por razones de seguridad.\n\nSi eres docente, introduce tu PIN para continuar.\n\nLa pantalla se cerrará automáticamente en unos segundos.");
+        tvMessage.setText("EDUControlPro ha bloqueado este acceso por razones de seguridad.\n\nSi eres docente, introduce tu PIN para continuar.");
         tvMessage.setTextColor(Color.WHITE);
         tvMessage.setTextSize(18);
         tvMessage.setGravity(Gravity.CENTER);
@@ -176,13 +157,5 @@ public class LockActivity extends AppCompatActivity {
         Intent intent = new Intent(this, LockActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
         startActivity(intent);
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        if (closeReceiver != null) {
-            unregisterReceiver(closeReceiver);
-        }
     }
 }
