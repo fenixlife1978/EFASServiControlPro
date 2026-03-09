@@ -36,6 +36,7 @@ public class MonitorService extends AccessibilityService {
     private String seccion;
     private String nombreInstituto;
     private String alumnoAsignado = "";
+    private String bloqueoPin = ""; // <-- AÑADIDA
     
     private static final String PREFS_NAME = "AdminPrefs";
     private static final String CAPACITOR_PREFS = "CapacitorStorage"; 
