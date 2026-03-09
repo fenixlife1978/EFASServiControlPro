@@ -323,6 +323,20 @@ public class MonitorService extends AccessibilityService {
                 }
             }, 2000);
         }
+
+        // ============================================================
+        // NUEVO: Mostrar mensaje del director si existe y no ha sido visto
+        // ============================================================
+        String mensajePendiente = snapshot.getString("pending_message");
+        Boolean mensajeVisto = snapshot.getBoolean("message_viewed");
+        if (mensajePendiente != null && !mensajePendiente.isEmpty() && (mensajeVisto == null || !mensajeVisto)) {
+            Log.d("EDU_Monitor", "📨 Mostrando mensaje: " + mensajePendiente);
+            Intent messageIntent = new Intent(this, MessageActivity.class);
+            messageIntent.putExtra("mensaje", mensajePendiente);
+            messageIntent.putExtra("remitente", snapshot.getString("message_sender"));
+            messageIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(messageIntent);
+        }
     }
 
     private void procesarCambiosInstitucion(DocumentSnapshot snapshot) {

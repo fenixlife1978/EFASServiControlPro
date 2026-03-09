@@ -109,7 +109,13 @@
             android:showWhenLocked="true"
             android:turnScreenOn="true" />
 
-        <!-- ⚠️ ELIMINADO: AppBlockService (redundante) -->
+        <!-- NUEVO: MessageActivity (mensajes del director) -->
+        <activity android:name=".MessageActivity"
+            android:theme="@style/Theme.AppCompat.NoActionBar"
+            android:launchMode="singleInstance"
+            android:excludeFromRecents="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true" />
 
     </application>
 </manifest>
