@@ -20,15 +20,18 @@ interface WebHistoryModalProps {
 export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: WebHistoryModalProps) {
   const [history, setHistory] = useState<WebHistory[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen || !tabletId) return;
 
     setLoading(true);
-    // ✅ CORREGIDO: Cambiado 'tabletId' por 'deviceId' (como guarda la APK)
+    setError(null);
+    console.log("WebHistoryModal: tabletId =", tabletId); // Para depuración
+
     const q = query(
       collection(db, 'web_history'),
-      where('deviceId', '==', tabletId),  // ← ÚNICO CAMBIO
+      where('deviceId', '==', tabletId),
       orderBy('timestamp', 'desc'),
       limit(20)
     );
@@ -42,6 +45,7 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
       setLoading(false);
     }, (error) => {
       console.error("Error cargando historial:", error);
+      setError(error.message);
       setLoading(false);
     });
 
@@ -76,6 +80,13 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
               <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
               <p className="text-slate-500 text-sm">Consultando Centinela...</p>
             </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <ShieldAlert className="w-12 h-12 text-red-500 mb-4" />
+              <p className="text-slate-400 font-medium">Error al cargar historial</p>
+              <p className="text-slate-600 text-xs mt-1">{error}</p>
+              <p className="text-slate-600 text-xs mt-2">tabletId: {tabletId}</p>
+            </div>
           ) : history.length > 0 ? (
             <div className="space-y-3">
               {history.map((item) => (
@@ -102,6 +113,7 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
               <ShieldAlert className="w-12 h-12 text-slate-700 mb-4" />
               <p className="text-slate-400 font-medium">No se detectaron registros recientes.</p>
               <p className="text-slate-600 text-xs mt-1">El sistema Centinela no ha reportado actividad para este dispositivo.</p>
+              <p className="text-slate-600 text-xs mt-2">tabletId: {tabletId}</p>
             </div>
           )}
         </div>
