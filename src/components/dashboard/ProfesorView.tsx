@@ -8,12 +8,11 @@ import {
 } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { 
-  History, User, RefreshCw, AlertTriangle, Search, Lock, Unlock, Globe, ShieldAlert
+  History, User, RefreshCw, AlertTriangle, Search, Lock, Unlock, Globe, ShieldAlert, ShieldCheck
 } from 'lucide-react';
 import { WebHistoryModal } from '@/components/admin/monitoring/WebHistoryModal';
 import { AlertFeed } from '@/components/dashboard/AlertFeed';
 
-// Definimos la interfaz para evitar errores de TypeScript
 interface Dispositivo {
   id: string;
   alumno_asignado?: string;
@@ -21,8 +20,8 @@ interface Dispositivo {
   seccion?: string;
   status?: string;
   current_url?: string;
-  ultimaUrl?: string; // Campo real que usa la APK
-  cortarNavegacion?: boolean; // Campo real que usa la APK
+  ultimaUrl?: string;
+  cortarNavegacion?: boolean;
   shieldMode?: boolean;
   online?: boolean;
   ultimoAcceso?: any;
@@ -38,6 +37,8 @@ export default function ProfesorView() {
   const [searchTerm, setSearchTerm] = useState('');
   const [historyModal, setHistoryModal] = useState({ isOpen: false, tabletId: '', alumnoNombre: '' });
   const [workingInstitutoId, setWorkingInstitutoId] = useState<string>('');
+  const [modoConcentracion, setModoConcentracion] = useState(false);
+  const [cambiandoModo, setCambiandoModo] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -45,6 +46,19 @@ export default function ProfesorView() {
       if (id) setWorkingInstitutoId(id);
     }
   }, []);
+
+  // Escuchar cambios en el modo concentración de la institución
+  useEffect(() => {
+    if (!workingInstitutoId) return;
+    const instRef = doc(db, 'institutions', workingInstitutoId);
+    const unsub = onSnapshot(instRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setModoConcentracion(data.modoConcentracion || false);
+      }
+    });
+    return () => unsub();
+  }, [workingInstitutoId]);
 
   useEffect(() => {
     if (!workingInstitutoId) return;
@@ -56,7 +70,6 @@ export default function ProfesorView() {
         const unsubProf = onSnapshot(qProf, (snap) => {
           if (!snap.empty) {
             const data = snap.docs[0].data();
-            // Limpieza de strings para comparación flexible
             const seccionLimpia = (data.seccion || '').toString().replace(/["']/g, '').replace('SECCION ', '').trim();
             
             setDatosProfesor({
@@ -100,25 +113,40 @@ export default function ProfesorView() {
     return () => unsubAuth();
   }, [workingInstitutoId]);
 
-  // CORREGIDO: Usar los campos reales de la APK
   const handleToggleBlock = async (tabletId: string, isBlocked: boolean) => {
     if (!tabletId) return;
     try {
       await updateDoc(doc(db, "dispositivos", tabletId), {
-        cortarNavegacion: !isBlocked, // Campo real que usa la APK
-        blockAllBrowsing: !isBlocked, // Sincronizar ambos para compatibilidad
+        cortarNavegacion: !isBlocked,
+        blockAllBrowsing: !isBlocked,
         lastUpdated: serverTimestamp()
       });
     } catch (e) { console.error(e); }
   };
 
-  // Función para verificar estado online
+  const handleToggleModoConcentracion = async () => {
+    if (!workingInstitutoId || cambiandoModo) return;
+    setCambiandoModo(true);
+    try {
+      const nuevoValor = !modoConcentracion;
+      await updateDoc(doc(db, 'institutions', workingInstitutoId), {
+        modoConcentracion: nuevoValor,
+        lastUpdated: serverTimestamp()
+      });
+      // También se podría enviar un mensaje a las tablets, pero eso lo hará el MonitorService
+    } catch (error) {
+      console.error("Error cambiando modo concentración:", error);
+    } finally {
+      setCambiandoModo(false);
+    }
+  };
+
   const checkIsOnline = (ultimoAcceso: any) => {
     if (!ultimoAcceso) return false;
     const lastSeenDate = ultimoAcceso.toDate ? ultimoAcceso.toDate() : new Date(ultimoAcceso);
     const now = new Date();
     const diff = now.getTime() - lastSeenDate.getTime();
-    return diff < 60000; // 60 segundos de tolerancia
+    return diff < 60000;
   };
 
   const alumnosFiltrados = alumnos.filter(al => 
@@ -144,14 +172,28 @@ export default function ProfesorView() {
           </div>
         </div>
 
-        <div className="relative w-full lg:w-72">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
-          <input 
-            type="text"
-            placeholder="BUSCAR ESTUDIANTE..."
-            className="w-full bg-slate-900 border border-slate-800 rounded-2xl py-3 pl-10 pr-4 text-white text-[9px] font-black uppercase outline-none focus:border-blue-500 transition-all"
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+        <div className="flex items-center gap-3 w-full lg:w-auto">
+          <button
+            onClick={handleToggleModoConcentracion}
+            disabled={cambiandoModo}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[9px] font-black uppercase italic transition-all ${
+              modoConcentracion
+                ? 'bg-green-600 text-white shadow-lg shadow-green-600/20'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            <ShieldCheck size={14} />
+            {cambiandoModo ? 'Cambiando...' : modoConcentracion ? 'Modo Concentración Activo' : 'Activar Modo Concentración'}
+          </button>
+          <div className="relative flex-1 lg:w-72">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
+            <input 
+              type="text"
+              placeholder="BUSCAR ESTUDIANTE..."
+              className="w-full bg-slate-900 border border-slate-800 rounded-2xl py-3 pl-10 pr-4 text-white text-[9px] font-black uppercase outline-none focus:border-blue-500 transition-all"
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
         </div>
       </div>
 
