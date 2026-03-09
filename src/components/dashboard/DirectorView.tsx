@@ -2,12 +2,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { db, auth } from '@/firebase/config';
 import { 
-  collection, onSnapshot, query, where, orderBy, doc, getDoc, getDocs, updateDoc, serverTimestamp 
+  collection, onSnapshot, query, where, orderBy, doc, getDoc, getDocs, updateDoc, serverTimestamp, deleteDoc 
 } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { 
   Users, Tablet, Layout, Search, GraduationCap, Briefcase, Activity, User, X, FileText, Printer, 
-  Globe, Eye, ShieldCheck, RefreshCw, Zap, Flame, AlertTriangle, Send, MessageSquare, Lock, ShieldAlert
+  Globe, Eye, ShieldCheck, RefreshCw, Zap, Flame, AlertTriangle, Send, MessageSquare, Lock, ShieldAlert,
+  CheckCircle, Trash2, Calendar
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -31,8 +32,14 @@ export default function DirectorView() {
   const [messageModal, setMessageModal] = useState({ isOpen: false, tabletId: '', alumnoNombre: '', text: '' });
   const [historyModal, setHistoryModal] = useState({ isOpen: false, tabletId: '', alumnoNombre: '' });
   
-  // NUEVO: Estado para alertas globales (riesgos de navegación)
+  // Estado para alertas globales
   const [alertasGlobales, setAlertasGlobales] = useState<any[]>([]);
+  const [alertasFiltradas, setAlertasFiltradas] = useState<any[]>([]);
+  
+  // Estados para filtros
+  const [fechaInicio, setFechaInicio] = useState('');
+  const [fechaFin, setFechaFin] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
   
   // Usamos estrictamente "InstitutoId" como en tu DB
   const getInstitutoId = () => {
@@ -119,7 +126,7 @@ export default function DirectorView() {
       setDispositivos(s.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (err) => console.error("Error dispositivos:", err));
 
-    // 6. Alertas globales (para riesgos de navegación)
+    // 6. Alertas globales
     const qAlertas = query(
       collection(db, "alertas"),
       where("InstitutoId", "==", workingInstitutoId),
@@ -140,6 +147,30 @@ export default function DirectorView() {
     };
   }, [workingInstitutoId, fetchMonitorDocente]);
 
+  // Aplicar filtros de fecha a las alertas
+  useEffect(() => {
+    let filtradas = alertasGlobales;
+
+    if (fechaInicio) {
+      const inicio = new Date(fechaInicio);
+      inicio.setHours(0, 0, 0, 0);
+      filtradas = filtradas.filter(a => {
+        const fecha = a.timestamp?.toDate ? a.timestamp.toDate() : new Date(a.timestamp);
+        return fecha >= inicio;
+      });
+    }
+    if (fechaFin) {
+      const fin = new Date(fechaFin);
+      fin.setHours(23, 59, 59, 999);
+      filtradas = filtradas.filter(a => {
+        const fecha = a.timestamp?.toDate ? a.timestamp.toDate() : new Date(a.timestamp);
+        return fecha <= fin;
+      });
+    }
+
+    setAlertasFiltradas(filtradas);
+  }, [alertasGlobales, fechaInicio, fechaFin]);
+
   // Supervisión táctica de aula
   useEffect(() => {
     if (!aulaSeleccionada || !workingInstitutoId) return;
@@ -155,16 +186,35 @@ export default function DirectorView() {
     return () => unsubSup();
   }, [aulaSeleccionada, workingInstitutoId]);
 
+  // Enviar mensaje al alumno (CORREGIDO: resetea message_viewed)
   const handleSendMessage = async () => {
     if (!messageModal.tabletId || !messageModal.text.trim()) return;
     try {
       await updateDoc(doc(db, "dispositivos", messageModal.tabletId), {
         pending_message: messageModal.text,
         message_timestamp: serverTimestamp(),
-        message_sender: "Dirección Institucional"
+        message_sender: "Dirección Institucional",
+        message_viewed: false // ← IMPORTANTE: para que el mensaje se muestre en la tablet
       });
       setMessageModal({ ...messageModal, isOpen: false, text: '' });
     } catch (e) { console.error(e); }
+  };
+
+  // Marcar todas las alertas filtradas como vistas
+  const handleMarcarVistas = async () => {
+    const promises = alertasFiltradas.map(alert => 
+      updateDoc(doc(db, 'alertas', alert.id), { status: 'visto' })
+    );
+    await Promise.all(promises);
+  };
+
+  // Eliminar todas las alertas filtradas
+  const handleLimpiar = async () => {
+    if (!confirm('¿Eliminar permanentemente todas las alertas mostradas?')) return;
+    const promises = alertasFiltradas.map(alert => 
+      deleteDoc(doc(db, 'alertas', alert.id))
+    );
+    await Promise.all(promises);
   };
 
   const exportToPDF = async () => {
@@ -211,15 +261,54 @@ export default function DirectorView() {
               <div className="scale-90 origin-left"><GlobalControls institutionId={workingInstitutoId} /></div>
             </div>
 
-            {/* RIESGOS DE NAVEGACIÓN CORREGIDO */}
+            {/* RIESGOS DE NAVEGACIÓN MEJORADO */}
             <div className="bg-[#0f1117] p-8 rounded-[2.5rem] border border-slate-800 shadow-xl">
-               <div className="flex justify-between items-center mb-6">
+               <div className="flex justify-between items-center mb-4">
                   <h3 className="text-[10px] font-black uppercase text-slate-500 tracking-widest italic flex items-center gap-2">
                     <Flame size={14} className="text-orange-500" /> Riesgos de Navegación
                   </h3>
+                  <button onClick={() => setShowFilters(!showFilters)} className="text-slate-400 hover:text-white text-[10px] font-black uppercase flex items-center gap-1">
+                    <Calendar size={14} /> Filtros
+                  </button>
                </div>
-               <div className="space-y-3">
-                  {alertasGlobales.length > 0 ? alertasGlobales.slice(0, 5).map((alert, i) => (
+
+               {showFilters && (
+                 <div className="mb-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                   <input
+                     type="date"
+                     className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs"
+                     value={fechaInicio}
+                     onChange={(e) => setFechaInicio(e.target.value)}
+                     placeholder="Fecha inicio"
+                   />
+                   <input
+                     type="date"
+                     className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs"
+                     value={fechaFin}
+                     onChange={(e) => setFechaFin(e.target.value)}
+                     placeholder="Fecha fin"
+                   />
+                   <div className="flex gap-2 justify-end">
+                     <button
+                       onClick={handleMarcarVistas}
+                       className="bg-blue-600/10 text-blue-500 hover:bg-blue-600 hover:text-white border border-blue-600/20 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase flex items-center gap-1 transition-all"
+                       title="Marcar vistas"
+                     >
+                       <CheckCircle size={12} /> Vistas
+                     </button>
+                     <button
+                       onClick={handleLimpiar}
+                       className="bg-red-600/10 text-red-500 hover:bg-red-600 hover:text-white border border-red-600/20 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase flex items-center gap-1 transition-all"
+                       title="Limpiar"
+                     >
+                       <Trash2 size={12} /> Limpiar
+                     </button>
+                   </div>
+                 </div>
+               )}
+
+               <div className="space-y-3 max-h-80 overflow-y-auto pr-1 custom-scrollbar">
+                  {alertasFiltradas.length > 0 ? alertasFiltradas.slice(0, 5).map((alert, i) => (
                     <div key={i} className="bg-red-500/5 p-4 rounded-2xl border border-red-500/10 group hover:border-red-500/30 transition-all">
                         <div className="flex justify-between items-start mb-2">
                             <p className="text-[9px] font-black text-white uppercase italic">{alert.estudianteNombre || alert.alumno_asignado || 'Estudiante'}</p>
@@ -244,7 +333,7 @@ export default function DirectorView() {
         </div>
 
         <div className="col-span-12 lg:col-span-8">
-            {/* MONITOR DOCENTE CORREGIDO */}
+            {/* MONITOR DOCENTE */}
             <section className="bg-[#0f1117] border border-slate-800 rounded-[2.5rem] overflow-hidden shadow-2xl h-full">
                 <div className="p-8 border-b border-slate-800 bg-black/40 flex justify-between items-center">
                   <h3 className="text-xs font-black text-white uppercase italic flex items-center gap-2">
