@@ -11,9 +11,12 @@ import android.graphics.Color;
 import android.view.Gravity;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.IntentFilter;
 import android.widget.Toast;
 import android.provider.Settings;
-import android.util.Log;
+import android.util.Log; // ← IMPORTANTE: añadido
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.FieldValue;
 import java.util.HashMap;
@@ -24,34 +27,46 @@ public class LockActivity extends AppCompatActivity {
     private static final String PREFS_NAME = "AdminPrefs";
     private static final String CAPACITOR_PREFS = "CapacitorStorage";
     private static final String KEY_UNLOCKED = "is_unlocked";
-    private static final String KEY_BLOQUEO_PIN = "bloqueo_pin"; // PIN específico del dispositivo
-    private static final String KEY_MASTER_PIN = "master_pin"; // PIN maestro global (respaldo)
-    
+    private static final String KEY_BLOQUEO_PIN = "bloqueo_pin";
+    private static final String KEY_MASTER_PIN = "master_pin";
+    private static final String ACTION_CLOSE_LOCK = "ACTION_CLOSE_LOCK"; // ← AÑADIDO
+
     private FirebaseFirestore db = FirebaseFirestore.getInstance();
     private String deviceDocId = null;
+    private BroadcastReceiver closeReceiver; // ← AÑADIDO
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Flags de seguridad para mantenerse al frente
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
                 | WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
                 | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
                 | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
 
-        // Obtener deviceId desde CapacitorStorage
         SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
         deviceDocId = capPrefs.getString("deviceId", null);
 
-        // Crear layout dinámico
+        // ====================================================
+        // BroadcastReceiver para cierre automático
+        // ====================================================
+        closeReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (ACTION_CLOSE_LOCK.equals(intent.getAction())) {
+                    Log.d("LockActivity", "Recibida orden de cierre automático");
+                    finish();
+                }
+            }
+        };
+        registerReceiver(closeReceiver, new IntentFilter(ACTION_CLOSE_LOCK));
+
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setGravity(Gravity.CENTER);
         layout.setBackgroundColor(Color.BLACK);
         layout.setPadding(60, 60, 60, 60);
 
-        // Título de advertencia en Rojo
         TextView tvTitle = new TextView(this);
         tvTitle.setText("ACCESO NO PERMITIDO");
         tvTitle.setTextColor(Color.RED);
@@ -60,15 +75,13 @@ public class LockActivity extends AppCompatActivity {
         tvTitle.setGravity(Gravity.CENTER);
         tvTitle.setPadding(0, 0, 0, 30);
 
-        // Mensaje personalizado
         TextView tvMessage = new TextView(this);
-        tvMessage.setText("EDUControlPro ha bloqueado este acceso por razones de seguridad.\n\nSi eres docente, introduce tu PIN para continuar.");
+        tvMessage.setText("EDUControlPro ha bloqueado este acceso por razones de seguridad.\n\nSi eres docente, introduce tu PIN para continuar.\n\nLa pantalla se cerrará automáticamente en unos segundos.");
         tvMessage.setTextColor(Color.WHITE);
         tvMessage.setTextSize(18);
         tvMessage.setGravity(Gravity.CENTER);
         tvMessage.setPadding(0, 0, 0, 50);
 
-        // Campo para el PIN
         EditText inputPin = new EditText(this);
         inputPin.setHint("INTRODUCE PIN DOCENTE");
         inputPin.setHintTextColor(Color.GRAY);
@@ -78,31 +91,22 @@ public class LockActivity extends AppCompatActivity {
         inputPin.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         inputPin.setPadding(20, 20, 20, 20);
 
-        // Botón de Desbloqueo
         Button btnUnlock = new Button(this);
         btnUnlock.setText("INGRESAR");
         btnUnlock.setOnClickListener(v -> {
             SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-            
-            // 1. Intentar con PIN específico del dispositivo (bloqueo_pin)
             String pinDispositivo = prefs.getString(KEY_BLOQUEO_PIN, "");
-            
-            // 2. Respaldo: PIN maestro global
             String pinMaestro = prefs.getString(KEY_MASTER_PIN, "1234");
-            
             String ingresado = inputPin.getText().toString();
-            
+
             if (ingresado.equals(pinDispositivo) || ingresado.equals(pinMaestro)) {
-                // PIN correcto - desbloquear
                 desbloquearDispositivo(prefs);
             } else {
                 Toast.makeText(this, "PIN Incorrecto - Intento registrado", Toast.LENGTH_SHORT).show();
-                // Registrar intento fallido en Firestore
                 registrarIntentoFallido(ingresado);
             }
         });
 
-        // Botón de emergencia para contacto (opcional)
         Button btnEmergency = new Button(this);
         btnEmergency.setText("CONTACTAR SOPORTE");
         btnEmergency.setBackgroundColor(Color.parseColor("#333333"));
@@ -111,7 +115,6 @@ public class LockActivity extends AppCompatActivity {
             Toast.makeText(this, "Comunícate con el administrador de la sede", Toast.LENGTH_LONG).show();
         });
 
-        // Agregar vistas al layout
         layout.addView(tvTitle);
         layout.addView(tvMessage);
         layout.addView(inputPin);
@@ -122,43 +125,40 @@ public class LockActivity extends AppCompatActivity {
     }
 
     private void desbloquearDispositivo(SharedPreferences prefs) {
-        // 1. Guardar estado desbloqueado localmente
         SharedPreferences.Editor editor = prefs.edit();
         editor.putBoolean(KEY_UNLOCKED, true);
         editor.apply();
-        
-        // 2. Actualizar Firestore (admin_mode_enable = true)
+
         if (deviceDocId != null) {
             Map<String, Object> updates = new HashMap<>();
             updates.put("admin_mode_enable", true);
             updates.put("ultimoAcceso", FieldValue.serverTimestamp());
             updates.put("ultimoDesbloqueo", FieldValue.serverTimestamp());
-            
+
             db.collection("dispositivos").document(deviceDocId)
                 .update(updates)
                 .addOnSuccessListener(aVoid -> Log.d("LockActivity", "Dispositivo desbloqueado en Firestore"))
                 .addOnFailureListener(e -> Log.e("LockActivity", "Error actualizando Firestore", e));
         }
-        
+
         Toast.makeText(this, "MODO ADMINISTRADOR ACTIVADO", Toast.LENGTH_SHORT).show();
-        
-        // 3. Abrir Ajustes automáticamente para el admin
+
         Intent intent = new Intent(Settings.ACTION_SETTINGS);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         startActivity(intent);
-        
-        finish(); // Cerrar pantalla de bloqueo
+
+        finish();
     }
 
     private void registrarIntentoFallido(String pinIngresado) {
         if (deviceDocId == null) return;
-        
+
         Map<String, Object> intento = new HashMap<>();
         intento.put("tipo", "PIN_INCORRECTO");
         intento.put("pin_intentado", pinIngresado);
         intento.put("timestamp", FieldValue.serverTimestamp());
         intento.put("deviceId", deviceDocId);
-        
+
         db.collection("dispositivos").document(deviceDocId)
             .collection("intentos_fallidos")
             .add(intento)
@@ -167,17 +167,22 @@ public class LockActivity extends AppCompatActivity {
 
     @Override
     public void onBackPressed() {
-        // Bloquear botón atrás - no hacer nada
-        // Opcional: mostrar un mensaje
         Toast.makeText(this, "Acción no permitida", Toast.LENGTH_SHORT).show();
     }
 
     @Override
     protected void onUserLeaveHint() {
         super.onUserLeaveHint();
-        // Si intentan minimizar, relanzar la actividad de bloqueo
         Intent intent = new Intent(this, LockActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
         startActivity(intent);
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (closeReceiver != null) {
+            unregisterReceiver(closeReceiver);
+        }
     }
 }
