@@ -309,20 +309,34 @@ public class MonitorService extends AccessibilityService {
             .addOnFailureListener(e -> Log.e("EDU_Monitor", "Error enviando log", e));
     }
 
+    // ============================================================
+    // 🔥 FUNCIÓN REPORTAR URL ACTUAL (MEJORADA CON LOGS)
+    // ============================================================
     private void reportarUrlActual(String url) {
-        if (deviceDocId == null || url.equals(ultimaUrlReportada)) return;
+        if (deviceDocId == null) {
+            Log.e("EDU_Monitor", "❌ reportarUrlActual: deviceDocId es NULL");
+            return;
+        }
         
+        if (url.equals(ultimaUrlReportada)) {
+            Log.d("EDU_Monitor", "ℹ️ URL repetida, ignorando: " + url);
+            return;
+        }
+        
+        Log.d("EDU_Monitor", "🌐 NUEVA URL DETECTADA: " + url);
         ultimaUrlReportada = url;
         
+        // 1. Actualizar ultimaUrl en el documento del dispositivo
         Map<String, Object> urlData = new HashMap<>();
         urlData.put("ultimaUrl", url);
         urlData.put("ultimaUrlTimestamp", FieldValue.serverTimestamp());
         
         db.collection("dispositivos").document(deviceDocId)
             .update(urlData)
-            .addOnFailureListener(e -> Log.e("EDU_Monitor", "Error reportando URL", e));
+            .addOnSuccessListener(aVoid -> Log.d("EDU_Monitor", "✅ ultimaUrl actualizada en dispositivo"))
+            .addOnFailureListener(e -> Log.e("EDU_Monitor", "❌ Error actualizando ultimaUrl", e));
         
-        // Guardar en historial global
+        // 2. Guardar en historial global
         Map<String, Object> history = new HashMap<>();
         history.put("deviceId", deviceDocId);
         history.put("url", url);
@@ -331,8 +345,13 @@ public class MonitorService extends AccessibilityService {
         history.put("aulaId", aulaId);
         history.put("alumno", alumnoAsignado);
         
+        Log.d("EDU_Monitor", "📤 Intentando guardar en web_history...");
+        
         db.collection("web_history").add(history)
-            .addOnFailureListener(e -> Log.e("EDU_Monitor", "Error guardando historial", e));
+            .addOnSuccessListener(documentReference -> 
+                Log.d("EDU_Monitor", "✅ Historial guardado con ID: " + documentReference.getId()))
+            .addOnFailureListener(e -> 
+                Log.e("EDU_Monitor", "❌ Error guardando historial: " + e.getMessage()));
     }
 
     private void reportarIncidencia(String tipo, String descripcion, String url) {
