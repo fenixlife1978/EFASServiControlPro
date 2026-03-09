@@ -45,32 +45,84 @@ public class MonitorService extends AccessibilityService {
     // VARIABLES DE ESTADO Y COMANDOS
     private boolean shieldMode = false;
     private boolean useBlacklist = false;
+    private boolean useWhitelist = false;
     private boolean blockAllBrowsing = false;
     private boolean cortarNavegacion = false;
     private String bloqueoPin = "";
     private List<String> listaNegra = new ArrayList<>();
+    private List<String> whitelist = new ArrayList<>();
     
-    // Lista blanca de sistema (apps que nunca se bloquean)
+    // Modo concentración (por aula)
+    private boolean modoConcentracion = false;
+    
+    // Apps educativas (permitidas siempre en modo concentración)
+    private List<String> appsEducativas = Arrays.asList(
+        "com.microsoft.office.word",
+        "com.microsoft.office.excel",
+        "com.microsoft.office.powerpoint",
+        "com.google.android.apps.docs",
+        "com.google.android.apps.classroom",
+        "com.google.android.apps.photos",
+        "com.android.chrome",
+        "org.mozilla.firefox",
+        "com.google.android.gm",
+        "com.google.android.calendar",
+        "com.google.android.apps.maps",
+        "com.google.android.apps.drive",
+        "com.google.android.apps.translate",
+        "org.wikipedia",
+        "com.duolingo",
+        "com.khanacademy.android"
+    );
+
+    // Aplicaciones prohibidas de nacimiento
+    private List<String> appsProhibidas = Arrays.asList(
+        "com.android.vending",
+        "com.google.android.gsf",
+        "com.android.mms",
+        "com.google.android.apps.messaging",
+        "tiktok", "instagram", "facebook", "youtube", "twitter", "whatsapp", "telegram", "snapchat", "discord",
+        "com.rovio.angrybirds", "com.supercell.clashofclans", "com.king.candycrushsaga", "com.mojang.minecraftpe",
+        "com.epicgames.fortnite", "com.tencent.ig", "com.dts.freefireth", "com.playrix.homescapes", "com.playrix.fishdom",
+        "com.netflix.mediaclient", "com.spotify.music", "com.amazon.avod.thirdpartyclient", "com.hulu.plus",
+        "com.disney.disneyplus", "com.crunchyroll.crunchyroid",
+        "com.mercadopago.wallet", "com.paypal.android.p2pmobile", "com.ubercab", "com.didiglobal.passenger",
+        "com.alibaba.aliexpresshd", "com.amazon.mShop.android.shopping"
+    );
+
+    // Lista blanca de sistema
     private List<String> listaBlancaSistema = Arrays.asList(
         "com.android.packageinstaller",
         "com.google.android.packageinstaller",
         "com.educontrolpro",
         "com.android.systemui",
         "com.google.android.googlequicksearchbox",
-        "com.android.launcher3", // Lanzador
-        "com.google.android.inputmethod.latin", // Teclado Gboard
-        "com.android.inputmethod.latin" // Teclado AOSP
+        "com.android.launcher3",
+        "com.google.android.inputmethod.latin",
+        "com.android.inputmethod.latin"
+    );
+
+    // ============================================================
+    // PALABRAS PROHIBIDAS (hardcoded)
+    // ============================================================
+    private static final List<String> PALABRAS_PROHIBIDAS = Arrays.asList(
+        "xxx",
+        "porno",
+        "pornos",
+        "videos pornos",
+        "juegos"
     );
 
     // Listeners
     private ListenerRegistration deviceListener;
     private ListenerRegistration institutionListener;
+    private ListenerRegistration aulaListener;
     private ListenerRegistration securityListener;
 
     // Heartbeat
     private Handler heartbeatHandler = new Handler(Looper.getMainLooper());
     private Runnable heartbeatRunnable;
-    private static final long HEARTBEAT_INTERVAL = 30000; // 30 segundos
+    private static final long HEARTBEAT_INTERVAL = 30000;
 
     // Última URL reportada
     private String ultimaUrlReportada = "";
@@ -96,7 +148,6 @@ public class MonitorService extends AccessibilityService {
             deviceDocId = prefs.getString(KEY_DEVICE_ID, null);
         }
         
-        // Obtener nombre del alumno si existe
         if (deviceDocId != null) {
             db.collection("dispositivos").document(deviceDocId).get()
                 .addOnSuccessListener(doc -> {
@@ -190,7 +241,7 @@ public class MonitorService extends AccessibilityService {
                 }
             });
 
-        // 2. LISTENER DE LA INSTITUCIÓN
+        // 2. LISTENER DE LA INSTITUCIÓN (carga blacklist y whitelist)
         institutionListener = db.collection("institutions").document(instId)
             .addSnapshotListener((snapshot, e) -> {
                 if (e != null) {
@@ -202,7 +253,28 @@ public class MonitorService extends AccessibilityService {
                 }
             });
 
-        // 3. LISTENER DE SEGURIDAD GLOBAL
+        // 3. LISTENER DEL AULA (para modo concentración)
+        if (aulaId != null) {
+            aulaListener = db.collection("institutions").document(instId)
+                .collection("Aulas").document(aulaId)
+                .addSnapshotListener((snapshot, e) -> {
+                    if (e != null) {
+                        Log.e("EDU_Monitor", "Error en listener de aula", e);
+                        return;
+                    }
+                    if (snapshot != null && snapshot.exists()) {
+                        Boolean concentracion = snapshot.getBoolean("modoConcentracion");
+                        if (concentracion != null) {
+                            modoConcentracion = concentracion;
+                            Log.d("EDU_Monitor", "Modo concentración aula: " + modoConcentracion);
+                        }
+                    } else {
+                        modoConcentracion = false;
+                    }
+                });
+        }
+
+        // 4. LISTENER DE SEGURIDAD GLOBAL
         securityListener = db.collection("system_config").document("security")
             .addSnapshotListener((snapshot, e) -> {
                 if (e != null) {
@@ -256,14 +328,24 @@ public class MonitorService extends AccessibilityService {
     private void procesarCambiosInstitucion(DocumentSnapshot snapshot) {
         Boolean blockAll = snapshot.getBoolean("blockAllBrowsing");
         Boolean useBlacklistFlag = snapshot.getBoolean("useBlacklist");
+        Boolean useWhitelistFlag = snapshot.getBoolean("useWhitelist");
         List<String> blacklist = (List<String>) snapshot.get("blacklist");
+        List<String> whitelistData = (List<String>) snapshot.get("whitelist");
         
         this.blockAllBrowsing = (blockAll != null && blockAll);
+        this.useBlacklist = (useBlacklistFlag != null && useBlacklistFlag);
+        this.useWhitelist = (useWhitelistFlag != null && useWhitelistFlag);
         
-        if (useBlacklistFlag != null && useBlacklistFlag && blacklist != null) {
+        if (blacklist != null) {
             this.listaNegra = blacklist;
         } else {
             this.listaNegra = new ArrayList<>();
+        }
+        
+        if (whitelistData != null) {
+            this.whitelist = whitelistData;
+        } else {
+            this.whitelist = new ArrayList<>();
         }
     }
 
@@ -406,8 +488,34 @@ public class MonitorService extends AccessibilityService {
         if (isUnlocked && !shieldMode) {
             return;
         }
-        
-        // Verificar si debe bloquear por ajustes (solo las apps de configuración exactas)
+
+        // ============================================================
+        // MODO CONCENTRACIÓN (por aula): si está activo, solo permitir apps educativas y de la whitelist
+        // ============================================================
+        if (modoConcentracion) {
+            // Permitir si la app está en appsEducativas O en la whitelist
+            if (appsEducativas.contains(packageName) || whitelist.contains(packageName)) {
+                return; // No bloquear
+            } else {
+                // No está permitida, bloquear
+                reportarIncidencia("MODO_CONCENTRACION", "App no permitida en modo concentración: " + packageName, packageName);
+                dispararBloqueoConDuracion(5000);
+                return;
+            }
+        }
+
+        // ============================================================
+        // BLOQUEO DE APPS PROHIBIDAS DE NACIMIENTO (solo si no está en modo concentración)
+        // ============================================================
+        for (String prohibida : appsProhibidas) {
+            if (packageName.toLowerCase().contains(prohibida.toLowerCase())) {
+                reportarIncidencia("APP_PROHIBIDA", "Intento de abrir app prohibida: " + packageName, packageName);
+                dispararBloqueoConDuracion(5000);
+                return;
+            }
+        }
+
+        // Verificar si debe bloquear por ajustes
         if (packageName.equals("com.android.settings") || packageName.equals("com.google.android.settings")) {
             if (!isUnlocked) {
                 dispararBloqueoConDuracion(5000);
@@ -415,7 +523,7 @@ public class MonitorService extends AccessibilityService {
             return;
         }
         
-        // Verificar blindaje: si está activo, solo permite nuestra app
+        // Verificar blindaje
         if (shieldMode && !packageName.contains("educontrolpro")) {
             dispararBloqueoConDuracion(5000);
             return;
@@ -425,16 +533,6 @@ public class MonitorService extends AccessibilityService {
         if ((cortarNavegacion || blockAllBrowsing) && esNavegador(packageName)) {
             dispararBloqueoConDuracion(5000);
             return;
-        }
-        
-        // Lista de redes sociales
-        List<String> redes = Arrays.asList("tiktok", "instagram", "facebook", "youtube", "twitter", "whatsapp");
-        for (String social : redes) {
-            if (packageName.toLowerCase().contains(social)) {
-                reportarIncidencia("RED_SOCIAL", "Intento de acceso a red social", packageName);
-                dispararBloqueoConDuracion(5000);
-                return;
-            }
         }
         
         // Si es navegador, analizar contenido
@@ -456,15 +554,29 @@ public class MonitorService extends AccessibilityService {
         if (node.getClassName() != null && node.getClassName().toString().contains("EditText")) {
             CharSequence texto = node.getText();
             if (texto != null) {
-                String url = texto.toString();
-                if (url.startsWith("http") || url.contains(".")) {
-                    reportarUrlActual(url);
+                String contenido = texto.toString();
+                
+                // ============================================================
+                // Verificar palabras prohibidas (antes de considerar URL)
+                // ============================================================
+                String contenidoLower = contenido.toLowerCase();
+                for (String palabra : PALABRAS_PROHIBIDAS) {
+                    if (contenidoLower.contains(palabra)) {
+                        Log.d("EDU_Monitor", "🔒 Palabra prohibida detectada: " + palabra);
+                        reportarIncidencia("PALABRA_PROHIBIDA", "Búsqueda con término prohibido: " + palabra, contenido);
+                        dispararBloqueoConDuracion(5000);
+                        return;
+                    }
+                }
+                
+                // Si parece una URL, reportar y verificar lista negra
+                if (contenido.startsWith("http") || contenido.contains(".")) {
+                    reportarUrlActual(contenido);
                     
-                    // Verificar lista negra
                     if (useBlacklist && listaNegra != null && !listaNegra.isEmpty()) {
                         for (String sitio : listaNegra) {
-                            if (url.toLowerCase().contains(sitio.toLowerCase())) {
-                                reportarIncidencia("BLOQUEO_LISTA_NEGRA", "Intento de acceso a sitio bloqueado", url);
+                            if (contenido.toLowerCase().contains(sitio.toLowerCase())) {
+                                reportarIncidencia("BLOQUEO_LISTA_NEGRA", "Intento de acceso a sitio bloqueado", contenido);
                                 dispararBloqueoConDuracion(5000);
                                 return;
                             }
@@ -485,6 +597,7 @@ public class MonitorService extends AccessibilityService {
         
         if (deviceListener != null) deviceListener.remove();
         if (institutionListener != null) institutionListener.remove();
+        if (aulaListener != null) aulaListener.remove();
         if (securityListener != null) securityListener.remove();
         
         if (heartbeatHandler != null && heartbeatRunnable != null) {

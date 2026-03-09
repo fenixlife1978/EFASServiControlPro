@@ -1,4 +1,3 @@
-
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
 import { db, auth } from '@/firebase/config';
@@ -31,6 +30,9 @@ export default function DirectorView() {
 
   const [messageModal, setMessageModal] = useState({ isOpen: false, tabletId: '', alumnoNombre: '', text: '' });
   const [historyModal, setHistoryModal] = useState({ isOpen: false, tabletId: '', alumnoNombre: '' });
+  
+  // NUEVO: Estado para alertas globales (riesgos de navegación)
+  const [alertasGlobales, setAlertasGlobales] = useState<any[]>([]);
   
   // Usamos estrictamente "InstitutoId" como en tu DB
   const getInstitutoId = () => {
@@ -93,7 +95,7 @@ export default function DirectorView() {
       setProfesores(s.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (err) => console.error("Error profesores:", err));
 
-    // 4. Aulas (CORREGIDO: Apuntando a subcolección y usando campos existentes según imagen)
+    // 4. Aulas
     const qAulas = query(
         collection(db, "institutions", workingInstitutoId, "Aulas"), 
         orderBy("aulaId") 
@@ -102,7 +104,6 @@ export default function DirectorView() {
       setAulas(s.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (err) => {
         console.error("Error aulas:", err);
-        // Fallback en caso de que el índice de orderBy tarde en propagarse
         const qAulasSimple = query(collection(db, "institutions", workingInstitutoId, "Aulas"));
         onSnapshot(qAulasSimple, (s) => {
             setAulas(s.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -118,9 +119,25 @@ export default function DirectorView() {
       setDispositivos(s.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (err) => console.error("Error dispositivos:", err));
 
+    // 6. Alertas globales (para riesgos de navegación)
+    const qAlertas = query(
+      collection(db, "alertas"),
+      where("InstitutoId", "==", workingInstitutoId),
+      orderBy("timestamp", "desc")
+    );
+    const unsubAlertas = onSnapshot(qAlertas, (snap) => {
+      setAlertasGlobales(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("Error alertas:", err));
+
     fetchMonitorDocente();
 
-    return () => { unsubAuth(); unsubProf(); unsubAulas(); unsubDev(); };
+    return () => { 
+      unsubAuth(); 
+      unsubProf(); 
+      unsubAulas(); 
+      unsubDev(); 
+      unsubAlertas(); 
+    };
   }, [workingInstitutoId, fetchMonitorDocente]);
 
   // Supervisión táctica de aula
@@ -129,7 +146,7 @@ export default function DirectorView() {
     const qSup = query(
       collection(db, "sesiones_monitoreo"),
       where("InstitutoId", "==", workingInstitutoId),
-      where("aulaId", "==", aulaSeleccionada.aulaId) // Usamos aulaId del documento
+      where("aulaId", "==", aulaSeleccionada.aulaId)
     );
     const unsubSup = onSnapshot(qSup, (s) => {
       setAlumnosAula(s.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -164,8 +181,6 @@ export default function DirectorView() {
     } catch (error) { console.error(error); }
   };
 
-  const alerts = dispositivos.filter(t => t.last_url?.includes('block') || t.status === 'restricted');
-
   if (!workingInstitutoId) return <div className="p-10 text-red-500 font-black italic uppercase">Acceso Denegado. No se encontró InstitutoId.</div>;
 
   return (
@@ -196,6 +211,7 @@ export default function DirectorView() {
               <div className="scale-90 origin-left"><GlobalControls institutionId={workingInstitutoId} /></div>
             </div>
 
+            {/* RIESGOS DE NAVEGACIÓN CORREGIDO */}
             <div className="bg-[#0f1117] p-8 rounded-[2.5rem] border border-slate-800 shadow-xl">
                <div className="flex justify-between items-center mb-6">
                   <h3 className="text-[10px] font-black uppercase text-slate-500 tracking-widest italic flex items-center gap-2">
@@ -203,17 +219,17 @@ export default function DirectorView() {
                   </h3>
                </div>
                <div className="space-y-3">
-                  {alerts.length > 0 ? alerts.slice(0, 4).map((alert, i) => (
+                  {alertasGlobales.length > 0 ? alertasGlobales.slice(0, 5).map((alert, i) => (
                     <div key={i} className="bg-red-500/5 p-4 rounded-2xl border border-red-500/10 group hover:border-red-500/30 transition-all">
                         <div className="flex justify-between items-start mb-2">
-                            <p className="text-[9px] font-black text-white uppercase italic">{alert.alumno_asignado || 'Estudiante'}</p>
+                            <p className="text-[9px] font-black text-white uppercase italic">{alert.estudianteNombre || alert.alumno_asignado || 'Estudiante'}</p>
                             <AlertTriangle size={12} className="text-red-500 animate-pulse" />
                         </div>
                         <div className="flex items-center justify-between">
-                           <p className="text-[8px] font-bold text-slate-600 uppercase truncate max-w-[120px]">{alert.last_url || 'BLOQUEADO'}</p>
+                           <p className="text-[8px] font-bold text-slate-600 uppercase truncate max-w-[120px]">{alert.urlIntentada || alert.descripcion || 'BLOQUEADO'}</p>
                            <div className="flex gap-2">
-                             <button onClick={() => setHistoryModal({ isOpen: true, tabletId: alert.id, alumnoNombre: alert.alumno_asignado })} className="text-slate-500 hover:text-white"><Globe size={12}/></button>
-                             <button onClick={() => setMessageModal({ isOpen: true, tabletId: alert.id, alumnoNombre: alert.alumno_asignado, text: '' })} className="text-[8px] font-black text-orange-500 uppercase hover:text-white">Notificar</button>
+                             <button onClick={() => setHistoryModal({ isOpen: true, tabletId: alert.deviceId, alumnoNombre: alert.estudianteNombre || alert.alumno_asignado })} className="text-slate-500 hover:text-white"><Globe size={12}/></button>
+                             <button onClick={() => setMessageModal({ isOpen: true, tabletId: alert.deviceId, alumnoNombre: alert.estudianteNombre || alert.alumno_asignado, text: '' })} className="text-[8px] font-black text-orange-500 uppercase hover:text-white">Notificar</button>
                            </div>
                         </div>
                     </div>
@@ -228,40 +244,47 @@ export default function DirectorView() {
         </div>
 
         <div className="col-span-12 lg:col-span-8">
+            {/* MONITOR DOCENTE CORREGIDO */}
             <section className="bg-[#0f1117] border border-slate-800 rounded-[2.5rem] overflow-hidden shadow-2xl h-full">
                 <div className="p-8 border-b border-slate-800 bg-black/40 flex justify-between items-center">
-                <h3 className="text-xs font-black text-white uppercase italic flex items-center gap-2">
-                    <Globe className="text-orange-500" size={16} /> Monitor Docente
-                </h3>
-                <button 
-                    onClick={fetchMonitorDocente}
-                    disabled={isRefreshing}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[9px] font-black uppercase italic transition-all ${isRefreshing ? 'bg-slate-800 text-slate-500' : 'bg-orange-500 text-white shadow-lg shadow-orange-500/20 hover:scale-105'}`}
-                >
-                    {isRefreshing ? <RefreshCw size={12} className="animate-spin" /> : <Zap size={12} />}
-                    {isRefreshing ? 'Sincronizando...' : 'Sincronizar'}
-                </button>
+                  <h3 className="text-xs font-black text-white uppercase italic flex items-center gap-2">
+                      <Globe className="text-orange-500" size={16} /> Monitor Docente
+                  </h3>
+                  <button 
+                      onClick={fetchMonitorDocente}
+                      disabled={isRefreshing}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[9px] font-black uppercase italic transition-all ${isRefreshing ? 'bg-slate-800 text-slate-500' : 'bg-orange-500 text-white shadow-lg shadow-orange-500/20 hover:scale-105'}`}
+                  >
+                      {isRefreshing ? <RefreshCw size={12} className="animate-spin" /> : <Zap size={12} />}
+                      {isRefreshing ? 'Sincronizando...' : 'Sincronizar'}
+                  </button>
                 </div>
                 <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-                {sesionesActivas.length > 0 ? sesionesActivas.map(sesion => (
-                    <div key={sesion.id} className="bg-slate-900/40 border border-slate-800/60 p-5 rounded-3xl group">
-                    <div className="flex items-center gap-3 mb-3">
-                        <div className="bg-blue-500/10 p-2 rounded-xl text-blue-500"><Briefcase size={16} /></div>
-                        <div>
-                        <p className="text-[10px] font-black text-white uppercase italic">{sesion.usuario}</p>
-                        <p className="text-[8px] text-slate-500 font-bold uppercase">ID: {sesion.tabletId}</p>
+                  {profesores.length > 0 ? profesores.map(prof => {
+                      const device = dispositivos.find(d => d.id === prof.tabletId);
+                      const online = device?.online ? true : false;
+                      const urlActual = device?.ultimaUrl || 'Sin actividad';
+                      return (
+                        <div key={prof.id} className="bg-slate-900/40 border border-slate-800/60 p-5 rounded-3xl group">
+                          <div className="flex items-center gap-3 mb-3">
+                              <div className="bg-blue-500/10 p-2 rounded-xl text-blue-500"><Briefcase size={16} /></div>
+                              <div>
+                                <p className="text-[10px] font-black text-white uppercase italic">{prof.nombre}</p>
+                                <p className="text-[8px] text-slate-500 font-bold uppercase">ID: {prof.tabletId || 'Sin asignar'}</p>
+                              </div>
+                          </div>
+                          <div className="bg-black/40 p-3 rounded-2xl border border-slate-800/50 flex items-center justify-between">
+                              <p className="text-[10px] text-blue-400 font-bold truncate lowercase flex-1">{urlActual}</p>
+                              <span className={`ml-2 w-2 h-2 rounded-full ${online ? 'bg-green-500 animate-pulse' : 'bg-slate-600'}`} />
+                          </div>
                         </div>
-                    </div>
-                    <div className="bg-black/40 p-3 rounded-2xl border border-slate-800/50">
-                        <p className="text-[10px] text-blue-400 font-bold truncate lowercase">{sesion.url_actual || 'efas-control.pro'}</p>
-                    </div>
-                    </div>
-                )) : (
-                    <div className="col-span-full flex flex-col items-center justify-center py-10 text-slate-600">
-                    <RefreshCw size={24} className="mb-2 opacity-20" />
-                    <p className="text-[9px] font-black uppercase italic">Esperando actividad docente...</p>
-                    </div>
-                )}
+                      );
+                  }) : (
+                      <div className="col-span-full flex flex-col items-center justify-center py-10 text-slate-600">
+                        <RefreshCw size={24} className="mb-2 opacity-20" />
+                        <p className="text-[9px] font-black uppercase italic">No hay docentes en esta sede</p>
+                      </div>
+                  )}
                 </div>
             </section>
         </div>
