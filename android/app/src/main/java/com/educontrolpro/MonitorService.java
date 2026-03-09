@@ -50,12 +50,16 @@ public class MonitorService extends AccessibilityService {
     private String bloqueoPin = "";
     private List<String> listaNegra = new ArrayList<>();
     
+    // Lista blanca de sistema (apps que nunca se bloquean)
     private List<String> listaBlancaSistema = Arrays.asList(
         "com.android.packageinstaller",
         "com.google.android.packageinstaller",
         "com.educontrolpro",
         "com.android.systemui",
-        "com.google.android.googlequicksearchbox"
+        "com.google.android.googlequicksearchbox",
+        "com.android.launcher3", // Lanzador
+        "com.google.android.inputmethod.latin", // Teclado Gboard
+        "com.android.inputmethod.latin" // Teclado AOSP
     );
 
     // Listeners
@@ -76,8 +80,6 @@ public class MonitorService extends AccessibilityService {
         super.onCreate();
         createNotificationChannel();
         startForeground(1, getNotification());
-        
-        // Leer identidad
         cargarIdentidad();
     }
 
@@ -136,15 +138,6 @@ public class MonitorService extends AccessibilityService {
             iniciarListeners(deviceDocId, InstitutoId);
             iniciarHeartbeat();
             reportarEstadoInicial();
-            
-            // 🔥 TEST: Escribir un log de prueba en Firestore
-            Map<String, Object> testLog = new HashMap<>();
-            testLog.put("tipo", "servicio_iniciado");
-            testLog.put("deviceId", deviceDocId);
-            testLog.put("timestamp", FieldValue.serverTimestamp());
-            db.collection("test_logs").add(testLog)
-                .addOnSuccessListener(ref -> Log.d("EDU_Monitor", "✅ test_log escrito"))
-                .addOnFailureListener(e -> Log.e("EDU_Monitor", "❌ Error escribiendo test_log", e));
             
         } else {
             Log.e("EDU_Monitor", "ERROR: Faltan datos críticos de identidad.");
@@ -226,7 +219,6 @@ public class MonitorService extends AccessibilityService {
     }
 
     private void procesarCambiosDispositivo(DocumentSnapshot snapshot) {
-        // LEER TODOS LOS CAMPOS
         Boolean adminEnabled = snapshot.getBoolean("admin_mode_enable");
         Boolean shield = snapshot.getBoolean("shieldMode");
         Boolean cortarNavegacionCmd = snapshot.getBoolean("cortarNavegacion");
@@ -234,12 +226,10 @@ public class MonitorService extends AccessibilityService {
         String pinCmd = snapshot.getString("pinBloqueo");
         String nuevoAlumno = snapshot.getString("alumno_asignado");
         
-        // Actualizar nombre del alumno
         if (nuevoAlumno != null && !nuevoAlumno.isEmpty()) {
             alumnoAsignado = nuevoAlumno;
         }
         
-        // Actualizar variables locales
         this.shieldMode = (shield != null && shield);
         this.cortarNavegacion = (cortarNavegacionCmd != null && cortarNavegacionCmd);
         
@@ -249,25 +239,17 @@ public class MonitorService extends AccessibilityService {
             Log.d("EDU_Monitor", "PIN de bloqueo actualizado");
         }
         
-        // GUARDAR ESTADO DE DESBLOQUEO
         saveUnlockState(adminEnabled != null && adminEnabled);
         
-        // PROCESAR COMANDOS INMEDIATOS
         if (bloquearCmd != null && bloquearCmd) {
             Log.d("EDU_Monitor", "Comando BLOQUEAR recibido");
-            dispararBloqueo();
-            // Resetear el comando después de 2 segundos
+            dispararBloqueoConDuracion(5000);
             new Handler(Looper.getMainLooper()).postDelayed(() -> {
                 if (deviceDocId != null) {
                     db.collection("dispositivos").document(deviceDocId)
                         .update("bloquear", false);
                 }
             }, 2000);
-        }
-        
-        // VERIFICAR SI DEBE BLOQUEAR
-        if (this.shieldMode || (adminEnabled != null && !adminEnabled)) {
-            dispararBloqueo();
         }
     }
 
@@ -300,7 +282,6 @@ public class MonitorService extends AccessibilityService {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_UNLOCKED, isUnlocked).apply();
     }
 
-    // REPORTES
     private void enviarLog(String packageName) {
         if (deviceDocId == null) return;
         
@@ -318,34 +299,19 @@ public class MonitorService extends AccessibilityService {
             .addOnFailureListener(e -> Log.e("EDU_Monitor", "Error enviando log", e));
     }
 
-    // ============================================================
-    // 🔥 FUNCIÓN REPORTAR URL ACTUAL (MEJORADA CON LOGS)
-    // ============================================================
     private void reportarUrlActual(String url) {
-        if (deviceDocId == null) {
-            Log.e("EDU_Monitor", "❌ reportarUrlActual: deviceDocId es NULL");
-            return;
-        }
+        if (deviceDocId == null || url.equals(ultimaUrlReportada)) return;
         
-        if (url.equals(ultimaUrlReportada)) {
-            Log.d("EDU_Monitor", "ℹ️ URL repetida, ignorando: " + url);
-            return;
-        }
-        
-        Log.d("EDU_Monitor", "🌐 NUEVA URL DETECTADA: " + url);
         ultimaUrlReportada = url;
         
-        // 1. Actualizar ultimaUrl en el documento del dispositivo
         Map<String, Object> urlData = new HashMap<>();
         urlData.put("ultimaUrl", url);
         urlData.put("ultimaUrlTimestamp", FieldValue.serverTimestamp());
         
         db.collection("dispositivos").document(deviceDocId)
             .update(urlData)
-            .addOnSuccessListener(aVoid -> Log.d("EDU_Monitor", "✅ ultimaUrl actualizada en dispositivo"))
-            .addOnFailureListener(e -> Log.e("EDU_Monitor", "❌ Error actualizando ultimaUrl", e));
+            .addOnFailureListener(e -> Log.e("EDU_Monitor", "Error reportando URL", e));
         
-        // 2. Guardar en historial global
         Map<String, Object> history = new HashMap<>();
         history.put("deviceId", deviceDocId);
         history.put("url", url);
@@ -354,13 +320,8 @@ public class MonitorService extends AccessibilityService {
         history.put("aulaId", aulaId);
         history.put("alumno", alumnoAsignado);
         
-        Log.d("EDU_Monitor", "📤 Intentando guardar en web_history...");
-        
         db.collection("web_history").add(history)
-            .addOnSuccessListener(documentReference -> 
-                Log.d("EDU_Monitor", "✅ Historial guardado con ID: " + documentReference.getId()))
-            .addOnFailureListener(e -> 
-                Log.e("EDU_Monitor", "❌ Error guardando historial: " + e.getMessage()));
+            .addOnFailureListener(e -> Log.e("EDU_Monitor", "Error guardando historial", e));
     }
 
     private void reportarIncidencia(String tipo, String descripcion, String url) {
@@ -378,7 +339,6 @@ public class MonitorService extends AccessibilityService {
             .add(incidencia)
             .addOnFailureListener(e -> Log.e("EDU_Monitor", "Error reportando incidencia", e));
         
-        // También reportar a colección global "alertas" para el dashboard
         reportarAlertaGlobal(tipo, descripcion, url);
     }
 
@@ -402,48 +362,82 @@ public class MonitorService extends AccessibilityService {
             .addOnFailureListener(e -> Log.e("EDU_Monitor", "Error reportando alerta global", e));
     }
 
+    private void dispararBloqueoConDuracion(int duracionMs) {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        boolean isUnlocked = prefs.getBoolean(KEY_UNLOCKED, false);
+        
+        if (!isUnlocked) {
+            Log.d("EDU_Monitor", "🔒 MOSTRANDO PANTALLA DE BLOQUEO (" + duracionMs/1000 + " segundos)");
+            
+            Intent lockIntent = new Intent(this, LockActivity.class);
+            lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            startActivity(lockIntent);
+            
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                Intent closeIntent = new Intent("ACTION_CLOSE_LOCK");
+                sendBroadcast(closeIntent);
+                Log.d("EDU_Monitor", "🔓 PANTALLA DE BLOQUEO CERRADA AUTOMÁTICAMENTE");
+            }, duracionMs);
+        }
+    }
+
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
+        // Solo procesamos eventos de cambio de ventana (cuando se abre una nueva app)
+        if (event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            return;
+        }
+
         if (event.getPackageName() == null) return;
         String packageName = event.getPackageName().toString();
         
-        if (listaBlancaSistema.contains(packageName)) return; 
+        // Apps del sistema siempre permitidas
+        if (listaBlancaSistema.contains(packageName)) {
+            return;
+        }
         
         // Registrar cada ventana nueva
-        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            enviarLog(packageName);
-        }
+        enviarLog(packageName);
         
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         boolean isUnlocked = prefs.getBoolean(KEY_UNLOCKED, false);
         
-        if (isUnlocked && !shieldMode) return;
-        
-        // Verificaciones de bloqueo
-        if (packageName.contains("settings")) {
-            dispararBloqueo();
+        // Si está desbloqueado y no en blindaje, no bloquear
+        if (isUnlocked && !shieldMode) {
             return;
         }
         
+        // Verificar si debe bloquear por ajustes (solo las apps de configuración exactas)
+        if (packageName.equals("com.android.settings") || packageName.equals("com.google.android.settings")) {
+            if (!isUnlocked) {
+                dispararBloqueoConDuracion(5000);
+            }
+            return;
+        }
+        
+        // Verificar blindaje: si está activo, solo permite nuestra app
         if (shieldMode && !packageName.contains("educontrolpro")) {
-            dispararBloqueo();
+            dispararBloqueoConDuracion(5000);
             return;
         }
         
+        // Verificar bloqueo de navegación
         if ((cortarNavegacion || blockAllBrowsing) && esNavegador(packageName)) {
-            dispararBloqueo();
+            dispararBloqueoConDuracion(5000);
             return;
         }
         
+        // Lista de redes sociales
         List<String> redes = Arrays.asList("tiktok", "instagram", "facebook", "youtube", "twitter", "whatsapp");
         for (String social : redes) {
             if (packageName.toLowerCase().contains(social)) {
                 reportarIncidencia("RED_SOCIAL", "Intento de acceso a red social", packageName);
-                dispararBloqueo();
+                dispararBloqueoConDuracion(5000);
                 return;
             }
         }
         
+        // Si es navegador, analizar contenido
         if (esNavegador(packageName)) {
             analizarContenido(event.getSource());
         }
@@ -471,7 +465,7 @@ public class MonitorService extends AccessibilityService {
                         for (String sitio : listaNegra) {
                             if (url.toLowerCase().contains(sitio.toLowerCase())) {
                                 reportarIncidencia("BLOQUEO_LISTA_NEGRA", "Intento de acceso a sitio bloqueado", url);
-                                dispararBloqueo();
+                                dispararBloqueoConDuracion(5000);
                                 return;
                             }
                         }
@@ -485,27 +479,18 @@ public class MonitorService extends AccessibilityService {
         }
     }
 
-    private void dispararBloqueo() {
-        Intent lockIntent = new Intent(this, LockActivity.class);
-        lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        startActivity(lockIntent);
-    }
-
     @Override
     public void onDestroy() {
         super.onDestroy();
         
-        // Cancelar listeners
         if (deviceListener != null) deviceListener.remove();
         if (institutionListener != null) institutionListener.remove();
         if (securityListener != null) securityListener.remove();
         
-        // Detener heartbeat
         if (heartbeatHandler != null && heartbeatRunnable != null) {
             heartbeatHandler.removeCallbacks(heartbeatRunnable);
         }
         
-        // Reportar offline
         if (deviceDocId != null) {
             Map<String, Object> offline = new HashMap<>();
             offline.put("online", false);

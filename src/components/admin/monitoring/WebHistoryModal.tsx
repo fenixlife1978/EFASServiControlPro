@@ -1,15 +1,15 @@
 'use client';
 import React, { useEffect, useState } from 'react';
 import { db } from '@/firebase/config';
-import { collection, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
-import { X, Globe, Clock, ExternalLink, ShieldAlert, Download, Share2 } from 'lucide-react';
+import { collection, query, where, orderBy, limit, onSnapshot, Timestamp, deleteDoc, getDocs } from 'firebase/firestore';
+import { X, Globe, Clock, ExternalLink, ShieldAlert, Download, Share2, Calendar, Search, Trash2 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 interface WebHistory {
   id: string;
   url: string;
-  timestamp: any;
+  timestamp: any; // Firestore Timestamp o Date
 }
 
 interface WebHistoryModalProps {
@@ -21,8 +21,16 @@ interface WebHistoryModalProps {
 
 export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: WebHistoryModalProps) {
   const [history, setHistory] = useState<WebHistory[]>([]);
+  const [filteredHistory, setFilteredHistory] = useState<WebHistory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showFilters, setShowFilters] = useState(false);
+  
+  // Fechas temporales y aplicadas
+  const [tempFechaInicio, setTempFechaInicio] = useState<string>('');
+  const [tempFechaFin, setTempFechaFin] = useState<string>('');
+  const [fechaInicio, setFechaInicio] = useState<string>('');
+  const [fechaFin, setFechaFin] = useState<string>('');
 
   useEffect(() => {
     if (!isOpen || !tabletId) return;
@@ -35,7 +43,7 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
       collection(db, 'web_history'),
       where('deviceId', '==', tabletId),
       orderBy('timestamp', 'desc'),
-      limit(20)
+      limit(20) // Podemos quitar el límite si usamos filtros
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -54,15 +62,60 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
     return () => unsubscribe();
   }, [isOpen, tabletId]);
 
-  // Función para compartir usando Web Share API
+  // Aplicar filtros de fecha
+  useEffect(() => {
+    let filtrados = history;
+
+    if (fechaInicio) {
+      const inicio = new Date(fechaInicio);
+      inicio.setHours(0, 0, 0, 0);
+      filtrados = filtrados.filter(item => {
+        const fecha = item.timestamp?.toDate ? item.timestamp.toDate() : new Date(item.timestamp);
+        return fecha >= inicio;
+      });
+    }
+    if (fechaFin) {
+      const fin = new Date(fechaFin);
+      fin.setHours(23, 59, 59, 999);
+      filtrados = filtrados.filter(item => {
+        const fecha = item.timestamp?.toDate ? item.timestamp.toDate() : new Date(item.timestamp);
+        return fecha <= fin;
+      });
+    }
+
+    setFilteredHistory(filtrados);
+  }, [history, fechaInicio, fechaFin]);
+
+  const handleBuscar = () => {
+    setFechaInicio(tempFechaInicio);
+    setFechaFin(tempFechaFin);
+    setShowFilters(false); // Opcional: cerrar filtros tras buscar
+  };
+
+  const handleLimpiarHistorial = async () => {
+    if (!confirm(`¿Estás seguro de eliminar todo el historial de navegación de ${alumnoNombre}?`)) return;
+    try {
+      const q = query(collection(db, 'web_history'), where('deviceId', '==', tabletId));
+      const snapshot = await getDocs(q);
+      const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all(deletePromises);
+      // El onSnapshot actualizará la lista automáticamente
+    } catch (error) {
+      console.error("Error eliminando historial:", error);
+      alert("No se pudo eliminar el historial. Verifica permisos.");
+    }
+  };
+
   const handleShare = async () => {
     if (!navigator.share) {
       alert('La función de compartir no está disponible en este navegador.');
       return;
     }
 
-    const text = `Historial de navegación de ${alumnoNombre}:\n` + 
-      history.map(h => `${h.timestamp?.toDate().toLocaleString()} - ${h.url}`).join('\n');
+    const text = `Historial de navegación de ${alumnoNombre}${
+      fechaInicio || fechaFin ? ` (${fechaInicio || ''} - ${fechaFin || ''})` : ''
+    }:\n` + 
+      filteredHistory.map(h => `${h.timestamp?.toDate().toLocaleString()} - ${h.url}`).join('\n');
 
     try {
       await navigator.share({
@@ -74,7 +127,6 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
     }
   };
 
-  // Función para generar PDF
   const generatePDF = () => {
     const doc = new jsPDF();
     doc.setFontSize(16);
@@ -82,15 +134,18 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
     doc.setFontSize(10);
     doc.text(`Alumno: ${alumnoNombre}`, 14, 30);
     doc.text(`Dispositivo: ${tabletId}`, 14, 36);
-    doc.text(`Fecha: ${new Date().toLocaleDateString()}`, 14, 42);
+    doc.text(`Fecha generación: ${new Date().toLocaleDateString()}`, 14, 42);
+    if (fechaInicio || fechaFin) {
+      doc.text(`Período: ${fechaInicio || 'sin inicio'} - ${fechaFin || 'sin fin'}`, 14, 48);
+    }
 
-    const tableData = history.map(h => [
+    const tableData = filteredHistory.map(h => [
       h.timestamp?.toDate().toLocaleString() || '',
       h.url
     ]);
 
     autoTable(doc, {
-      startY: 50,
+      startY: fechaInicio || fechaFin ? 55 : 50,
       head: [['Fecha/Hora', 'URL']],
       body: tableData,
       styles: { fontSize: 8 },
@@ -101,6 +156,8 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
   };
 
   if (!isOpen) return null;
+
+  const displayHistory = (fechaInicio || fechaFin) ? filteredHistory : history;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
@@ -116,10 +173,59 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
               <p className="text-slate-400 text-xs uppercase tracking-wider font-semibold">Alumno: {alumnoNombre}</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors text-slate-400 hover:text-white">
-            <X className="w-6 h-6" />
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className="p-2 text-slate-400 hover:text-white transition-colors"
+              title="Filtros por fecha"
+            >
+              <Calendar size={18} />
+            </button>
+            <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors text-slate-400 hover:text-white">
+              <X className="w-6 h-6" />
+            </button>
+          </div>
         </div>
+
+        {/* Filtros */}
+        {showFilters && (
+          <div className="p-4 bg-slate-900/50 border-b border-white/10">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="text-[8px] text-slate-500 uppercase block mb-1">Fecha inicio</label>
+                <input
+                  type="date"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg py-2 px-3 text-white text-xs"
+                  value={tempFechaInicio}
+                  onChange={(e) => setTempFechaInicio(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-[8px] text-slate-500 uppercase block mb-1">Fecha fin</label>
+                <input
+                  type="date"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg py-2 px-3 text-white text-xs"
+                  value={tempFechaFin}
+                  onChange={(e) => setTempFechaFin(e.target.value)}
+                />
+              </div>
+              <div className="flex items-end gap-2">
+                <button
+                  onClick={handleBuscar}
+                  className="flex-1 bg-orange-600/10 hover:bg-orange-600 text-orange-500 hover:text-white py-2 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-1 transition-all"
+                >
+                  <Search size={12} /> Buscar
+                </button>
+                <button
+                  onClick={handleLimpiarHistorial}
+                  className="flex-1 bg-red-600/10 hover:bg-red-600 text-red-500 hover:text-white py-2 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-1 transition-all"
+                >
+                  <Trash2 size={12} /> Limpiar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Content */}
         <div className="p-6 max-h-[60vh] overflow-y-auto">
@@ -135,9 +241,9 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
               <p className="text-slate-600 text-xs mt-1">{error}</p>
               <p className="text-slate-600 text-xs mt-2">tabletId: {tabletId}</p>
             </div>
-          ) : history.length > 0 ? (
+          ) : displayHistory.length > 0 ? (
             <div className="space-y-3">
-              {history.map((item) => (
+              {displayHistory.map((item) => (
                 <div key={item.id} className="group p-4 rounded-xl bg-white/5 border border-white/5 hover:border-orange-500/30 hover:bg-orange-500/5 transition-all flex items-center justify-between">
                   <div className="flex items-center gap-4 overflow-hidden">
                     <div className="p-2 rounded-lg bg-slate-800 text-slate-400 group-hover:text-orange-500 group-hover:bg-orange-500/10 transition-colors">
@@ -146,7 +252,7 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
                     <div className="overflow-hidden">
                       <p className="text-sm text-slate-200 font-medium truncate group-hover:text-white">{item.url}</p>
                       <p className="text-[10px] text-slate-500 font-mono">
-                        {item.timestamp?.toDate().toLocaleString() || 'Fecha no disponible'}
+                        {item.timestamp?.toDate ? item.timestamp.toDate().toLocaleString() : new Date(item.timestamp).toLocaleString()}
                       </p>
                     </div>
                   </div>
@@ -169,7 +275,7 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
         {/* Footer con botones de acción */}
         <div className="p-4 bg-black/20 border-t border-white/5 flex justify-between items-center">
           <p className="text-[10px] text-slate-500 uppercase tracking-[0.2em]">EDUControlPro - Monitoreo</p>
-          {history.length > 0 && (
+          {displayHistory.length > 0 && (
             <div className="flex gap-2">
               <button
                 onClick={handleShare}

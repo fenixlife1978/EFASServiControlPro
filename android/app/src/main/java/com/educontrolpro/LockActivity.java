@@ -49,7 +49,7 @@ public class LockActivity extends AppCompatActivity {
         layout.setPadding(60, 60, 60, 60);
 
         TextView tvTitle = new TextView(this);
-        tvTitle.setText("ACCESO NO PERMITIDO");
+        tvTitle.setText("SITIO BLOQUEADO");
         tvTitle.setTextColor(Color.RED);
         tvTitle.setTextSize(24);
         tvTitle.setTypeface(null, android.graphics.Typeface.BOLD);
@@ -57,7 +57,8 @@ public class LockActivity extends AppCompatActivity {
         tvTitle.setPadding(0, 0, 0, 30);
 
         TextView tvMessage = new TextView(this);
-        tvMessage.setText("EDUControlPro ha bloqueado este acceso por razones de seguridad.\n\nSi eres docente, introduce tu PIN para continuar.");
+        // 🔥 NUEVO MENSAJE PERSONALIZADO
+        tvMessage.setText("Este sitio ha sido bloqueado por políticas educativas.\n\nSi eres docente, introduce tu PIN para continuar.");
         tvMessage.setTextColor(Color.WHITE);
         tvMessage.setTextSize(18);
         tvMessage.setGravity(Gravity.CENTER);

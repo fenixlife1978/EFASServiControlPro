@@ -36,9 +36,17 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
   const [alertas, setAlertas] = useState<Alerta[]>([]);
   const [filteredAlertas, setFilteredAlertas] = useState<Alerta[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [fechaInicio, setFechaInicio] = useState<string>('');
-  const [fechaFin, setFechaFin] = useState<string>('');
+  
+  // Estados para los inputs de filtro
+  const [tempSearchTerm, setTempSearchTerm] = useState('');
+  const [tempFechaInicio, setTempFechaInicio] = useState<string>('');
+  const [tempFechaFin, setTempFechaFin] = useState<string>('');
+  
+  // Estados aplicados (los que realmente se usan en el filtro)
+  const [appliedSearchTerm, setAppliedSearchTerm] = useState('');
+  const [appliedFechaInicio, setAppliedFechaInicio] = useState<string>('');
+  const [appliedFechaFin, setAppliedFechaFin] = useState<string>('');
+  
   const [showFilters, setShowFilters] = useState(false);
   const [exportando, setExportando] = useState(false);
 
@@ -67,7 +75,7 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
     return () => unsubscribe();
   }, [institutoId]);
 
-  // Aplicar filtros cada vez que cambien las alertas o los filtros
+  // Aplicar filtros cuando cambien los valores aplicados
   useEffect(() => {
     let filtradas = alertas;
 
@@ -77,8 +85,8 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
     }
 
     // Filtrar por término de búsqueda (nombre del alumno)
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
+    if (appliedSearchTerm) {
+      const term = appliedSearchTerm.toLowerCase();
       filtradas = filtradas.filter(a => 
         (a.estudianteNombre?.toLowerCase().includes(term)) ||
         (a.alumno_asignado?.toLowerCase().includes(term))
@@ -86,16 +94,16 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
     }
 
     // Filtrar por rango de fechas
-    if (fechaInicio) {
-      const inicio = new Date(fechaInicio);
+    if (appliedFechaInicio) {
+      const inicio = new Date(appliedFechaInicio);
       inicio.setHours(0, 0, 0, 0);
       filtradas = filtradas.filter(a => {
         const fecha = a.timestamp instanceof Date ? a.timestamp : new Date(a.timestamp as any);
         return fecha >= inicio;
       });
     }
-    if (fechaFin) {
-      const fin = new Date(fechaFin);
+    if (appliedFechaFin) {
+      const fin = new Date(appliedFechaFin);
       fin.setHours(23, 59, 59, 999);
       filtradas = filtradas.filter(a => {
         const fecha = a.timestamp instanceof Date ? a.timestamp : new Date(a.timestamp as any);
@@ -104,7 +112,14 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
     }
 
     setFilteredAlertas(filtradas);
-  }, [alertas, searchTerm, fechaInicio, fechaFin, aulaId]);
+  }, [alertas, appliedSearchTerm, appliedFechaInicio, appliedFechaFin, aulaId]);
+
+  // Función para aplicar los filtros
+  const handleBuscar = () => {
+    setAppliedSearchTerm(tempSearchTerm);
+    setAppliedFechaInicio(tempFechaInicio);
+    setAppliedFechaFin(tempFechaFin);
+  };
 
   const handleMarcarVistas = async () => {
     // Marcar todas las alertas filtradas como vistas
@@ -129,10 +144,10 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
       doc.setFontSize(11);
       doc.text(`Institución: ${institutoId}`, 14, 32);
       if (aulaId) doc.text(`Aula: ${aulaId}`, 14, 38);
-      if (fechaInicio || fechaFin) {
+      if (appliedFechaInicio || appliedFechaFin) {
         let fechaTexto = 'Fechas: ';
-        if (fechaInicio) fechaTexto += `desde ${new Date(fechaInicio).toLocaleDateString()}`;
-        if (fechaFin) fechaTexto += ` hasta ${new Date(fechaFin).toLocaleDateString()}`;
+        if (appliedFechaInicio) fechaTexto += `desde ${new Date(appliedFechaInicio).toLocaleDateString()}`;
+        if (appliedFechaFin) fechaTexto += ` hasta ${new Date(appliedFechaFin).toLocaleDateString()}`;
         doc.text(fechaTexto, 14, 44);
       }
 
@@ -147,7 +162,7 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
       autoTable(doc, {
         head: [tableColumn],
         body: tableRows,
-        startY: fechaInicio || fechaFin ? 50 : 40,
+        startY: appliedFechaInicio || appliedFechaFin ? 50 : 40,
         styles: { fontSize: 8 },
         headStyles: { fillColor: [249, 115, 22] }
       });
@@ -185,23 +200,23 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
       </div>
 
       {showFilters && (
-        <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 mb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="relative">
+        <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 mb-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="relative col-span-1 md:col-span-1">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
             <input
               type="text"
               placeholder="Buscar alumno..."
               className="w-full bg-slate-800 border border-slate-700 rounded-lg py-2 pl-8 pr-3 text-white text-xs outline-none focus:border-orange-500"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={tempSearchTerm}
+              onChange={(e) => setTempSearchTerm(e.target.value)}
             />
           </div>
           <div>
             <input
               type="date"
               className="w-full bg-slate-800 border border-slate-700 rounded-lg py-2 px-3 text-white text-xs"
-              value={fechaInicio}
-              onChange={(e) => setFechaInicio(e.target.value)}
+              value={tempFechaInicio}
+              onChange={(e) => setTempFechaInicio(e.target.value)}
               placeholder="Fecha inicio"
             />
           </div>
@@ -209,12 +224,20 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
             <input
               type="date"
               className="w-full bg-slate-800 border border-slate-700 rounded-lg py-2 px-3 text-white text-xs"
-              value={fechaFin}
-              onChange={(e) => setFechaFin(e.target.value)}
+              value={tempFechaFin}
+              onChange={(e) => setTempFechaFin(e.target.value)}
               placeholder="Fecha fin"
             />
           </div>
-          <div className="flex gap-2 col-span-full justify-end">
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={handleBuscar}
+              className="bg-orange-600/10 text-orange-500 hover:bg-orange-600 hover:text-white border border-orange-600/20 px-4 py-2 rounded-lg text-[10px] font-black uppercase flex items-center gap-1 transition-all"
+            >
+              <Search size={12} /> Buscar
+            </button>
+          </div>
+          <div className="flex gap-2 col-span-full justify-end mt-2">
             <button
               onClick={handleMarcarVistas}
               className="bg-blue-600/10 text-blue-500 hover:bg-blue-600 hover:text-white border border-blue-600/20 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase flex items-center gap-1 transition-all"
