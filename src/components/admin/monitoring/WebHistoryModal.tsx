@@ -2,7 +2,9 @@
 import React, { useEffect, useState } from 'react';
 import { db } from '@/firebase/config';
 import { collection, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
-import { X, Globe, Clock, ExternalLink, ShieldAlert } from 'lucide-react';
+import { X, Globe, Clock, ExternalLink, ShieldAlert, Download, Share2 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface WebHistory {
   id: string;
@@ -27,7 +29,7 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
 
     setLoading(true);
     setError(null);
-    console.log("WebHistoryModal: tabletId =", tabletId); // Para depuración
+    console.log("WebHistoryModal: tabletId =", tabletId);
 
     const q = query(
       collection(db, 'web_history'),
@@ -51,6 +53,52 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
 
     return () => unsubscribe();
   }, [isOpen, tabletId]);
+
+  // Función para compartir usando Web Share API
+  const handleShare = async () => {
+    if (!navigator.share) {
+      alert('La función de compartir no está disponible en este navegador.');
+      return;
+    }
+
+    const text = `Historial de navegación de ${alumnoNombre}:\n` + 
+      history.map(h => `${h.timestamp?.toDate().toLocaleString()} - ${h.url}`).join('\n');
+
+    try {
+      await navigator.share({
+        title: `Historial de ${alumnoNombre}`,
+        text: text,
+      });
+    } catch (error) {
+      console.error('Error al compartir:', error);
+    }
+  };
+
+  // Función para generar PDF
+  const generatePDF = () => {
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.text('Historial de Navegación', 14, 20);
+    doc.setFontSize(10);
+    doc.text(`Alumno: ${alumnoNombre}`, 14, 30);
+    doc.text(`Dispositivo: ${tabletId}`, 14, 36);
+    doc.text(`Fecha: ${new Date().toLocaleDateString()}`, 14, 42);
+
+    const tableData = history.map(h => [
+      h.timestamp?.toDate().toLocaleString() || '',
+      h.url
+    ]);
+
+    autoTable(doc, {
+      startY: 50,
+      head: [['Fecha/Hora', 'URL']],
+      body: tableData,
+      styles: { fontSize: 8 },
+      columnStyles: { 0: { cellWidth: 50 }, 1: { cellWidth: 'auto' } }
+    });
+
+    doc.save(`historial_${alumnoNombre}_${tabletId}.pdf`);
+  };
 
   if (!isOpen) return null;
 
@@ -118,9 +166,27 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
           )}
         </div>
 
-        {/* Footer */}
-        <div className="p-4 bg-black/20 border-t border-white/5 text-center">
-          <p className="text-[10px] text-slate-500 uppercase tracking-[0.2em]">EDUControlPro Sistema de Control Parental Educativo - Monitoreo en Tiempo Real</p>
+        {/* Footer con botones de acción */}
+        <div className="p-4 bg-black/20 border-t border-white/5 flex justify-between items-center">
+          <p className="text-[10px] text-slate-500 uppercase tracking-[0.2em]">EDUControlPro - Monitoreo</p>
+          {history.length > 0 && (
+            <div className="flex gap-2">
+              <button
+                onClick={handleShare}
+                className="flex items-center gap-2 px-3 py-2 bg-blue-600/10 hover:bg-blue-600 text-blue-500 hover:text-white rounded-lg text-[10px] font-black uppercase transition-colors"
+              >
+                <Share2 size={14} />
+                Compartir
+              </button>
+              <button
+                onClick={generatePDF}
+                className="flex items-center gap-2 px-3 py-2 bg-orange-600/10 hover:bg-orange-600 text-orange-500 hover:text-white rounded-lg text-[10px] font-black uppercase transition-colors"
+              >
+                <Download size={14} />
+                PDF
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
