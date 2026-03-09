@@ -3,9 +3,21 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/firebase/config';
 import { 
-  collection, query, where, orderBy, limit, onSnapshot 
+  collection, query, where, orderBy, limit, onSnapshot, Timestamp 
 } from 'firebase/firestore';
 import { ShieldAlert, Clock, X } from 'lucide-react';
+
+interface Alerta {
+  id: string;
+  InstitutoId: string;
+  aulaId?: string | null;
+  estudianteNombre?: string;
+  alumno_asignado?: string;
+  descripcion?: string;
+  url?: string;
+  urlIntentada?: string;
+  timestamp?: Timestamp | Date | string;
+}
 
 interface AlertFeedProps {
   aulaId: string;
@@ -13,112 +25,47 @@ interface AlertFeedProps {
 }
 
 export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
-  const [alertas, setAlertas] = useState<any[]>([]);
+  const [alertas, setAlertas] = useState<Alerta[]>([]);
   const [show, setShow] = useState(true);
 
   useEffect(() => {
-    if (!aulaId || !institutoId) return;
+    if (!institutoId) return;
 
-    // BUSCAR EN EL LUGAR CORRECTO: dispositivos/{deviceId}/incidencias
-    // Primero obtenemos los dispositivos de esta aula
-    const dispositivosQuery = query(
-      collection(db, "dispositivos"),
-      where("aulaId", "==", aulaId),
-      where("InstitutoId", "==", institutoId)
-    );
-
-    const unsubscribeDevices = onSnapshot(dispositivosQuery, async (snapshot) => {
-      // Para cada dispositivo, buscar sus incidencias
-      const todasIncidencias: any[] = [];
-      
-      snapshot.forEach(async (docSnap) => {
-        const deviceId = docSnap.id;
-        const incidenciasQuery = query(
-          collection(db, "dispositivos", deviceId, "incidencias"),
-          where("resuelta", "==", false),
-          orderBy("timestamp", "desc"),
-          limit(3)
-        );
-        
-        // Nota: onSnapshot anidado requiere manejo cuidadoso
-        // Usamos un listener separado para cada dispositivo
-        const unsubscribeIncidencias = onSnapshot(incidenciasQuery, (incSnap) => {
-          const nuevas = incSnap.docs.map(d => ({
-            id: d.id,
-            deviceId: deviceId,
-            ...d.data()
-          }));
-          
-          setAlertas(prev => {
-            // Filtrar las que ya no están y agregar las nuevas
-            const otras = prev.filter(a => a.deviceId !== deviceId);
-            return [...otras, ...nuevas].slice(0, 10);
-          });
-        });
-        
-        // Guardar para limpiar después (esto es complejo, simplificamos)
-      });
-    });
-
-    // Limpieza - esto es complicado con listeners anidados
-    // Para simplificar, usaremos un enfoque más directo:
-    
-    return () => {
-      // No podemos limpiar fácilmente, pero como es un componente,
-      // se desmontará y los listeners se perderán
-    };
-  }, [aulaId, institutoId]);
-
-  // VERSIÓN SIMPLIFICADA Y MÁS ROBUSTA:
-  useEffect(() => {
-    if (!aulaId) return;
-
-    // Consulta combinada: obtenemos todas las subcolecciones de incidencias
-    // Esta es una solución más elegante usando collection group
-    const incidenciasQuery = query(
-      collection(db, "incidencias"), // Necesitas un índice compuesto
-      where("aulaId", "==", aulaId),
-      where("institutoId", "==", institutoId),
-      orderBy("timestamp", "desc"),
-      limit(10)
-    );
-
-    // Intentar con collection group (requiere índice en Firebase)
-    try {
-      const unsubscribe = onSnapshot(incidenciasQuery, (snapshot) => {
-        setAlertas(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-      }, (error) => {
-        console.log("Error con collection group, usando método alternativo", error);
-        // Si falla, no hacemos nada por ahora
-      });
-      
-      return () => unsubscribe();
-    } catch (e) {
-      console.log("Collection group no disponible");
-    }
-  }, [aulaId, institutoId]);
-
-  // MÉTODO DE RESPALDO: Escuchar directamente desde el MonitorService
-  // (simplificado - asumimos que las incidencias se guardan también en una colección global)
-  useEffect(() => {
-    if (!aulaId) return;
-
-    // Intentar leer de la colección "alertas" que el TeacherView ya usa
-    const alertasQuery = query(
+    const q = query(
       collection(db, "alertas"),
-      where("aulaId", "==", aulaId),
+      where("InstitutoId", "==", institutoId),
       orderBy("timestamp", "desc"),
-      limit(5)
+      limit(20)
     );
 
-    const unsubscribe = onSnapshot(alertasQuery, (snapshot) => {
-      setAlertas(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data: Alerta[] = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as Alerta));
+
+      // Filtrar por aula si se proporciona: incluir las que no tienen aula (null) y las que coinciden
+      const filtradas = aulaId 
+        ? data.filter(alert => !alert.aulaId || alert.aulaId === aulaId)
+        : data;
+
+      setAlertas(filtradas);
+    }, (error) => {
+      console.error("Error cargando alertas:", error);
     });
 
     return () => unsubscribe();
-  }, [aulaId]);
+  }, [aulaId, institutoId]);
 
   if (!show || alertas.length === 0) return null;
+
+  const formatearHora = (timestamp?: Timestamp | Date | string) => {
+    if (!timestamp) return 'Ahora';
+    if (timestamp instanceof Timestamp) return timestamp.toDate().toLocaleTimeString();
+    if (timestamp instanceof Date) return timestamp.toLocaleTimeString();
+    if (typeof timestamp === 'string') return new Date(timestamp).toLocaleTimeString();
+    return 'Ahora';
+  };
 
   return (
     <div className="fixed bottom-6 right-6 z-[100] w-full max-w-sm animate-in slide-in-from-right duration-500">
@@ -141,11 +88,11 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
                 </p>
                 <span className="text-[8px] text-slate-500 font-bold italic">
                   <Clock size={8} className="inline mr-1" />
-                  {alert.timestamp?.toDate ? alert.timestamp.toDate().toLocaleTimeString() : 'Ahora'}
+                  {formatearHora(alert.timestamp)}
                 </span>
               </div>
               <p className="text-[9px] text-slate-300 font-medium leading-tight">
-                {alert.detalle || alert.url || alert.descripcion || 'Acceso bloqueado'}
+                {alert.descripcion || alert.urlIntentada || alert.url || 'Acceso bloqueado'}
               </p>
             </div>
           ))}

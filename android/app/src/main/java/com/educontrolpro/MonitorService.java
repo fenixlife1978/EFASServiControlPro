@@ -137,6 +137,15 @@ public class MonitorService extends AccessibilityService {
             iniciarHeartbeat();
             reportarEstadoInicial();
             
+            // 🔥 TEST: Escribir un log de prueba en Firestore
+            Map<String, Object> testLog = new HashMap<>();
+            testLog.put("tipo", "servicio_iniciado");
+            testLog.put("deviceId", deviceDocId);
+            testLog.put("timestamp", FieldValue.serverTimestamp());
+            db.collection("test_logs").add(testLog)
+                .addOnSuccessListener(ref -> Log.d("EDU_Monitor", "✅ test_log escrito"))
+                .addOnFailureListener(e -> Log.e("EDU_Monitor", "❌ Error escribiendo test_log", e));
+            
         } else {
             Log.e("EDU_Monitor", "ERROR: Faltan datos críticos de identidad.");
         }
