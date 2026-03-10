@@ -601,14 +601,11 @@ public class MonitorService extends AccessibilityService {
                 }
                 
                 // ============================================================
-                // Reportar URL actual (incluso si no parece URL, para capturar búsquedas)
+                // Solo reportar si parece una URL (como en la versión que funcionaba)
                 // ============================================================
-                if (!contenido.isEmpty()) {
-                    reportarUrlActual(contenido);
-                }
-                
-                // Verificar lista negra si parece una URL
                 if (contenido.startsWith("http") || contenido.contains(".")) {
+                    reportarUrlActual(contenido);
+                    
                     if (useBlacklist && listaNegra != null && !listaNegra.isEmpty()) {
                         for (String sitio : listaNegra) {
                             if (contenido.toLowerCase().contains(sitio.toLowerCase())) {
