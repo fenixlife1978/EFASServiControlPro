@@ -12,16 +12,16 @@ public class BootReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction()) || 
-            "android.intent.action.QUICKBOOT_POWERON".equals(intent.getAction())) {
-            
+        if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction()) ||
+                "android.intent.action.QUICKBOOT_POWERON".equals(intent.getAction())) {
+
             SharedPreferences prefs = context.getSharedPreferences(CAPACITOR_PREFS, Context.MODE_PRIVATE);
             String deviceId = prefs.getString(KEY_DEVICE_ID, null);
 
             if (deviceId != null) {
                 Log.d("EDU_Boot", "Dispositivo vinculado, iniciando servicios...");
-                
-                // 1. Iniciar MonitorService (el servicio correcto)
+
+                // 1. Iniciar MonitorService (Accessibility)
                 Intent serviceIntent = new Intent(context, MonitorService.class);
                 try {
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -34,12 +34,23 @@ public class BootReceiver extends BroadcastReceiver {
                     Log.e("EDU_Boot", "Error al iniciar MonitorService: " + e.getMessage());
                 }
 
-                // 2. Opcional: abrir la app (comentado para no interrumpir al usuario)
-                // Intent launchIntent = new Intent(context, MainActivity.class);
-                // launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                // context.startActivity(launchIntent);
+                // 2. Iniciar EduVpnService (si está habilitado)
+                // La decisión de iniciarlo o no la tomaremos en base a un flag en Firestore,
+                // pero por ahora lo iniciamos siempre y que el propio servicio consulte.
+                Intent vpnIntent = new Intent(context, EduVpnService.class);
+                try {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        context.startForegroundService(vpnIntent);
+                    } else {
+                        context.startService(vpnIntent);
+                    }
+                    Log.d("EDU_Boot", "EduVpnService iniciado correctamente");
+                } catch (Exception e) {
+                    Log.e("EDU_Boot", "Error al iniciar EduVpnService: " + e.getMessage());
+                }
+
             } else {
-                Log.d("EDU_Boot", "Dispositivo no vinculado, no se inicia servicio");
+                Log.d("EDU_Boot", "Dispositivo no vinculado, no se inician servicios");
             }
         }
     }

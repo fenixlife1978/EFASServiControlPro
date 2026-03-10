@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/firebase';
 import { collection, doc, onSnapshot, updateDoc, setDoc, query, where, getDocs } from 'firebase/firestore';
-import { Power, ShieldAlert, GlobeLock, Zap, Loader2, Lock, Eye, EyeOff, RotateCcw } from 'lucide-react';
+import { Power, ShieldAlert, GlobeLock, Zap, Loader2, Lock, Eye, EyeOff, RotateCcw, List } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 
@@ -11,10 +11,12 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
   const [config, setConfig] = useState({
     blockAllBrowsing: false,
     useBlacklist: false,
+    useWhitelist: false, // NUEVO: modo solo lista blanca
     shieldMode: false,
     cortarNavegacion: false,
     pinBloqueo: '',
-    maintenanceMode: false // para compatibilidad
+    maintenanceMode: false,
+    vpn_enabled: false
   });
   const [loading, setLoading] = useState(true);
   const [showPinInput, setShowPinInput] = useState(false);
@@ -23,7 +25,7 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
   const [selectedDevice, setSelectedDevice] = useState<string>('todos');
   const { toast } = useToast();
 
-  // Cargar configuración de la institución (desde el documento principal)
+  // Cargar configuración de la institución
   useEffect(() => {
     const instRef = doc(db, 'institutions', institutionId);
     const unsubscribe = onSnapshot(instRef, (snapshot) => {
@@ -32,10 +34,12 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
         setConfig({
           blockAllBrowsing: data.blockAllBrowsing || false,
           useBlacklist: data.useBlacklist || false,
+          useWhitelist: data.useWhitelist || false, // NUEVO
           shieldMode: data.shieldMode || false,
           cortarNavegacion: data.cortarNavegacion || false,
           pinBloqueo: data.pinBloqueo || '',
-          maintenanceMode: data.maintenanceMode || false
+          maintenanceMode: data.maintenanceMode || false,
+          vpn_enabled: data.vpn_enabled || false
         });
       }
       setLoading(false);
@@ -43,7 +47,7 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
     return () => unsubscribe();
   }, [institutionId]);
 
-  // Cargar dispositivos de esta institución para comandos individuales
+  // Cargar dispositivos
   useEffect(() => {
     const q = query(collection(db, 'dispositivos'), where('InstitutoId', '==', institutionId));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -54,12 +58,11 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
 
   const toggleSetting = async (key: string, value: boolean) => {
     try {
-      // Actualizar el documento de la institución
       const instRef = doc(db, 'institutions', institutionId);
       await updateDoc(instRef, { [key]: value });
-      
-      // Si es un modo que afecta a todos los dispositivos, propagar a cada uno
-      if (key === 'shieldMode' || key === 'cortarNavegacion') {
+
+      // Propagar a dispositivos si es necesario
+      if (key === 'shieldMode' || key === 'cortarNavegacion' || key === 'useWhitelist') {
         const dispositivosRef = collection(db, 'dispositivos');
         const q = query(dispositivosRef, where('InstitutoId', '==', institutionId));
         const snapshot = await getDocs(q);
@@ -92,7 +95,6 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
       const instRef = doc(db, 'institutions', institutionId);
       await updateDoc(instRef, { pinBloqueo: pinValue });
       
-      // También actualizar en dispositivos seleccionados
       if (selectedDevice === 'todos') {
         const q = query(collection(db, 'dispositivos'), where('InstitutoId', '==', institutionId));
         const snapshot = await getDocs(q);
@@ -130,7 +132,6 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
         toast({ title: "Comando Enviado", description: "Bloqueo inmediato en dispositivo seleccionado" });
       }
       
-      // Resetear el comando después de 2 segundos
       setTimeout(async () => {
         if (selectedDevice === 'todos') {
           const q = query(collection(db, 'dispositivos'), where('InstitutoId', '==', institutionId));
@@ -170,7 +171,6 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
         <h2 className="text-xl font-black italic uppercase text-white">Controles Maestros</h2>
       </div>
 
-      {/* Selector de dispositivo */}
       <div className="space-y-2">
         <label className="text-[10px] font-black uppercase text-orange-500 ml-2 italic">Aplicar a:</label>
         <select 
@@ -187,9 +187,8 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
         </select>
       </div>
 
-      {/* Switches existentes pero con nombres correctos */}
       <div className="space-y-6">
-        {/* FILTRO DE CONTENIDO -> useBlacklist */}
+        {/* FILTRO DE CONTENIDO (blacklist) */}
         <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
           <div className="flex gap-4 items-center">
             <div className={`p-3 rounded-xl ${config.useBlacklist ? 'bg-emerald-500/20 text-emerald-500' : 'bg-red-500/20 text-red-500'}`}>
@@ -206,7 +205,24 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
           />
         </div>
 
-        {/* MODO ESTRICTO -> shieldMode */}
+        {/* NUEVO: MODO SOLO LISTA BLANCA */}
+        <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
+          <div className="flex gap-4 items-center">
+            <div className={`p-3 rounded-xl ${config.useWhitelist ? 'bg-green-500/20 text-green-500' : 'bg-slate-800 text-slate-500'}`}>
+              <List className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm font-black text-white uppercase italic">Navegación Solo Lista Blanca</p>
+              <p className="text-[10px] text-slate-500 font-bold uppercase">Solo permite sitios de la lista blanca</p>
+            </div>
+          </div>
+          <Switch 
+            checked={config.useWhitelist} 
+            onCheckedChange={(val) => toggleSetting('useWhitelist', val)} 
+          />
+        </div>
+
+        {/* MODO ESTRICTO (blindaje) */}
         <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
           <div className="flex gap-4 items-center">
             <div className={`p-3 rounded-xl ${config.shieldMode ? 'bg-orange-500/20 text-orange-500' : 'bg-slate-800 text-slate-500'}`}>
@@ -223,7 +239,7 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
           />
         </div>
 
-        {/* BLOQUEO DE NAVEGACIÓN -> cortarNavegacion / blockAllBrowsing */}
+        {/* BLOQUEO DE NAVEGACIÓN */}
         <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
           <div className="flex gap-4 items-center">
             <div className={`p-3 rounded-xl ${config.cortarNavegacion ? 'bg-red-600/20 text-red-600 animate-pulse' : 'bg-slate-800 text-slate-500'}`}>
@@ -238,8 +254,25 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
             checked={config.cortarNavegacion} 
             onCheckedChange={(val) => {
               toggleSetting('cortarNavegacion', val);
-              toggleSetting('blockAllBrowsing', val); // Mantener sincronizados
+              toggleSetting('blockAllBrowsing', val);
             }} 
+          />
+        </div>
+
+        {/* VPN SIEMPRE ACTIVA */}
+        <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
+          <div className="flex gap-4 items-center">
+            <div className={`p-3 rounded-xl ${config.vpn_enabled ? 'bg-blue-500/20 text-blue-500' : 'bg-slate-800 text-slate-500'}`}>
+              <GlobeLock className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm font-black text-white uppercase italic">VPN Siempre Activa</p>
+              <p className="text-[10px] text-slate-500 font-bold uppercase">Filtra todo el tráfico por DNS</p>
+            </div>
+          </div>
+          <Switch 
+            checked={config.vpn_enabled} 
+            onCheckedChange={(val) => toggleSetting('vpn_enabled', val)} 
           />
         </div>
       </div>
@@ -294,7 +327,6 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
           <Lock size={14} /> BLOQUEAR AHORA
         </button>
 
-        {/* Botones individuales por dispositivo */}
         {selectedDevice !== 'todos' && (
           <button
             onClick={() => rebloquearDispositivo(selectedDevice)}
@@ -305,7 +337,6 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
         )}
       </div>
 
-      {/* LISTA NEGRA - versión simplificada, luego podemos profundizar */}
       <div className="border-t border-slate-800 pt-6">
         <h3 className="text-sm font-black text-white uppercase italic mb-4 flex items-center gap-2">
           <EyeOff size={16} className="text-orange-500" /> Lista Negra Global

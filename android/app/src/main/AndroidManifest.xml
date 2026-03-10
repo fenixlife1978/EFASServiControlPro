@@ -16,6 +16,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     
+    <!-- 🔥 NUEVO: Permiso para VPN Service -->
+    <uses-permission android:name="android.permission.BIND_VPN_SERVICE" />
+    
     <!-- Permiso para estadísticas de uso (necesario para UsageStatsManager) -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     
@@ -58,7 +61,6 @@
             <intent-filter> 
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
                 <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
-                <!-- QUITADO BOOT_COMPLETED de aquí porque ya está en BootReceiver -->
             </intent-filter> 
         </receiver>
 
@@ -85,6 +87,16 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <!-- 🔥 NUEVO: VpnService para filtrado de red -->
+        <service android:name=".VpnService"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:exported="true"
+            android:foregroundServiceType="specialUse">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
+
         <!-- MainActivity (punto de entrada) -->
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
@@ -109,7 +121,7 @@
             android:showWhenLocked="true"
             android:turnScreenOn="true" />
 
-        <!-- NUEVO: MessageActivity (mensajes del director) -->
+        <!-- MessageActivity (mensajes del director) -->
         <activity android:name=".MessageActivity"
             android:theme="@style/Theme.AppCompat.NoActionBar"
             android:launchMode="singleInstance"

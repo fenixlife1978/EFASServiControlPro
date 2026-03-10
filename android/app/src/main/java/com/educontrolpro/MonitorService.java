@@ -51,6 +51,7 @@ public class MonitorService extends AccessibilityService {
     private String bloqueoPin = "";
     private List<String> listaNegra = new ArrayList<>();
     private List<String> whitelist = new ArrayList<>();
+    private boolean whitelistOnly = false; // NUEVO
     
     // Modo concentración (por aula)
     private boolean modoConcentracion = false;
@@ -103,14 +104,24 @@ public class MonitorService extends AccessibilityService {
     );
 
     // ============================================================
-    // PALABRAS PROHIBIDAS (hardcoded)
+    // PALABRAS PROHIBIDAS (ampliadas)
     // ============================================================
     private static final List<String> PALABRAS_PROHIBIDAS = Arrays.asList(
         "xxx",
         "porno",
         "pornos",
         "videos pornos",
-        "juegos"
+        "juegos",
+        "proxy",
+        "vpn",
+        "unblock",
+        "bypass",
+        "casino",
+        "bet",
+        "poker",
+        "slot",
+        "torrent",
+        "piratebay"
     );
 
     // Listeners
@@ -241,7 +252,7 @@ public class MonitorService extends AccessibilityService {
                 }
             });
 
-        // 2. LISTENER DE LA INSTITUCIÓN (carga blacklist y whitelist)
+        // 2. LISTENER DE LA INSTITUCIÓN (carga blacklist, whitelist y whitelistOnly)
         institutionListener = db.collection("institutions").document(instId)
             .addSnapshotListener((snapshot, e) -> {
                 if (e != null) {
@@ -324,9 +335,7 @@ public class MonitorService extends AccessibilityService {
             }, 2000);
         }
 
-        // ============================================================
-        // NUEVO: Mostrar mensaje del director si existe y no ha sido visto
-        // ============================================================
+        // Mostrar mensaje del director si existe y no ha sido visto
         String mensajePendiente = snapshot.getString("pending_message");
         Boolean mensajeVisto = snapshot.getBoolean("message_viewed");
         if (mensajePendiente != null && !mensajePendiente.isEmpty() && (mensajeVisto == null || !mensajeVisto)) {
@@ -343,12 +352,14 @@ public class MonitorService extends AccessibilityService {
         Boolean blockAll = snapshot.getBoolean("blockAllBrowsing");
         Boolean useBlacklistFlag = snapshot.getBoolean("useBlacklist");
         Boolean useWhitelistFlag = snapshot.getBoolean("useWhitelist");
+        Boolean whitelistOnlyFlag = snapshot.getBoolean("whitelistOnly"); // NUEVO
         List<String> blacklist = (List<String>) snapshot.get("blacklist");
         List<String> whitelistData = (List<String>) snapshot.get("whitelist");
         
         this.blockAllBrowsing = (blockAll != null && blockAll);
         this.useBlacklist = (useBlacklistFlag != null && useBlacklistFlag);
         this.useWhitelist = (useWhitelistFlag != null && useWhitelistFlag);
+        this.whitelistOnly = (whitelistOnlyFlag != null && whitelistOnlyFlag); // NUEVO
         
         if (blacklist != null) {
             this.listaNegra = blacklist;
@@ -465,7 +476,7 @@ public class MonitorService extends AccessibilityService {
         alerta.put("deviceId", deviceDocId);
         alerta.put("InstitutoId", InstitutoId);
         alerta.put("aulaId", aulaId);
-        alerta.put("seccion", seccion);                // ← AÑADIDO
+        alerta.put("seccion", seccion);
         alerta.put("alumno_asignado", alumnoAsignado);
         alerta.put("estudianteNombre", alumnoAsignado);
         alerta.put("status", "nuevo");
@@ -582,30 +593,49 @@ public class MonitorService extends AccessibilityService {
     private void analizarContenido(AccessibilityNodeInfo node) {
         if (node == null) return;
         
+        // Primero, verificar el texto en el nodo actual (si es un EditText)
         if (node.getClassName() != null && node.getClassName().toString().contains("EditText")) {
             CharSequence texto = node.getText();
             if (texto != null) {
                 String contenido = texto.toString();
                 
-                // ============================================================
-                // Verificar palabras prohibidas (antes de considerar URL)
-                // ============================================================
+                // Verificar palabras prohibidas
                 String contenidoLower = contenido.toLowerCase();
                 for (String palabra : PALABRAS_PROHIBIDAS) {
                     if (contenidoLower.contains(palabra)) {
-                        Log.d("EDU_Monitor", "🔒 Palabra prohibida detectada: " + palabra);
+                        Log.d("EDU_Monitor", "🔒 Palabra prohibida detectada en EditText: " + palabra);
                         reportarIncidencia("PALABRA_PROHIBIDA", "Búsqueda con término prohibido: " + palabra, contenido);
                         dispararBloqueoConDuracion(5000);
                         return;
                     }
                 }
                 
-                // ============================================================
-                // Solo reportar si parece una URL (como en la versión que funcionaba)
-                // ============================================================
+                // Si parece URL, procesar
                 if (contenido.startsWith("http") || contenido.contains(".")) {
+                    // ============================================================
+                    // NUEVO: Verificar whitelistOnly
+                    // ============================================================
+                    if (whitelistOnly) {
+                        // Solo permitir si el dominio está en la whitelist
+                        boolean permitido = false;
+                        for (String sitio : whitelist) {
+                            if (contenido.toLowerCase().contains(sitio.toLowerCase())) {
+                                permitido = true;
+                                break;
+                            }
+                        }
+                        if (!permitido) {
+                            Log.d("EDU_Monitor", "⛔ Sitio no permitido por whitelistOnly: " + contenido);
+                            reportarIncidencia("WHITELIST_ONLY", "Acceso a sitio no autorizado", contenido);
+                            dispararBloqueoConDuracion(5000);
+                            return;
+                        }
+                    }
+                    
+                    // Reportar URL actual (solo si pasa el filtro whitelistOnly)
                     reportarUrlActual(contenido);
                     
+                    // Verificar lista negra (si no está en whitelistOnly)
                     if (useBlacklist && listaNegra != null && !listaNegra.isEmpty()) {
                         for (String sitio : listaNegra) {
                             if (contenido.toLowerCase().contains(sitio.toLowerCase())) {
@@ -619,9 +649,35 @@ public class MonitorService extends AccessibilityService {
             }
         }
         
+        // Ahora, buscar en todos los nodos de texto (para capturar títulos, etc.)
+        verificarTextoEnNodos(node);
+        
+        // Seguir con los hijos
         for (int i = 0; i < node.getChildCount(); i++) {
             analizarContenido(node.getChild(i));
         }
+    }
+
+    private void verificarTextoEnNodos(AccessibilityNodeInfo node) {
+        if (node == null) return;
+        if (node.getText() != null && node.getClassName() != null) {
+            // Evitar EditText ya verificado
+            if (!node.getClassName().toString().contains("EditText")) {
+                String texto = node.getText().toString();
+                if (texto != null && !texto.isEmpty()) {
+                    String textoLower = texto.toLowerCase();
+                    for (String palabra : PALABRAS_PROHIBIDAS) {
+                        if (textoLower.contains(palabra)) {
+                            Log.d("EDU_Monitor", "🔒 Palabra prohibida detectada en texto: " + palabra + " en " + node.getClassName());
+                            reportarIncidencia("PALABRA_PROHIBIDA", "Texto con término prohibido: " + palabra, texto);
+                            dispararBloqueoConDuracion(5000);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+        // No recursivo aquí porque ya lo hará el llamador
     }
 
     @Override

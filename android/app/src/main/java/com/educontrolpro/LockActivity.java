@@ -25,7 +25,6 @@ public class LockActivity extends AppCompatActivity {
     private static final String CAPACITOR_PREFS = "CapacitorStorage";
     private static final String KEY_UNLOCKED = "is_unlocked";
     private static final String KEY_BLOQUEO_PIN = "bloqueo_pin";
-    private static final String KEY_MASTER_PIN = "master_pin";
 
     private FirebaseFirestore db = FirebaseFirestore.getInstance();
     private String deviceDocId = null;
@@ -57,7 +56,6 @@ public class LockActivity extends AppCompatActivity {
         tvTitle.setPadding(0, 0, 0, 30);
 
         TextView tvMessage = new TextView(this);
-        // 🔥 NUEVO MENSAJE PERSONALIZADO
         tvMessage.setText("Este sitio ha sido bloqueado por políticas educativas.\n\nSi eres docente, introduce tu PIN para continuar.");
         tvMessage.setTextColor(Color.WHITE);
         tvMessage.setTextSize(18);
@@ -78,10 +76,12 @@ public class LockActivity extends AppCompatActivity {
         btnUnlock.setOnClickListener(v -> {
             SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
             String pinDispositivo = prefs.getString(KEY_BLOQUEO_PIN, "");
-            String pinMaestro = prefs.getString(KEY_MASTER_PIN, "1234");
             String ingresado = inputPin.getText().toString();
 
-            if (ingresado.equals(pinDispositivo) || ingresado.equals(pinMaestro)) {
+            // Si el PIN del dispositivo está vacío (primer uso), se desbloquea sin PIN
+            if (pinDispositivo.isEmpty()) {
+                desbloquearDispositivo(prefs);
+            } else if (ingresado.equals(pinDispositivo)) {
                 desbloquearDispositivo(prefs);
             } else {
                 Toast.makeText(this, "PIN Incorrecto - Intento registrado", Toast.LENGTH_SHORT).show();
