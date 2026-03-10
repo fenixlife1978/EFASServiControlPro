@@ -16,17 +16,17 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     
-    <!-- 🔥 NUEVO: Permiso para VPN Service -->
+    <!-- Permiso para VPN Service -->
     <uses-permission android:name="android.permission.BIND_VPN_SERVICE" />
     
-    <!-- Permiso para estadísticas de uso (necesario para UsageStatsManager) -->
+    <!-- Permiso para estadísticas de uso -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     
     <!-- Permisos de cámara para escáner QR -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
-    <!-- Permiso para reordenar tareas (bloqueo) -->
+    <!-- Permiso para reordenar tareas -->
     <uses-permission android:name="android.permission.REORDER_TASKS" />
 
     <application
@@ -52,7 +52,7 @@
         <!-- Dependencias de ML Kit para escáner QR -->
         <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="barcode" />
 
-        <!-- AdminReceiver para Device Policy Manager -->
+        <!-- AdminReceiver -->
         <receiver android:name=".AdminReceiver" 
             android:permission="android.permission.BIND_DEVICE_ADMIN" 
             android:exported="true"> 
@@ -64,7 +64,7 @@
             </intent-filter> 
         </receiver>
 
-        <!-- BootReceiver para iniciar servicios al arrancar -->
+        <!-- BootReceiver -->
         <receiver android:name=".BootReceiver" 
             android:exported="true"
             android:enabled="true">
@@ -87,17 +87,17 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- 🔥 NUEVO: VpnService para filtrado de red -->
-        <service android:name=".VpnService"
+        <!-- CORREGIDO: EduVpnService (nombre correcto) -->
+        <service android:name=".EduVpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"
             android:exported="true"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse">  <!-- Usamos specialUse para compatibilidad -->
             <intent-filter>
                 <action android:name="android.net.VpnService" />
             </intent-filter>
         </service>
 
-        <!-- MainActivity (punto de entrada) -->
+        <!-- MainActivity -->
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
             android:name="com.educontrolpro.MainActivity"
@@ -112,7 +112,7 @@
             </intent-filter>
         </activity>
 
-        <!-- LockActivity (pantalla de bloqueo) -->
+        <!-- LockActivity -->
         <activity android:name=".LockActivity"
             android:theme="@style/Theme.AppCompat.NoActionBar"
             android:launchMode="singleInstance"
@@ -121,7 +121,7 @@
             android:showWhenLocked="true"
             android:turnScreenOn="true" />
 
-        <!-- MessageActivity (mensajes del director) -->
+        <!-- MessageActivity -->
         <activity android:name=".MessageActivity"
             android:theme="@style/Theme.AppCompat.NoActionBar"
             android:launchMode="singleInstance"

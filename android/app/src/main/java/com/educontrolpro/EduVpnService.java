@@ -8,8 +8,11 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.VpnService;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.util.Log;
+import android.widget.Toast;
 
 import androidx.core.app.NotificationCompat;
 
@@ -17,6 +20,7 @@ import com.google.firebase.firestore.FirebaseFirestore;
 
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.HashSet;
@@ -24,6 +28,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class EduVpnService extends VpnService {
 
@@ -33,10 +38,11 @@ public class EduVpnService extends VpnService {
     private static final int DNS_PORT = 53;
     private static final int NOTIFICATION_ID = 2;
     private static final String CHANNEL_ID = "VPN_CHANNEL";
+    private static final String ACTION_START_VPN = "START_VPN";
 
     private ParcelFileDescriptor vpnInterface;
     private ExecutorService executorService;
-    private boolean isRunning = false;
+    private volatile boolean isRunning = false;
     private boolean vpnEnabled = false;
 
     private Set<String> blacklist = new HashSet<>();
@@ -45,10 +51,15 @@ public class EduVpnService extends VpnService {
     private com.google.firebase.firestore.ListenerRegistration blacklistListener;
     private com.google.firebase.firestore.ListenerRegistration vpnEnabledListener;
 
+    // Contadores para depuración
+    private AtomicLong packetCount = new AtomicLong(0);
+    private AtomicLong dnsQueryCount = new AtomicLong(0);
+
     @Override
     public void onCreate() {
         super.onCreate();
         Log.d(TAG, "Servicio VPN creado");
+        showToast("Servicio VPN creado");
         createNotificationChannel();
         listenForBlacklistUpdates();
         listenForVpnEnabled();
@@ -56,26 +67,44 @@ public class EduVpnService extends VpnService {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && "STOP_VPN".equals(intent.getAction())) {
-            stopVpn();
-            return START_NOT_STICKY;
+        if (intent != null) {
+            String action = intent.getAction();
+            if ("STOP_VPN".equals(action)) {
+                showToast("Deteniendo VPN por solicitud");
+                stopVpn();
+                return START_NOT_STICKY;
+            } else if (ACTION_START_VPN.equals(action)) {
+                showToast("Forzando inicio de VPN manual");
+                // Forzar inicio independientemente de vpnEnabled (para pruebas)
+                startVpn(true);
+                return START_STICKY;
+            }
         }
-        // No iniciar automáticamente, esperar a que el listener lo haga
+        showToast("Servicio iniciado, esperando configuración...");
         return START_STICKY;
     }
 
-    private void startVpn() {
-        if (isRunning) return;
-        if (!vpnEnabled) {
+    /**
+     * Inicia la VPN.
+     * @param force Ignora el estado de vpnEnabled si es true (para pruebas manuales)
+     */
+    private void startVpn(boolean force) {
+        if (isRunning) {
+            Log.d(TAG, "VPN ya está en ejecución");
+            showToast("VPN ya en ejecución");
+            return;
+        }
+        if (!force && !vpnEnabled) {
             Log.d(TAG, "VPN no habilitada, no se inicia");
+            showToast("VPN no habilitada en Firestore");
             return;
         }
 
+        showToast("Intentando iniciar VPN...");
         try {
             Builder builder = new Builder();
             builder.setSession("EDUControlPro VPN");
 
-            // Convertir direcciones a InetAddress
             InetAddress vpnAddr = InetAddress.getByName(VPN_ADDRESS);
             builder.addAddress(vpnAddr, 32);
 
@@ -91,31 +120,51 @@ public class EduVpnService extends VpnService {
             vpnInterface = builder.establish();
             if (vpnInterface == null) {
                 Log.e(TAG, "Error: No se pudo establecer la VPN");
+                showToast("Error: No se pudo establecer la VPN");
                 return;
             }
 
             startForeground(NOTIFICATION_ID, getNotification());
 
             isRunning = true;
+            packetCount.set(0);
+            dnsQueryCount.set(0);
             Log.d(TAG, "VPN iniciada correctamente");
+            showToast("VPN iniciada correctamente");
 
             executorService = Executors.newSingleThreadExecutor();
             executorService.submit(this::processVpn);
 
         } catch (UnknownHostException e) {
             Log.e(TAG, "Dirección IP inválida", e);
+            showToast("Error: Dirección IP inválida");
             isRunning = false;
         } catch (Exception e) {
             Log.e(TAG, "Error iniciando VPN", e);
+            showToast("Error iniciando VPN: " + e.getMessage());
             isRunning = false;
         }
     }
 
+    // Sobrecarga para mantener compatibilidad con llamadas anteriores
+    private void startVpn() {
+        startVpn(false);
+    }
+
     private void processVpn() {
         Log.d(TAG, "Hilo de procesamiento VPN iniciado");
+        showToast("Hilo VPN iniciado");
 
-        FileInputStream in = new FileInputStream(vpnInterface.getFileDescriptor());
-        FileOutputStream out = new FileOutputStream(vpnInterface.getFileDescriptor());
+        FileInputStream in = null;
+        FileOutputStream out = null;
+        try {
+            in = new FileInputStream(vpnInterface.getFileDescriptor());
+            out = new FileOutputStream(vpnInterface.getFileDescriptor());
+        } catch (Exception e) {
+            Log.e(TAG, "Error obteniendo flujos de la interfaz VPN", e);
+            showToast("Error al obtener flujos de la VPN");
+            return;
+        }
 
         byte[] packet = new byte[32767];
         java.nio.ByteBuffer buffer = java.nio.ByteBuffer.wrap(packet);
@@ -123,31 +172,54 @@ public class EduVpnService extends VpnService {
         while (isRunning) {
             try {
                 int length = in.read(packet);
-                if (length < 0) break;
+                if (length < 0) {
+                    Log.d(TAG, "Fin del flujo de entrada, deteniendo VPN");
+                    showToast("Fin del flujo VPN");
+                    break;
+                }
+
+                packetCount.incrementAndGet();
+                if (packetCount.get() % 100 == 0) {
+                    Log.d(TAG, "Paquetes procesados: " + packetCount.get() + ", consultas DNS: " + dnsQueryCount.get());
+                }
 
                 buffer.position(0);
                 buffer.limit(length);
 
                 if (isDnsPacket(packet, length)) {
+                    dnsQueryCount.incrementAndGet();
                     String domain = extractDomainFromDns(packet, length);
                     if (domain != null) {
-                        Log.d(TAG, "Consulta DNS para: " + domain);
+                        String action = isBlocked(domain) ? "BLOQUEADO" : "PERMITIDO";
+                        Log.d(TAG, "[" + dnsQueryCount.get() + "] Consulta DNS para: " + domain + " -> " + action);
+                        showToast("DNS: " + domain + " -> " + action);
                         if (isBlocked(domain)) {
-                            Log.d(TAG, "⛔ Dominio bloqueado: " + domain);
-                            continue;
-                        } else {
-                            Log.d(TAG, "✅ Dominio permitido: " + domain);
+                            continue; // No reenviar el paquete
                         }
                     }
                 }
 
+                // Reenviar el paquete
                 out.write(packet, 0, length);
+                out.flush();
 
+            } catch (IOException e) {
+                Log.e(TAG, "Error de E/S en el bucle VPN: " + e.getMessage());
+                showToast("Error de E/S en VPN: " + e.getMessage());
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException ignored) {}
             } catch (Exception e) {
-                Log.e(TAG, "Error procesando paquete", e);
-                break;
+                Log.e(TAG, "Error inesperado en el bucle VPN", e);
+                showToast("Error inesperado: " + e.getMessage());
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException ignored) {}
             }
         }
+
+        Log.d(TAG, "Hilo de procesamiento finalizado. Total paquetes: " + packetCount.get());
+        showToast("Hilo VPN finalizado");
     }
 
     private boolean isDnsPacket(byte[] packet, int length) {
@@ -155,11 +227,12 @@ public class EduVpnService extends VpnService {
         int version = (packet[0] >> 4) & 0x0F;
         if (version != 4) return false;
         int protocol = packet[9] & 0xFF;
-        if (protocol != 17) return false;
+        if (protocol != 17) return false; // UDP
         int totalLength = ((packet[2] & 0xFF) << 8) | (packet[3] & 0xFF);
         if (totalLength > length) return false;
         int headerLength = (packet[0] & 0x0F) * 4;
         int udpStart = headerLength;
+        if (udpStart + 3 >= length) return false;
         int destPort = ((packet[udpStart + 2] & 0xFF) << 8) | (packet[udpStart + 3] & 0xFF);
         return destPort == DNS_PORT;
     }
@@ -169,10 +242,14 @@ public class EduVpnService extends VpnService {
             int headerLength = (packet[0] & 0x0F) * 4;
             int udpStart = headerLength;
             int dnsStart = udpStart + 8;
+            if (dnsStart + 12 > length) return null;
+
             int flags = ((packet[dnsStart + 2] & 0xFF) << 8) | (packet[dnsStart + 3] & 0xFF);
-            if ((flags & 0x8000) != 0) return null;
+            if ((flags & 0x8000) != 0) return null; // Es respuesta
+
             int qdcount = ((packet[dnsStart + 4] & 0xFF) << 8) | (packet[dnsStart + 5] & 0xFF);
             if (qdcount == 0) return null;
+
             int pos = dnsStart + 12;
             StringBuilder domain = new StringBuilder();
             while (pos < length) {
@@ -182,7 +259,8 @@ public class EduVpnService extends VpnService {
                 if (pos + len > length) return null;
                 if (domain.length() > 0) domain.append('.');
                 for (int i = 0; i < len; i++) {
-                    domain.append((char) packet[pos + i]);
+                    char c = (char) (packet[pos + i] & 0xFF);
+                    domain.append(c);
                 }
                 pos += len;
             }
@@ -196,7 +274,7 @@ public class EduVpnService extends VpnService {
     private boolean isBlocked(String domain) {
         String lowerDomain = domain.toLowerCase();
         for (String blocked : blacklist) {
-            if (lowerDomain.endsWith("." + blocked) || lowerDomain.equals(blocked)) {
+            if (lowerDomain.equals(blocked) || lowerDomain.endsWith("." + blocked)) {
                 return true;
             }
         }
@@ -220,6 +298,7 @@ public class EduVpnService extends VpnService {
                             blacklist.clear();
                             blacklist.addAll(newBlacklist);
                             Log.d(TAG, "Lista negra actualizada: " + blacklist.size() + " dominios");
+                            showToast("Blacklist actualizada: " + blacklist.size() + " dominios");
                         }
                     }
                 });
@@ -240,7 +319,9 @@ public class EduVpnService extends VpnService {
                         Boolean enabled = snapshot.getBoolean("vpn_enabled");
                         if (enabled != null) {
                             vpnEnabled = enabled;
-                            Log.d(TAG, "VPN enabled: " + vpnEnabled);
+                            String msg = "VPN enabled: " + vpnEnabled;
+                            Log.d(TAG, msg);
+                            showToast(msg);
                             if (vpnEnabled && !isRunning) {
                                 startVpn();
                             } else if (!vpnEnabled && isRunning) {
@@ -292,6 +373,7 @@ public class EduVpnService extends VpnService {
         }
         stopForeground(true);
         Log.d(TAG, "VPN detenida");
+        showToast("VPN detenida");
     }
 
     @Override
@@ -300,5 +382,12 @@ public class EduVpnService extends VpnService {
         if (blacklistListener != null) blacklistListener.remove();
         if (vpnEnabledListener != null) vpnEnabledListener.remove();
         stopVpn();
+    }
+
+    // Método para mostrar Toasts desde cualquier hilo
+    private void showToast(final String message) {
+        new Handler(Looper.getMainLooper()).post(() ->
+                Toast.makeText(getApplicationContext(), message, Toast.LENGTH_SHORT).show()
+        );
     }
 }

@@ -8,19 +8,20 @@ import android.content.SharedPreferences;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.util.Log;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.Button;
 import android.widget.Toast;
 
 import com.getcapacitor.BridgeActivity;
 import com.capacitorjs.plugins.device.DevicePlugin;
-import com.google.firebase.firestore.FieldValue;
 import com.google.firebase.firestore.FirebaseFirestore;
-
-import java.util.HashMap;
-import java.util.Map;
 
 public class MainActivity extends BridgeActivity {
     private static final int DEVICE_ADMIN_REQUEST = 101;
+    private static final int VPN_PREPARE_REQUEST = 102;
     private static final String CAPACITOR_PREFS = "CapacitorStorage";
     private static final String ADMIN_PREFS = "AdminPrefs";
     private static final String KEY_UNLOCKED = "is_unlocked";
@@ -30,7 +31,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
-        // 1. Registro de Plugins
+        // Registro de Plugins
         registerPlugin(DevicePlugin.class);
         try {
             registerPlugin(LiberarPlugin.class); 
@@ -38,19 +39,29 @@ public class MainActivity extends BridgeActivity {
             Log.e("EDU_Status", "Error al registrar LiberarPlugin: " + e.getMessage());
         }
 
-        // 2. Lógica de seguridad (Device Owner / Admin)
+        // Lógica de seguridad
         checkSecurityPrivileges();
 
-        // 3. Verificar vinculación e iniciar MonitorService y configurar VPN
+        // Verificar vinculación e iniciar servicios
         checkVinculacionYEstado();
 
-        // 4. Monitor de actualizaciones
+        // Monitor de actualizaciones
         try {
             UpdateManager updateManager = new UpdateManager(this);
             updateManager.listenForUpdates();
         } catch (Exception e) {
             Log.e("EDU_Status", "UpdateManager no inicializado: " + e.getMessage());
         }
+
+        // --- BOTÓN DE PRUEBA (puedes eliminarlo después) ---
+        runOnUiThread(() -> {
+            Button btn = new Button(this);
+            btn.setText("SOLICITAR PERMISO VPN");
+            btn.setOnClickListener(v -> requestVpnPermissionAndConfigure());
+            addContentView(btn, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        });
     }
 
     // --- RE-ACTIVAR BLOQUEO DE ALUMNO ---
@@ -157,8 +168,7 @@ public class MainActivity extends BridgeActivity {
         } else {
             Log.d("EDU_Status", "Vinculado a: " + institutoId + " con ID: " + deviceId);
             
-            // --- APLICAR MEDIDAS DE SEGURIDAD ADICIONALES ---
-            disablePreinstalledVpnApps();  // Deshabilitar VPNs que vengan preinstaladas
+            disablePreinstalledVpnApps();
 
             // Iniciar MonitorService
             try {
@@ -185,48 +195,58 @@ public class MainActivity extends BridgeActivity {
                 Log.e("EDU_Status", "Error al iniciar EduVpnService: " + e.getMessage());
             }
 
-            // Configurar VPN como siempre activa (requiere Device Admin)
-            setVpnAsAlwaysOn();
+            // Esperar un poco antes de solicitar permiso VPN (para dar tiempo a que la UI se estabilice)
+            new Handler().postDelayed(this::requestVpnPermissionAndConfigure, 2000);
         }
     }
 
     /**
-     * Configura la VPN como siempre activa usando DevicePolicyManager.
-     * Esto evita que el usuario pueda desactivar la VPN manualmente.
+     * Solicita permiso de VPN al usuario y luego configura como siempre activa.
      */
-    private void setVpnAsAlwaysOn() {
+    private void requestVpnPermissionAndConfigure() {
+        Log.d("EDU_Status", "Preparando solicitud de permiso VPN...");
+        Intent prepareIntent = VpnService.prepare(this);
+        if (prepareIntent != null) {
+            // El usuario aún no ha concedido permiso
+            Log.d("EDU_Status", "Lanzando diálogo de permiso VPN");
+            prepareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            startActivityForResult(prepareIntent, VPN_PREPARE_REQUEST);
+        } else {
+            // Ya tiene permiso, proceder a configurar como siempre activa
+            Log.d("EDU_Status", "Permiso VPN ya concedido, configurando siempre activa");
+            configureVpnAlwaysOn();
+        }
+    }
+
+    /**
+     * Configura la VPN como siempre activa.
+     */
+    private void configureVpnAlwaysOn() {
         DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
         ComponentName adminComponent = new ComponentName(this, AdminReceiver.class);
 
-        if (dpm.isAdminActive(adminComponent)) {
-            try {
-                Intent prepareIntent = VpnService.prepare(this);
-                if (prepareIntent != null) {
-                    startActivityForResult(prepareIntent, 0);
-                    Log.d("EDU_Status", "Esperando permiso de VPN del usuario");
-                } else {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                        // En API 24+ el método retorna boolean, pero no asignamos para evitar problemas de compilación
-                        dpm.setAlwaysOnVpnPackage(adminComponent, getPackageName(), true);
-                        Log.d("EDU_Status", "VPN configurada como siempre activa");
-                    } else {
-                        dpm.setAlwaysOnVpnPackage(adminComponent, getPackageName(), true);
-                        Log.d("EDU_Status", "VPN configurada como siempre activa (llamada realizada)");
-                    }
-                }
-            } catch (SecurityException e) {
-                Log.e("EDU_Status", "Sin permisos para configurar VPN siempre activa", e);
-            } catch (Exception e) {
-                Log.e("EDU_Status", "Error configurando VPN siempre activa", e);
-            }
-        } else {
+        if (!dpm.isAdminActive(adminComponent)) {
             Log.e("EDU_Status", "Admin no activo, no se puede configurar VPN siempre activa");
+            return;
+        }
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                dpm.setAlwaysOnVpnPackage(adminComponent, getPackageName(), true);
+                Log.d("EDU_Status", "VPN configurada como siempre activa (API 24+)");
+            } else {
+                dpm.setAlwaysOnVpnPackage(adminComponent, getPackageName(), true);
+                Log.d("EDU_Status", "VPN configurada como siempre activa (API 21-23)");
+            }
+        } catch (SecurityException e) {
+            Log.e("EDU_Status", "Sin permisos para configurar VPN siempre activa", e);
+        } catch (Exception e) {
+            Log.e("EDU_Status", "Error configurando VPN siempre activa", e);
         }
     }
 
     /**
-     * Deshabilita aplicaciones VPN que puedan venir preinstaladas en el dispositivo.
-     * Se utiliza setApplicationHidden() del DevicePolicyManager para ocultarlas y desactivarlas.
+     * Deshabilita aplicaciones VPN preinstaladas.
      */
     private void disablePreinstalledVpnApps() {
         DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
@@ -237,16 +257,14 @@ public class MainActivity extends BridgeActivity {
             return;
         }
 
-        // Lista de paquetes conocidos de VPNs que podrían venir preinstaladas
         String[] vpnPackages = {
-            "com.secure.vpn",          // Ejemplo genérico
+            "com.secure.vpn",
             "com.hotspotshield.android",
             "com.tunnelbear.android",
             "org.getlantern.lantern",
             "com.windscribe.vpn",
             "com.expressvpn.vpn",
             "com.nordvpn.android",
-            // Añade aquí los paquetes específicos de tu dispositivo si los conoces
         };
 
         for (String pkg : vpnPackages) {
@@ -255,12 +273,10 @@ public class MainActivity extends BridgeActivity {
                 if (hidden) {
                     Log.d("EDU_Status", "VPN oculta/deshabilitada: " + pkg);
                 } else {
-                    Log.d("EDU_Status", "No se pudo ocultar " + pkg + " (puede que no exista)");
+                    Log.d("EDU_Status", "No se pudo ocultar " + pkg);
                 }
-            } catch (SecurityException e) {
-                Log.e("EDU_Status", "Sin permisos para ocultar " + pkg, e);
             } catch (Exception e) {
-                // La app no está instalada, ignoramos
+                // Ignorar
             }
         }
     }
@@ -268,10 +284,19 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == 0) {
+        if (requestCode == VPN_PREPARE_REQUEST) {
             if (resultCode == RESULT_OK) {
-                Log.d("EDU_Status", "Permiso de VPN concedido, configurando como siempre activa");
-                setVpnAsAlwaysOn();
+                Log.d("EDU_Status", "Permiso de VPN concedido por el usuario");
+                configureVpnAlwaysOn();
+                // Forzar el reinicio del servicio VPN para que intente iniciar
+                Intent vpnIntent = new Intent(this, EduVpnService.class);
+                vpnIntent.setAction("START_VPN");
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(vpnIntent);
+                } else {
+                    startService(vpnIntent);
+                }
+                Toast.makeText(this, "Reiniciando servicio VPN...", Toast.LENGTH_SHORT).show();
             } else {
                 Log.e("EDU_Status", "Permiso de VPN denegado por el usuario");
             }
@@ -281,6 +306,5 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onDestroy() {
         super.onDestroy();
-        // No detenemos nada aquí porque MonitorService se maneja solo
     }
 }
