@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dialog';
 import { dbService } from '@/lib/dbService';
 import { format } from 'date-fns';
-import { Globe, Clock, AlertTriangle, ShieldCheck } from 'lucide-react';  // ← AÑADIDO ShieldCheck
+import { Globe, Clock, AlertTriangle, ShieldCheck } from 'lucide-react';
 
 interface InfractionLogModalProps {
   isOpen: boolean;
@@ -29,16 +29,9 @@ export function InfractionLogModal({ isOpen, onOpenChange, deviceId, alumnoNombr
     const cargarIncidencias = async () => {
       setLoading(true);
       try {
-        // Obtener incidencias de Firebase (subcolección del dispositivo)
-        // Nota: dbService debe tener un método para subcolecciones
-        const { mode, url } = dbService.getSettings();
-        
-        // Por ahora, usamos fetch directo a Firebase
-        // En el futuro, esto debería ir por dbService
-        const response = await fetch(`/api/incidencias?deviceId=${deviceId}`);
-        const data = await response.json();
+        // Usar dbService.getIncidencias que decide según el modo actual
+        const data = await dbService.getIncidencias(deviceId);
         setIncidencias(data);
-        
       } catch (error) {
         console.error("Error cargando incidencias:", error);
       } finally {
@@ -52,14 +45,14 @@ export function InfractionLogModal({ isOpen, onOpenChange, deviceId, alumnoNombr
   // Filtrar solo las de hoy
   const incidenciasHoy = incidencias.filter(inc => {
     if (!inc.timestamp) return false;
-    const fecha = inc.timestamp.toDate ? inc.timestamp.toDate() : new Date(inc.timestamp);
+    const fecha = inc.timestamp instanceof Date ? inc.timestamp : new Date(inc.timestamp);
     const hoy = new Date();
     return fecha.getDate() === hoy.getDate() &&
            fecha.getMonth() === hoy.getMonth() &&
            fecha.getFullYear() === hoy.getFullYear();
   }).sort((a, b) => {
-    const fechaA = a.timestamp.toDate ? a.timestamp.toDate() : new Date(a.timestamp);
-    const fechaB = b.timestamp.toDate ? b.timestamp.toDate() : new Date(b.timestamp);
+    const fechaA = a.timestamp instanceof Date ? a.timestamp : new Date(a.timestamp);
+    const fechaB = b.timestamp instanceof Date ? b.timestamp : new Date(b.timestamp);
     return fechaB.getTime() - fechaA.getTime();
   });
 
@@ -83,7 +76,7 @@ export function InfractionLogModal({ isOpen, onOpenChange, deviceId, alumnoNombr
             </div>
           ) : incidenciasHoy.length > 0 ? (
             incidenciasHoy.map((inc, index) => (
-              <div key={index} className="flex items-center justify-between gap-4 rounded-xl border border-red-500/20 bg-red-500/5 p-4">
+              <div key={inc.id || index} className="flex items-center justify-between gap-4 rounded-xl border border-red-500/20 bg-red-500/5 p-4">
                 <div className="flex items-center gap-3 overflow-hidden">
                   <AlertTriangle className="h-4 w-4 shrink-0 text-red-500" />
                   <div>
@@ -98,9 +91,11 @@ export function InfractionLogModal({ isOpen, onOpenChange, deviceId, alumnoNombr
                 <div className="flex items-center gap-2 text-[10px] text-slate-400 shrink-0">
                   <Clock className="h-3 w-3" />
                   <span>
-                    {inc.timestamp?.toDate 
-                      ? format(inc.timestamp.toDate(), 'HH:mm:ss')
-                      : format(new Date(inc.timestamp), 'HH:mm:ss')}
+                    {inc.timestamp instanceof Date
+                      ? format(inc.timestamp, 'HH:mm:ss')
+                      : inc.timestamp
+                      ? format(new Date(inc.timestamp), 'HH:mm:ss')
+                      : ''}
                   </span>
                 </div>
               </div>

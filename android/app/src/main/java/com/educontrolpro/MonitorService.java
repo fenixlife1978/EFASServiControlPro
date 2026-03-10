@@ -396,18 +396,30 @@ public class MonitorService extends AccessibilityService {
     }
 
     private void reportarUrlActual(String url) {
-        if (deviceDocId == null || url.equals(ultimaUrlReportada)) return;
+        if (deviceDocId == null) {
+            Log.e("EDU_Monitor", "❌ reportarUrlActual: deviceDocId es NULL");
+            return;
+        }
         
+        if (url.equals(ultimaUrlReportada)) {
+            Log.d("EDU_Monitor", "ℹ️ URL repetida, ignorando: " + url);
+            return;
+        }
+        
+        Log.d("EDU_Monitor", "🌐 NUEVA URL DETECTADA: " + url);
         ultimaUrlReportada = url;
         
+        // 1. Actualizar ultimaUrl en el documento del dispositivo
         Map<String, Object> urlData = new HashMap<>();
         urlData.put("ultimaUrl", url);
         urlData.put("ultimaUrlTimestamp", FieldValue.serverTimestamp());
         
         db.collection("dispositivos").document(deviceDocId)
             .update(urlData)
-            .addOnFailureListener(e -> Log.e("EDU_Monitor", "Error reportando URL", e));
+            .addOnSuccessListener(aVoid -> Log.d("EDU_Monitor", "✅ ultimaUrl actualizada en dispositivo"))
+            .addOnFailureListener(e -> Log.e("EDU_Monitor", "❌ Error actualizando ultimaUrl", e));
         
+        // 2. Guardar en historial global
         Map<String, Object> history = new HashMap<>();
         history.put("deviceId", deviceDocId);
         history.put("url", url);
@@ -417,7 +429,10 @@ public class MonitorService extends AccessibilityService {
         history.put("alumno", alumnoAsignado);
         
         db.collection("web_history").add(history)
-            .addOnFailureListener(e -> Log.e("EDU_Monitor", "Error guardando historial", e));
+            .addOnSuccessListener(documentReference -> 
+                Log.d("EDU_Monitor", "✅ Historial guardado con ID: " + documentReference.getId()))
+            .addOnFailureListener(e -> 
+                Log.e("EDU_Monitor", "❌ Error guardando historial: " + e.getMessage()));
     }
 
     private void reportarIncidencia(String tipo, String descripcion, String url) {
@@ -450,12 +465,14 @@ public class MonitorService extends AccessibilityService {
         alerta.put("deviceId", deviceDocId);
         alerta.put("InstitutoId", InstitutoId);
         alerta.put("aulaId", aulaId);
+        alerta.put("seccion", seccion);                // ← AÑADIDO
         alerta.put("alumno_asignado", alumnoAsignado);
         alerta.put("estudianteNombre", alumnoAsignado);
         alerta.put("status", "nuevo");
         
         db.collection("alertas").add(alerta)
-            .addOnFailureListener(e -> Log.e("EDU_Monitor", "Error reportando alerta global", e));
+            .addOnSuccessListener(ref -> Log.d("EDU_Monitor", "✅ Alerta global guardada con ID: " + ref.getId()))
+            .addOnFailureListener(e -> Log.e("EDU_Monitor", "❌ Error reportando alerta global", e));
     }
 
     private void dispararBloqueoConDuracion(int duracionMs) {
@@ -583,10 +600,15 @@ public class MonitorService extends AccessibilityService {
                     }
                 }
                 
-                // Si parece una URL, reportar y verificar lista negra
-                if (contenido.startsWith("http") || contenido.contains(".")) {
+                // ============================================================
+                // Reportar URL actual (incluso si no parece URL, para capturar búsquedas)
+                // ============================================================
+                if (!contenido.isEmpty()) {
                     reportarUrlActual(contenido);
-                    
+                }
+                
+                // Verificar lista negra si parece una URL
+                if (contenido.startsWith("http") || contenido.contains(".")) {
                     if (useBlacklist && listaNegra != null && !listaNegra.isEmpty()) {
                         for (String sitio : listaNegra) {
                             if (contenido.toLowerCase().contains(sitio.toLowerCase())) {

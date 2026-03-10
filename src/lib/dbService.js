@@ -1,5 +1,5 @@
 import { db } from '@/firebase/config';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 
 // Configuración de qué colecciones van a cada lado
 const COLLECTION_ROUTES = {
@@ -36,32 +36,84 @@ export const dbService = {
     }
   },
 
-  // Método principal con PROTECCIÓN
+  // ============================================================
+  // NUEVO: Obtener incidencias de un dispositivo específico
+  // ============================================================
+  async getIncidencias(deviceId) {
+    const { mode, url } = this.getSettings();
+
+    // 🔒 PROTECCIÓN: Si no es Firebase y no hay URL, usar Firebase (fallback)
+    if (mode !== 'firebase' && !url) {
+      console.warn(`⚠️ Modo "${mode}" sin URL configurada. Usando Firebase como fallback.`);
+      return await this.fetchIncidenciasFirebase(deviceId);
+    }
+
+    if (mode === 'firebase') {
+      return await this.fetchIncidenciasFirebase(deviceId);
+    }
+
+    if (mode === 'local') {
+      return await this.fetchIncidenciasLocal(url, deviceId);
+    }
+
+    if (mode === 'hibrido' || mode === 'hybrid') {
+      // En híbrido, las incidencias están en la lista 'local', así que van al servidor local
+      return await this.fetchIncidenciasLocal(url, deviceId);
+    }
+
+    return await this.fetchIncidenciasFirebase(deviceId);
+  },
+
+  async fetchIncidenciasFirebase(deviceId) {
+    try {
+      const incidenciasRef = collection(db, 'dispositivos', deviceId, 'incidencias');
+      const q = query(incidenciasRef, orderBy('timestamp', 'desc'));
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        timestamp: doc.data().timestamp?.toDate?.() || doc.data().timestamp
+      }));
+    } catch (error) {
+      console.error(`Error obteniendo incidencias de Firebase para dispositivo ${deviceId}:`, error);
+      return [];
+    }
+  },
+
+  async fetchIncidenciasLocal(url, deviceId) {
+    try {
+      const response = await fetch(`${url}/api/incidencias?deviceId=${deviceId}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      console.error(`Error obteniendo incidencias del servidor local para dispositivo ${deviceId}:`, error);
+      return [];
+    }
+  },
+
+  // ============================================================
+  // Métodos existentes (sin cambios)
+  // ============================================================
   async getData(collectionName) {
     const { mode, url } = this.getSettings();
 
-    // 🔒 PROTECCIÓN: Si no es Firebase y no hay URL, usar Firebase
     if (mode !== 'firebase' && !url) {
       console.warn(`⚠️ Modo "${mode}" sin URL configurada. Usando Firebase como fallback.`);
       return await this.fetchFirebase(collectionName);
     }
 
-    // Modo Firebase puro
     if (mode === 'firebase') {
       return await this.fetchFirebase(collectionName);
     }
     
-    // Modo Local puro
     if (mode === 'local') {
       return await this.fetchExternal(url, collectionName);
     }
     
-    // 🔥 CORREGIDO: Acepta tanto 'hibrido' (español) como 'hybrid' (inglés)
     if (mode === 'hibrido' || mode === 'hybrid') {
       return await this.fetchHybrid(collectionName, url);
     }
     
-    // Por defecto, Firebase
     return await this.fetchFirebase(collectionName);
   },
 
@@ -87,17 +139,14 @@ export const dbService = {
   },
 
   async fetchHybrid(collectionName, url) {
-    // 1. Si es colección crítica → Firebase
     if (COLLECTION_ROUTES.firebase.includes(collectionName)) {
       return await this.fetchFirebase(collectionName);
     }
     
-    // 2. Si es colección de carga pesada → Servidor local
     if (COLLECTION_ROUTES.local.includes(collectionName)) {
       return await this.fetchExternal(url, collectionName);
     }
     
-    // 3. Si no está clasificada, intenta Firebase con fallback a local
     try {
       return await this.fetchFirebase(collectionName);
     } catch (firebaseError) {
@@ -106,17 +155,14 @@ export const dbService = {
     }
   },
 
-  // Para escrituras (con protección también)
   async sendData(collectionName, data, method = 'POST') {
     const { mode, url } = this.getSettings();
     
-    // 🔒 PROTECCIÓN: Si no es Firebase y no hay URL, advertir y no hacer nada
     if (mode !== 'firebase' && !url) {
       console.warn(`⚠️ Modo "${mode}" sin URL. No se puede enviar datos.`);
       return { success: false, error: 'URL no configurada' };
     }
     
-    // Los comandos SIEMPRE van a Firebase (para que la APK los reciba)
     const comandosCriticos = ['bloquear', 'pinBloqueo', 'cortarNavegacion', 'shieldMode'];
     
     if (comandosCriticos.some(cmd => data.hasOwnProperty(cmd))) {
@@ -132,7 +178,6 @@ export const dbService = {
       return { success: true, mode: 'local' };
     }
     
-    // 🔥 CORREGIDO: Acepta ambos nombres para híbrido
     if (mode === 'hibrido' || mode === 'hybrid') {
       if (COLLECTION_ROUTES.firebase.includes(collectionName)) {
         return { success: true, mode: 'firebase' };
@@ -145,7 +190,7 @@ export const dbService = {
   }
 };
 
-// 🔥 AÑADIDO: Exponer dbService globalmente para depuración
+
 if (typeof window !== 'undefined') {
   (window).dbService = dbService;
 }

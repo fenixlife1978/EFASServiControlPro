@@ -14,12 +14,12 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { GlobalControls } from '@/components/admin/config/GlobalControls';
 import { WebHistoryModal } from '@/components/admin/monitoring/WebHistoryModal';
+import { IncidentsTable } from '@/components/admin/security/IncidentsTable';
 
 export default function DirectorView() {
   const [profesores, setProfesores] = useState<any[]>([]);
   const [aulas, setAulas] = useState<any[]>([]);
   const [dispositivos, setDispositivos] = useState<any[]>([]);
-  const [sesionesActivas, setSesionesActivas] = useState<any[]>([]);
   const [nombreInstituto, setNombreInstituto] = useState('Cargando...');
   const [nombreDirector, setNombreDirector] = useState('Cargando...');
   const [showReport, setShowReport] = useState(false);
@@ -32,15 +32,6 @@ export default function DirectorView() {
   const [messageModal, setMessageModal] = useState({ isOpen: false, tabletId: '', alumnoNombre: '', text: '' });
   const [historyModal, setHistoryModal] = useState({ isOpen: false, tabletId: '', alumnoNombre: '' });
   
-  // Estado para alertas globales
-  const [alertasGlobales, setAlertasGlobales] = useState<any[]>([]);
-  const [alertasFiltradas, setAlertasFiltradas] = useState<any[]>([]);
-  
-  // Estados para filtros
-  const [fechaInicio, setFechaInicio] = useState('');
-  const [fechaFin, setFechaFin] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
-  
   // Usamos estrictamente "InstitutoId" como en tu DB
   const getInstitutoId = () => {
     if (typeof window !== 'undefined') {
@@ -50,24 +41,6 @@ export default function DirectorView() {
   };
 
   const workingInstitutoId = getInstitutoId();
-
-  const fetchMonitorDocente = useCallback(async () => {
-    if (!workingInstitutoId) return;
-    setIsRefreshing(true);
-    try {
-      const qSesiones = query(
-        collection(db, "sesiones_monitoreo"), 
-        where("InstitutoId", "==", workingInstitutoId),
-        where("role", "==", "profesor")
-      );
-      const snapshot = await getDocs(qSesiones);
-      setSesionesActivas(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch (err) {
-      console.error("Error en sesiones_monitoreo:", err);
-    } finally {
-      setTimeout(() => setIsRefreshing(false), 1000);
-    }
-  }, [workingInstitutoId]);
 
   useEffect(() => {
     if (!workingInstitutoId) return;
@@ -126,67 +99,26 @@ export default function DirectorView() {
       setDispositivos(s.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (err) => console.error("Error dispositivos:", err));
 
-    // 6. Alertas globales
-    const qAlertas = query(
-      collection(db, "alertas"),
-      where("InstitutoId", "==", workingInstitutoId),
-      orderBy("timestamp", "desc")
-    );
-    const unsubAlertas = onSnapshot(qAlertas, (snap) => {
-      setAlertasGlobales(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, (err) => console.error("Error alertas:", err));
-
-    fetchMonitorDocente();
-
     return () => { 
       unsubAuth(); 
       unsubProf(); 
       unsubAulas(); 
       unsubDev(); 
-      unsubAlertas(); 
     };
-  }, [workingInstitutoId, fetchMonitorDocente]);
+  }, [workingInstitutoId]);
 
-  // Aplicar filtros de fecha a las alertas
-  useEffect(() => {
-    let filtradas = alertasGlobales;
-
-    if (fechaInicio) {
-      const inicio = new Date(fechaInicio);
-      inicio.setHours(0, 0, 0, 0);
-      filtradas = filtradas.filter(a => {
-        const fecha = a.timestamp?.toDate ? a.timestamp.toDate() : new Date(a.timestamp);
-        return fecha >= inicio;
-      });
-    }
-    if (fechaFin) {
-      const fin = new Date(fechaFin);
-      fin.setHours(23, 59, 59, 999);
-      filtradas = filtradas.filter(a => {
-        const fecha = a.timestamp?.toDate ? a.timestamp.toDate() : new Date(a.timestamp);
-        return fecha <= fin;
-      });
-    }
-
-    setAlertasFiltradas(filtradas);
-  }, [alertasGlobales, fechaInicio, fechaFin]);
-
-  // Supervisión táctica de aula
+  // Cuando se selecciona un aula, filtramos los dispositivos de los alumnos de esa aula
   useEffect(() => {
     if (!aulaSeleccionada || !workingInstitutoId) return;
-    const qSup = query(
-      collection(db, "sesiones_monitoreo"),
-      where("InstitutoId", "==", workingInstitutoId),
-      where("aulaId", "==", aulaSeleccionada.aulaId)
+    const alumnos = dispositivos.filter(d => 
+      d.aulaId === aulaSeleccionada.aulaId && 
+      d.rol === 'alumno'
     );
-    const unsubSup = onSnapshot(qSup, (s) => {
-      setAlumnosAula(s.docs.map(d => ({ id: d.id, ...d.data() })));
-      setLastPulse(new Date().toLocaleTimeString());
-    }, (err) => console.error("Error monitoreo aula:", err));
-    return () => unsubSup();
-  }, [aulaSeleccionada, workingInstitutoId]);
+    setAlumnosAula(alumnos);
+    setLastPulse(new Date().toLocaleTimeString());
+  }, [aulaSeleccionada, dispositivos, workingInstitutoId]);
 
-  // Enviar mensaje al alumno (CORREGIDO: resetea message_viewed)
+  // Enviar mensaje al alumno
   const handleSendMessage = async () => {
     if (!messageModal.tabletId || !messageModal.text.trim()) return;
     try {
@@ -194,27 +126,10 @@ export default function DirectorView() {
         pending_message: messageModal.text,
         message_timestamp: serverTimestamp(),
         message_sender: "Dirección Institucional",
-        message_viewed: false // ← IMPORTANTE: para que el mensaje se muestre en la tablet
+        message_viewed: false
       });
       setMessageModal({ ...messageModal, isOpen: false, text: '' });
     } catch (e) { console.error(e); }
-  };
-
-  // Marcar todas las alertas filtradas como vistas
-  const handleMarcarVistas = async () => {
-    const promises = alertasFiltradas.map(alert => 
-      updateDoc(doc(db, 'alertas', alert.id), { status: 'visto' })
-    );
-    await Promise.all(promises);
-  };
-
-  // Eliminar todas las alertas filtradas
-  const handleLimpiar = async () => {
-    if (!confirm('¿Eliminar permanentemente todas las alertas mostradas?')) return;
-    const promises = alertasFiltradas.map(alert => 
-      deleteDoc(doc(db, 'alertas', alert.id))
-    );
-    await Promise.all(promises);
   };
 
   const exportToPDF = async () => {
@@ -229,6 +144,15 @@ export default function DirectorView() {
       pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
       pdf.save(`EDU_Reporte_${new Date().getTime()}.pdf`);
     } catch (error) { console.error(error); }
+  };
+
+  // Función para verificar estado online
+  const checkIsOnline = (ultimoAcceso: any) => {
+    if (!ultimoAcceso) return false;
+    const lastSeenDate = ultimoAcceso.toDate ? ultimoAcceso.toDate() : new Date(ultimoAcceso);
+    const now = new Date();
+    const diff = now.getTime() - lastSeenDate.getTime();
+    return diff < 60000; // 60 segundos de tolerancia
   };
 
   if (!workingInstitutoId) return <div className="p-10 text-red-500 font-black italic uppercase">Acceso Denegado. No se encontró InstitutoId.</div>;
@@ -260,76 +184,6 @@ export default function DirectorView() {
               <h2 className="text-xs font-black italic uppercase text-white mb-6 flex items-center gap-3"><Lock className="text-orange-500 w-4 h-4" /> Control Maestro</h2>
               <div className="scale-90 origin-left"><GlobalControls institutionId={workingInstitutoId} /></div>
             </div>
-
-            {/* RIESGOS DE NAVEGACIÓN MEJORADO */}
-            <div className="bg-[#0f1117] p-8 rounded-[2.5rem] border border-slate-800 shadow-xl">
-               <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-[10px] font-black uppercase text-slate-500 tracking-widest italic flex items-center gap-2">
-                    <Flame size={14} className="text-orange-500" /> Riesgos de Navegación
-                  </h3>
-                  <button onClick={() => setShowFilters(!showFilters)} className="text-slate-400 hover:text-white text-[10px] font-black uppercase flex items-center gap-1">
-                    <Calendar size={14} /> Filtros
-                  </button>
-               </div>
-
-               {showFilters && (
-                 <div className="mb-4 p-4 bg-slate-900/50 rounded-xl border border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                   <input
-                     type="date"
-                     className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs"
-                     value={fechaInicio}
-                     onChange={(e) => setFechaInicio(e.target.value)}
-                     placeholder="Fecha inicio"
-                   />
-                   <input
-                     type="date"
-                     className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs"
-                     value={fechaFin}
-                     onChange={(e) => setFechaFin(e.target.value)}
-                     placeholder="Fecha fin"
-                   />
-                   <div className="flex gap-2 justify-end">
-                     <button
-                       onClick={handleMarcarVistas}
-                       className="bg-blue-600/10 text-blue-500 hover:bg-blue-600 hover:text-white border border-blue-600/20 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase flex items-center gap-1 transition-all"
-                       title="Marcar vistas"
-                     >
-                       <CheckCircle size={12} /> Vistas
-                     </button>
-                     <button
-                       onClick={handleLimpiar}
-                       className="bg-red-600/10 text-red-500 hover:bg-red-600 hover:text-white border border-red-600/20 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase flex items-center gap-1 transition-all"
-                       title="Limpiar"
-                     >
-                       <Trash2 size={12} /> Limpiar
-                     </button>
-                   </div>
-                 </div>
-               )}
-
-               <div className="space-y-3 max-h-80 overflow-y-auto pr-1 custom-scrollbar">
-                  {alertasFiltradas.length > 0 ? alertasFiltradas.slice(0, 5).map((alert, i) => (
-                    <div key={i} className="bg-red-500/5 p-4 rounded-2xl border border-red-500/10 group hover:border-red-500/30 transition-all">
-                        <div className="flex justify-between items-start mb-2">
-                            <p className="text-[9px] font-black text-white uppercase italic">{alert.estudianteNombre || alert.alumno_asignado || 'Estudiante'}</p>
-                            <AlertTriangle size={12} className="text-red-500 animate-pulse" />
-                        </div>
-                        <div className="flex items-center justify-between">
-                           <p className="text-[8px] font-bold text-slate-600 uppercase truncate max-w-[120px]">{alert.urlIntentada || alert.descripcion || 'BLOQUEADO'}</p>
-                           <div className="flex gap-2">
-                             <button onClick={() => setHistoryModal({ isOpen: true, tabletId: alert.deviceId, alumnoNombre: alert.estudianteNombre || alert.alumno_asignado })} className="text-slate-500 hover:text-white"><Globe size={12}/></button>
-                             <button onClick={() => setMessageModal({ isOpen: true, tabletId: alert.deviceId, alumnoNombre: alert.estudianteNombre || alert.alumno_asignado, text: '' })} className="text-[8px] font-black text-orange-500 uppercase hover:text-white">Notificar</button>
-                           </div>
-                        </div>
-                    </div>
-                  )) : (
-                    <div className="text-center py-6 border border-dashed border-slate-800 rounded-3xl">
-                        <ShieldCheck size={24} className="text-slate-800 mx-auto mb-2" />
-                        <p className="text-[9px] font-black text-slate-600 uppercase italic">Sin Infracciones</p>
-                    </div>
-                  )}
-               </div>
-            </div>
         </div>
 
         <div className="col-span-12 lg:col-span-8">
@@ -339,14 +193,6 @@ export default function DirectorView() {
                   <h3 className="text-xs font-black text-white uppercase italic flex items-center gap-2">
                       <Globe className="text-orange-500" size={16} /> Monitor Docente
                   </h3>
-                  <button 
-                      onClick={fetchMonitorDocente}
-                      disabled={isRefreshing}
-                      className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[9px] font-black uppercase italic transition-all ${isRefreshing ? 'bg-slate-800 text-slate-500' : 'bg-orange-500 text-white shadow-lg shadow-orange-500/20 hover:scale-105'}`}
-                  >
-                      {isRefreshing ? <RefreshCw size={12} className="animate-spin" /> : <Zap size={12} />}
-                      {isRefreshing ? 'Sincronizando...' : 'Sincronizar'}
-                  </button>
                 </div>
                 <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
                   {profesores.length > 0 ? profesores.map(prof => {
@@ -394,6 +240,13 @@ export default function DirectorView() {
            <div><p className="text-[9px] font-black text-slate-500 uppercase italic">Dispositivos</p><p className="text-2xl font-black text-white italic">{dispositivos.length}</p></div>
         </div>
       </div>
+
+      {/* LOG DE INCIDENCIAS GLOBAL con acciones de historial y mensaje */}
+      <IncidentsTable 
+        institutionId={workingInstitutoId}
+        onViewHistory={(deviceId, alumnoNombre) => setHistoryModal({ isOpen: true, tabletId: deviceId, alumnoNombre })}
+        onSendMessage={(deviceId, alumnoNombre) => setMessageModal({ isOpen: true, tabletId: deviceId, alumnoNombre, text: '' })}
+      />
 
       {/* SUPERVISIÓN PERSONAL */}
       <div className="grid grid-cols-12 gap-8">
@@ -458,7 +311,7 @@ export default function DirectorView() {
         </div>
       </div>
 
-      {/* MODAL SUPERVISIÓN LIVE AULA */}
+      {/* MODAL SUPERVISIÓN LIVE AULA (con datos reales) */}
       {aulaSeleccionada && (
         <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/95 backdrop-blur-xl">
           <div className="bg-[#0f1117] border border-slate-800 w-full max-w-4xl rounded-[2.5rem] overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
@@ -476,18 +329,22 @@ export default function DirectorView() {
               <button onClick={() => setAulaSeleccionada(null)} className="hover:bg-red-500 p-2 rounded-full transition-colors"><X size={24} /></button>
             </div>
             <div className="p-8 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-4">
-              {alumnosAula.length > 0 ? alumnosAula.map(al => (
-                <div key={al.id} className="bg-slate-900/50 border border-slate-800 p-4 rounded-3xl border-l-4 border-l-blue-500">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-white font-bold text-xs uppercase">{al.usuario}</span>
-                    <span className="text-[9px] text-slate-600 font-black italic">TABLET: {al.tabletId}</span>
+              {alumnosAula.length > 0 ? alumnosAula.map(alumno => {
+                const online = checkIsOnline(alumno.ultimoAcceso);
+                return (
+                  <div key={alumno.id} className="bg-slate-900/50 border border-slate-800 p-4 rounded-3xl border-l-4 border-l-blue-500">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-white font-bold text-xs uppercase">{alumno.alumno_asignado || 'Sin nombre'}</span>
+                      <span className="text-[9px] text-slate-600 font-black italic">TABLET: {alumno.id}</span>
+                    </div>
+                    <div className="bg-black/40 p-3 rounded-xl border border-slate-800/50 flex items-center justify-between">
+                      <p className="text-[10px] text-blue-400 font-medium truncate flex-1">{alumno.ultimaUrl || 'Sin actividad'}</p>
+                      <span className={`ml-2 w-2 h-2 rounded-full ${online ? 'bg-green-500 animate-pulse' : 'bg-slate-600'}`} />
+                    </div>
                   </div>
-                  <div className="bg-black/40 p-3 rounded-xl border border-slate-800/50">
-                    <p className="text-[10px] text-blue-400 font-medium truncate">{al.url_actual || 'Pestaña del Sistema'}</p>
-                  </div>
-                </div>
-              )) : (
-                <div className="col-span-full py-20 text-center text-slate-500 font-black uppercase italic text-xs">Sin tráfico detectado en este aula</div>
+                );
+              }) : (
+                <div className="col-span-full py-20 text-center text-slate-500 font-black uppercase italic text-xs">No hay alumnos en esta aula</div>
               )}
             </div>
           </div>
