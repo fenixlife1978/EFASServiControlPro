@@ -33,7 +33,6 @@ public class MainActivity extends BridgeActivity {
 
     private DevicePolicyManager dpm;
     private ComponentName adminComponent;
-    private boolean isRequestingBatteryOptimization = false;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -61,14 +60,13 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    public void onResume() {   // Ahora es public para sobrescribir correctamente
+    public void onResume() {
         super.onResume();
         SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
         String deviceId = capPrefs.getString(KEY_DEVICE_ID, null);
-        if (deviceId != null && !isRequestingBatteryOptimization) {
+        if (deviceId != null) {
             verificarYActivarTodo();
         }
-        isRequestingBatteryOptimization = false;
     }
 
     private void ejecutarFlujoConfiguracion() {
@@ -86,7 +84,6 @@ public class MainActivity extends BridgeActivity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
             if (!pm.isIgnoringBatteryOptimizations(getPackageName())) {
-                isRequestingBatteryOptimization = true;
                 Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
                 intent.setData(Uri.parse("package:" + getPackageName()));
                 startActivity(intent);
