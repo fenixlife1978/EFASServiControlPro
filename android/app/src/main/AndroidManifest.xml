@@ -5,21 +5,18 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" /> 
-    
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    
     <uses-permission android:name="android.permission.BIND_VPN_SERVICE" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
-    
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
-
     <uses-permission android:name="android.permission.REORDER_TASKS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
@@ -30,9 +27,8 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
-        android:hardwareAccelerated="true">
-
-        <provider
+        android:hardwareAccelerated="true"
+        android:directBootAware="true"> <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.provider"
             android:exported="false"
@@ -49,7 +45,7 @@
             android:exported="true"> 
             <meta-data android:name="android.app.device_admin"
                 android:resource="@xml/device_admin_policies" /> 
-            <intent-filter> 
+            <intent-filter android:priority="1000"> 
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
                 <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
             </intent-filter> 
@@ -57,9 +53,11 @@
 
         <receiver android:name=".BootReceiver" 
             android:exported="true"
-            android:enabled="true">
+            android:enabled="true"
+            android:directBootAware="true">
             <intent-filter android:priority="999">
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
@@ -80,8 +78,8 @@
 
         <service android:name=".EduVpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"
-            android:exported="true">
-            <intent-filter>
+            android:exported="true"
+            android:foregroundServiceType="specialUse"> <intent-filter>
                 <action android:name="android.net.VpnService" />
             </intent-filter>
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
@@ -109,14 +107,16 @@
             android:showWhenLocked="true"
             android:turnScreenOn="true"
             android:screenOrientation="portrait"
-            android:noHistory="true" />
-
-        <activity android:name=".MessageActivity"
+            android:taskAffinity="" 
+            android:noHistory="true"
+            android:finishOnTaskLaunch="true"
+            android:exported="false" /> <activity android:name=".MessageActivity"
             android:theme="@style/Theme.AppCompat.NoActionBar"
             android:launchMode="singleInstance"
             android:excludeFromRecents="true"
             android:showWhenLocked="true"
-            android:turnScreenOn="true" />
+            android:turnScreenOn="true"
+            android:taskAffinity=".messages" />
 
     </application>
 </manifest>

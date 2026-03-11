@@ -79,6 +79,8 @@ public class EduVpnService extends VpnService {
                 startVpn();
             }
         }
+        // START_STICKY asegura que si el sistema mata el servicio por falta de memoria, 
+        // lo intente recrear automáticamente.
         return START_STICKY;
     }
 
@@ -91,11 +93,12 @@ public class EduVpnService extends VpnService {
 
             builder.addAddress(VPN_ADDRESS, 24);
             builder.addRoute(VPN_ROUTE, 0);
-            builder.addRoute("::", 0); // IPv6
+            builder.addRoute("::", 0); // IPv6 para cerrar fugas de datos
 
             builder.addDnsServer("8.8.8.8");
             builder.addDnsServer("1.1.1.1");
 
+            // Evitar bucle infinito: el propio paquete no pasa por el túnel
             builder.addDisallowedApplication(getPackageName());
 
             builder.setMtu(1500);
@@ -108,6 +111,7 @@ public class EduVpnService extends VpnService {
                 return;
             }
 
+            // Iniciamos como Foreground con prioridad máxima para evitar que el sistema lo cierre
             startForeground(NOTIFICATION_ID, getNotification());
 
             isRunning = true;
@@ -138,30 +142,25 @@ public class EduVpnService extends VpnService {
                             if (isDnsPacket(buffer.array(), length)) {
                                 String domain = extractDomainFromDns(buffer.array(), length);
                                 if (domain != null && isBlocked(domain)) {
+                                    // Bloqueo: simplemente no escribimos el paquete al exterior
                                     continue;
                                 }
                             }
                             out.write(buffer.array(), 0, length);
                         }
                     } catch (Exception e) {
-                        Log.e(TAG, "Error en ciclo VPN", e);
-                        try {
-                            Thread.sleep(1000);
-                        } catch (InterruptedException ignored) {}
+                        if (isRunning) Log.e(TAG, "Error en ciclo VPN", e);
                     }
                 }
             } catch (IOException e) {
-                Log.e(TAG, "Error de E/S en VPN", e);
+                if (isRunning) Log.e(TAG, "Error de E/S en VPN", e);
             }
 
             if (isRunning) {
-                Log.d(TAG, "Reiniciando VPN automáticamente...");
-                try {
-                    Thread.sleep(2000);
-                } catch (InterruptedException ignored) {}
+                // Si sigue marcado como ejecutando pero salimos del ciclo, reinicio breve
+                try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
             }
         }
-        stopVpn();
     }
 
     private boolean isDnsPacket(byte[] data, int length) {
@@ -229,19 +228,23 @@ public class EduVpnService extends VpnService {
 
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "Protección de Red", NotificationManager.IMPORTANCE_LOW);
+            NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "Protección de Red Escolar", NotificationManager.IMPORTANCE_HIGH);
+            channel.setDescription("Mantiene el filtrado de contenido activo");
             getSystemService(NotificationManager.class).createNotificationChannel(channel);
         }
     }
 
     private Notification getNotification() {
-        PendingIntent pi = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
+        Intent intent = new Intent(this, MainActivity.class);
+        PendingIntent pi = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE);
+        
         return new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("EDUControlPro activo")
-                .setContentText("Filtrado de contenido en ejecución")
+                .setContentTitle("Escudo EDUControlPro")
+                .setContentText("Filtrado de contenido web activo")
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
                 .setContentIntent(pi)
                 .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_MAX) // Para Android < Oreo
                 .build();
     }
 
@@ -261,10 +264,21 @@ public class EduVpnService extends VpnService {
         Log.d(TAG, "VPN Detenida");
     }
 
+    // CRÍTICO: Este método se activa si otra VPN intenta conectarse
     @Override
     public void onRevoke() {
-        Log.d(TAG, "VPN revocada por el sistema");
+        Log.w(TAG, "⚠️ VPN REVOCADA por otra aplicación");
+        
+        // Notificamos al MonitorService que la protección web cayó
+        Intent revokedIntent = new Intent("ACTION_VPN_REVOKED");
+        sendBroadcast(revokedIntent);
+        
         stopVpn();
+        
+        // Si Firestore dice que debería estar activa, intentamos recuperarla tras 3 segundos
+        if (vpnEnabledFromFirestore) {
+            new Handler(Looper.getMainLooper()).postDelayed(this::startVpn, 3000);
+        }
     }
 
     @Override

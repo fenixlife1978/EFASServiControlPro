@@ -1,10 +1,14 @@
 package com.educontrolpro;
 
 import android.accessibilityservice.AccessibilityService;
+import android.app.ActivityManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Handler;
@@ -57,10 +61,9 @@ public class MonitorService extends AccessibilityService {
     private boolean whitelistOnly = false;
     private boolean modoConcentracion = false;
 
-    private long firstDetectionTime = 0;
-    private static final long GRACE_PERIOD = 8000;
+    // Eliminamos GRACE_PERIOD para evitar vulnerabilidades
     private long lastBlockTime = 0;
-    private static final long BLOCK_COOLDOWN = 10000;
+    private static final long BLOCK_COOLDOWN = 2000; // Cooldown reducido para mayor firmeza
 
     private List<String> appsEducativas = Arrays.asList(
             "com.microsoft.office.word", "com.microsoft.office.excel", "com.microsoft.office.powerpoint",
@@ -75,9 +78,10 @@ public class MonitorService extends AccessibilityService {
             "tiktok", "instagram", "facebook", "youtube", "twitter", "whatsapp", "telegram", "snapchat", "discord",
             "com.rovio.angrybirds", "com.supercell.clashofclans", "com.king.candycrushsaga", "com.mojang.minecraftpe",
             "com.epicgames.fortnite", "com.tencent.ig", "com.dts.freefireth", "com.playrix.homescapes", "com.playrix.fishdom",
-            "com.netflix.mediaclient", "com.spotify.music", "com.amazon.avod.thirdpartyclient", "com.hulu.plus",
+            "com.netflix.mediaclient", "spotify", "com.amazon.avod.thirdpartyclient", "com.hulu.plus",
             "com.disney.disneyplus", "com.crunchyroll.crunchyroid", "com.mercadopago.wallet", "com.paypal.android.p2pmobile",
-            "com.ubercab", "com.didiglobal.passenger", "com.alibaba.aliexpresshd", "com.amazon.mShop.android.shopping"
+            "com.ubercab", "com.didiglobal.passenger", "com.alibaba.aliexpresshd", "com.amazon.mShop.android.shopping",
+            "com.android.vpndialogs" // CRÍTICO: Bloquea el permiso de otras VPN
     );
 
     private List<String> listaBlancaSistema = Arrays.asList(
@@ -87,7 +91,7 @@ public class MonitorService extends AccessibilityService {
     );
 
     private static final List<String> PALABRAS_PROHIBIDAS = Arrays.asList(
-            "xxx", "porno", "pornos", "videos pornos", "juegos", "proxy", "vpn", "unblock",
+            "xxx", "porno", "videos pornos", "juegos", "proxy", "vpn", "unblock",
             "bypass", "casino", "bet", "poker", "slot", "torrent", "piratebay"
     );
 
@@ -98,9 +102,20 @@ public class MonitorService extends AccessibilityService {
 
     private Handler heartbeatHandler = new Handler(Looper.getMainLooper());
     private Runnable heartbeatRunnable;
-    private static final long HEARTBEAT_INTERVAL = 30000;
+    private static final long HEARTBEAT_INTERVAL = 15000; // Intervalo más frecuente para monitoreo real
 
     private String ultimaUrlReportada = "";
+
+    // Receptor para cuando la VPN es revocada
+    private final BroadcastReceiver vpnStatusReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if ("ACTION_VPN_REVOKED".equals(intent.getAction())) {
+                reportarIncidencia("SEGURIDAD_VPN", "VPN Desactivada externamente", "Sistema");
+                dispararBloqueoInmediato("VPN_REVOKED");
+            }
+        }
+    };
 
     @Override
     public void onCreate() {
@@ -108,6 +123,13 @@ public class MonitorService extends AccessibilityService {
         createNotificationChannel();
         startForeground(1, getNotification());
         cargarIdentidad();
+        
+        // Registrar el receptor de estatus de VPN
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(vpnStatusReceiver, new IntentFilter("ACTION_VPN_REVOKED"), Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(vpnStatusReceiver, new IntentFilter("ACTION_VPN_REVOKED"));
+        }
     }
 
     private void cargarIdentidad() {
@@ -136,7 +158,7 @@ public class MonitorService extends AccessibilityService {
 
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel serviceChannel = new NotificationChannel(CHANNEL_ID, "Monitoreo Educativo", NotificationManager.IMPORTANCE_LOW);
+            NotificationChannel serviceChannel = new NotificationChannel(CHANNEL_ID, "Monitoreo Educativo", NotificationManager.IMPORTANCE_HIGH);
             NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager != null) manager.createNotificationChannel(serviceChannel);
         }
@@ -144,10 +166,10 @@ public class MonitorService extends AccessibilityService {
 
     private Notification getNotification() {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("EDUControlPro")
-                .setContentText("Protección de aula activa")
+                .setContentTitle("EDUControlPro Protegido")
+                .setContentText("Sistema de supervisión activo")
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setOngoing(true)
                 .build();
     }
@@ -178,11 +200,27 @@ public class MonitorService extends AccessibilityService {
                 if (deviceDocId != null) {
                     db.collection("dispositivos").document(deviceDocId)
                             .update("online", true, "ultimoAcceso", FieldValue.serverTimestamp());
+                    
+                    // Verificación de salud de la VPN
+                    if (cortarNavegacion) {
+                        verificarYReactivarVPN();
+                    }
                 }
                 heartbeatHandler.postDelayed(this, HEARTBEAT_INTERVAL);
             }
         };
         heartbeatHandler.post(heartbeatRunnable);
+    }
+
+    private void verificarYReactivarVPN() {
+        // Lógica para asegurar que el servicio VPN no esté detenido
+        Intent vpnIntent = new Intent(this, EduVpnService.class);
+        vpnIntent.setAction(EduVpnService.ACTION_START_VPN);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(vpnIntent);
+        } else {
+            startService(vpnIntent);
+        }
     }
 
     private void iniciarListeners(String docId, String instId) {
@@ -234,7 +272,7 @@ public class MonitorService extends AccessibilityService {
         saveUnlockState(adminEnabled != null && adminEnabled);
 
         if (bloquearCmd != null && bloquearCmd) {
-            dispararBloqueoConDuracion(8000);
+            dispararBloqueoInmediato("COMANDO_REMOTO");
             db.collection("dispositivos").document(deviceDocId).update("bloquear", false);
         }
 
@@ -311,22 +349,22 @@ public class MonitorService extends AccessibilityService {
         db.collection("alertas").add(alerta);
     }
 
-    private synchronized void dispararBloqueoConDuracion(int duracionMs) {
+    // CORREGIDO: Bloqueo persistente sin auto-desbloqueo
+    private synchronized void dispararBloqueoInmediato(String razon) {
         long now = System.currentTimeMillis();
         if (now - lastBlockTime < BLOCK_COOLDOWN) return;
 
         if (!getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(KEY_UNLOCKED, false)) {
             lastBlockTime = now;
-            firstDetectionTime = 0;
-            Log.d(TAG, "🔒 EXPULSIÓN EJECUTADA");
+            Log.d(TAG, "🔒 BLOQUEO ACTIVADO POR: " + razon);
 
             Intent lockIntent = new Intent(this, LockActivity.class);
             lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             startActivity(lockIntent);
-
-            new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                sendBroadcast(new Intent("ACTION_CLOSE_LOCK"));
-            }, duracionMs);
+            
+            // Hemos eliminado el Handler que enviaba ACTION_CLOSE_LOCK. 
+            // La pantalla solo se quitará cuando el usuario vuelva a un área permitida 
+            // o se use el PIN de desbloqueo.
         }
     }
 
@@ -336,7 +374,6 @@ public class MonitorService extends AccessibilityService {
         String packageName = (event.getPackageName() != null) ? event.getPackageName().toString() : "";
 
         if (listaBlancaSistema.contains(packageName)) {
-            firstDetectionTime = 0;
             return;
         }
 
@@ -354,23 +391,27 @@ public class MonitorService extends AccessibilityService {
 
     private void procesarCambioApp(String packageName) {
         boolean isUnlocked = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(KEY_UNLOCKED, false);
+        
+        // Si la app está desbloqueada por el administrador, no bloqueamos a menos que shieldMode esté activo
         if (isUnlocked && !shieldMode) return;
 
+        // 1. Modo Concentración: Solo apps educativas
         if (modoConcentracion && !appsEducativas.contains(packageName) && !whitelist.contains(packageName)) {
-            reportarIncidencia("MODO_CONCENTRACION", "App bloqueada: " + packageName, packageName);
-            dispararBloqueoConDuracion(8000);
+            dispararBloqueoInmediato("MODO_CONCENTRACION");
             return;
         }
 
+        // 2. Apps Prohibidas explícitamente
         for (String prohibida : appsProhibidas) {
             if (packageName.toLowerCase().contains(prohibida)) {
-                dispararBloqueoConDuracion(8000);
+                dispararBloqueoInmediato("APP_PROHIBIDA: " + prohibida);
                 return;
             }
         }
 
+        // 3. Blindaje de Ajustes
         if (packageName.contains("settings") && !isUnlocked) {
-            dispararBloqueoConDuracion(8000);
+            dispararBloqueoInmediato("AJUSTES_PROTEGIDOS");
         }
     }
 
@@ -384,6 +425,7 @@ public class MonitorService extends AccessibilityService {
         if (node == null) return;
 
         try {
+            // Detección de URL en Chrome
             List<AccessibilityNodeInfo> urlNodes = node.findAccessibilityNodeInfosByViewId("com.android.chrome:id/url_bar");
             if (urlNodes != null && !urlNodes.isEmpty()) {
                 AccessibilityNodeInfo urlNode = urlNodes.get(0);
@@ -396,32 +438,19 @@ public class MonitorService extends AccessibilityService {
                 }
             }
 
+            // Análisis de texto en pantalla
             if (node.getText() != null) {
                 String texto = node.getText().toString().toLowerCase();
-                boolean detectedForbidden = false;
 
                 for (String palabra : PALABRAS_PROHIBIDAS) {
                     if (texto.contains(palabra)) {
+                        // Si se detecta contenido prohibido, bloqueo inmediato (eliminada la gracia)
                         if (node.isEditable() || node.getClassName().toString().contains("EditText") || esNodoUrl(node)) {
-                            detectedForbidden = true;
-
-                            long now = System.currentTimeMillis();
-                            if (firstDetectionTime == 0) {
-                                firstDetectionTime = now;
-                                Log.d(TAG, "⚠️ Aviso: Palabra prohibida detectada. Iniciando gracia de 8s.");
-                            } else if (now - firstDetectionTime > GRACE_PERIOD) {
-                                Log.d(TAG, "🚫 BLOQUEO: Tiempo de gracia agotado para: " + palabra);
-                                reportarIncidencia("CONTENIDO_PROHIBIDO", "Palabra detectada post-gracia: " + palabra, texto);
-                                dispararBloqueoConDuracion(8000);
-                                return;
-                            }
+                            Log.d(TAG, "🚫 CONTENIDO PROHIBIDO: " + palabra);
+                            reportarIncidencia("CONTENIDO_PROHIBIDO", "Detección: " + palabra, texto);
+                            dispararBloqueoInmediato("CONTENIDO_RESTRINGIDO");
+                            return;
                         }
-                    }
-                }
-
-                if (!detectedForbidden && System.currentTimeMillis() - lastBlockTime > BLOCK_COOLDOWN) {
-                    if (texto.contains(".") && (texto.contains("http") || texto.length() > 6)) {
-                        procesarUrlEncontrada(texto);
                     }
                 }
             }
@@ -472,16 +501,10 @@ public class MonitorService extends AccessibilityService {
         }
 
         if (urlBlocked) {
-            long now = System.currentTimeMillis();
-            if (firstDetectionTime == 0) {
-                firstDetectionTime = now;
-                Log.d(TAG, "⚠️ URL Bloqueada: " + url + ". Iniciando gracia.");
-            } else if (now - firstDetectionTime > GRACE_PERIOD) {
-                reportarIncidencia("WEB_BLOCK", "URL restringida", url);
-                dispararBloqueoConDuracion(8000);
-            }
+            Log.d(TAG, "⚠️ URL RESTRINGIDA: " + url);
+            reportarIncidencia("WEB_BLOCK", "Intento de acceso a URL", url);
+            dispararBloqueoInmediato("URL_PROHIBIDA");
         } else {
-            firstDetectionTime = 0;
             reportarUrlActual(url);
         }
     }
@@ -489,6 +512,10 @@ public class MonitorService extends AccessibilityService {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        try {
+            unregisterReceiver(vpnStatusReceiver);
+        } catch (Exception ignored) {}
+        
         if (deviceListener != null) deviceListener.remove();
         if (institutionListener != null) institutionListener.remove();
         if (aulaListener != null) aulaListener.remove();
@@ -499,6 +526,6 @@ public class MonitorService extends AccessibilityService {
 
     @Override
     public void onInterrupt() {
-        Log.d(TAG, "Servicio de accesibilidad interrumpido");
+        Log.d(TAG, "Servicio interrumpido");
     }
 }
