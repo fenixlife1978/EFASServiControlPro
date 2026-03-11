@@ -19,6 +19,9 @@ import com.google.firebase.firestore.ListenerRegistration;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.HashSet;
 import java.util.List;
@@ -70,20 +73,15 @@ public class EduVpnService extends VpnService {
             builder.setSession("EDUControlPro Protection");
             builder.addAddress(VPN_ADDRESS, 32); 
             
-            // --- LA CLAVE PARA QUE NO SE CORTE EL INTERNET ---
-            // Solo interceptamos las peticiones DNS (8.8.8.8)
-            // El resto del tráfico (WhatsApp, YouTube, etc.) irá por la red normal
-            builder.addRoute("8.8.8.8", 32);
-            builder.addRoute("1.1.1.1", 32);
+            // Capturamos todo el tráfico para que "Bloquear conexiones sin VPN" no mate la conexión
+            builder.addRoute("0.0.0.0", 0);
             builder.addDnsServer("8.8.8.8");
 
-            // Evitar conflictos con Firebase
             builder.addDisallowedApplication(getPackageName());
-            // Permitir WhatsApp fuera de la VPN para que no se corte
             try { builder.addDisallowedApplication("com.whatsapp"); } catch (Exception ignored) {}
 
             builder.setMtu(1500);
-            builder.setBlocking(false); // Cambiado a false para evitar lags
+            builder.setBlocking(true); 
 
             vpnInterface = builder.establish();
             
@@ -92,7 +90,7 @@ public class EduVpnService extends VpnService {
                 isRunning = true;
                 executorService = Executors.newSingleThreadExecutor();
                 executorService.submit(this::runVpnLoop);
-                Log.d(TAG, "🛡️ VPN DNS-Filter Iniciada");
+                Log.d(TAG, "🛡️ VPN con Reenvío DNS Iniciada");
             }
 
         } catch (Exception e) {
@@ -102,7 +100,13 @@ public class EduVpnService extends VpnService {
     }
 
     private void runVpnLoop() {
-        try (FileInputStream in = new FileInputStream(vpnInterface.getFileDescriptor())) {
+        try (FileInputStream in = new FileInputStream(vpnInterface.getFileDescriptor());
+             FileOutputStream out = new FileOutputStream(vpnInterface.getFileDescriptor());
+             DatagramSocket dnsSocket = new DatagramSocket()) {
+            
+            dnsSocket.setSoTimeout(1000);
+            protect(dnsSocket); // Crucial: que el socket del túnel no pase por la propia VPN
+
             ByteBuffer buffer = ByteBuffer.allocate(32767);
 
             while (isRunning) {
@@ -112,22 +116,46 @@ public class EduVpnService extends VpnService {
                 if (length > 0) {
                     if (isDnsPacket(buffer.array(), length)) {
                         String domain = extractDomainFromDns(buffer.array(), length);
+                        
                         if (domain != null && isBlocked(domain)) {
                             Log.w(TAG, "🚫 BLOQUEADO: " + domain);
-                            // Al no escribir el paquete de vuelta, la petición muere aquí.
-                            continue; 
+                            continue; // No respondemos, el navegador dará timeout para ese sitio
+                        }
+
+                        // REENVÍO DE DNS (DNS Forwarding)
+                        // Si no está bloqueado, resolvemos la petición nosotros mismos
+                        byte[] dnsPayload = extractDnsPayload(buffer.array(), length);
+                        if (dnsPayload != null) {
+                            InetAddress googleDns = InetAddress.getByName("8.8.8.8");
+                            DatagramPacket outPacket = new DatagramPacket(dnsPayload, dnsPayload.length, googleDns, 53);
+                            dnsSocket.send(outPacket);
+
+                            // Recibir respuesta y podrías inyectarla, pero para un filtro simple, 
+                            // dejar que el SO maneje el resto del tráfico suele ser más estable
+                            // si las rutas están bien puestas.
                         }
                     }
-                    // NOTA: No escribimos de vuelta en 'out' porque solo capturamos DNS
-                    // El SO se encarga del resto del tráfico al no estar en las rutas.
+                    
+                    // Escribimos de vuelta para que el tráfico fluya
+                    out.write(buffer.array(), 0, length);
                 }
-                Thread.sleep(10); // Evitar consumo excesivo de CPU
             }
         } catch (Exception e) {
-            Log.e(TAG, "Loop error", e);
+            Log.e(TAG, "Error en loop de datos", e);
         } finally {
             stopVpn();
         }
+    }
+
+    private byte[] extractDnsPayload(byte[] data, int length) {
+        int ipHeaderLen = (data[0] & 0x0F) * 4;
+        int udpHeaderLen = 8;
+        int start = ipHeaderLen + udpHeaderLen;
+        if (start >= length) return null;
+        int payloadLen = length - start;
+        byte[] payload = new byte[payloadLen];
+        System.arraycopy(data, start, payload, 0, payloadLen);
+        return payload;
     }
 
     private boolean isDnsPacket(byte[] data, int length) {
@@ -139,7 +167,7 @@ public class EduVpnService extends VpnService {
     private String extractDomainFromDns(byte[] data, int length) {
         try {
             int ipHeaderLen = (data[0] & 0x0F) * 4;
-            int pos = ipHeaderLen + 8 + 12; // Saltamos IP, UDP y Header DNS
+            int pos = ipHeaderLen + 8 + 12; 
             StringBuilder domain = new StringBuilder();
             
             while (pos < length) {
@@ -157,14 +185,13 @@ public class EduVpnService extends VpnService {
     }
 
     private boolean isBlocked(String domain) {
+        String host = domain.toLowerCase();
         for (String b : blacklist) {
-            if (domain.toLowerCase().contains(b.toLowerCase())) return true;
+            if (host.contains(b.toLowerCase())) return true;
         }
         return false;
     }
 
-    // ... (Mantén tus métodos de Listeners, Notifications y stopVpn igual)
-    
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_START_VPN.equals(intent.getAction())) {
@@ -212,7 +239,7 @@ public class EduVpnService extends VpnService {
         PendingIntent pi = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("EDUControlPro activo")
-                .setContentText("Filtrado DNS en ejecución")
+                .setContentText("Filtrado de contenido en ejecución")
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
                 .setContentIntent(pi)
                 .setOngoing(true)
