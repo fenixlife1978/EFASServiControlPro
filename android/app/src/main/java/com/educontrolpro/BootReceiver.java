@@ -21,7 +21,6 @@ public class BootReceiver extends BroadcastReceiver {
             if (deviceId != null) {
                 Log.d("EDU_Boot", "Dispositivo vinculado, iniciando servicios...");
 
-                // 1. Iniciar MonitorService (Accessibility)
                 Intent serviceIntent = new Intent(context, MonitorService.class);
                 try {
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -34,17 +33,15 @@ public class BootReceiver extends BroadcastReceiver {
                     Log.e("EDU_Boot", "Error al iniciar MonitorService: " + e.getMessage());
                 }
 
-                // 2. Iniciar EduVpnService (si está habilitado)
-                // La decisión de iniciarlo o no la tomaremos en base a un flag en Firestore,
-                // pero por ahora lo iniciamos siempre y que el propio servicio consulte.
                 Intent vpnIntent = new Intent(context, EduVpnService.class);
+                vpnIntent.setAction(EduVpnService.ACTION_START_VPN);
                 try {
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                         context.startForegroundService(vpnIntent);
                     } else {
                         context.startService(vpnIntent);
                     }
-                    Log.d("EDU_Boot", "EduVpnService iniciado correctamente");
+                    Log.d("EDU_Boot", "EduVpnService iniciado correctamente con acción START_VPN");
                 } catch (Exception e) {
                     Log.e("EDU_Boot", "Error al iniciar EduVpnService: " + e.getMessage());
                 }

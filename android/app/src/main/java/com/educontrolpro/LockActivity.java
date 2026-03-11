@@ -1,28 +1,33 @@
 package com.educontrolpro;
 
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.view.WindowManager;
-import androidx.appcompat.app.AppCompatActivity;
-import android.widget.TextView;
-import android.widget.EditText;
-import android.widget.Button;
-import android.widget.LinearLayout;
-import android.graphics.Color;
-import android.view.Gravity;
-import android.content.Intent;
-import android.content.SharedPreferences;
-import android.widget.Toast;
 import android.provider.Settings;
+import android.text.InputType;
 import android.util.Log;
-import com.google.firebase.firestore.FirebaseFirestore;
+import android.view.Gravity;
+import android.view.WindowManager;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.appcompat.app.AppCompatActivity;
+
 import com.google.firebase.firestore.FieldValue;
+import com.google.firebase.firestore.FirebaseFirestore;
+
 import java.util.HashMap;
 import java.util.Map;
 
 public class LockActivity extends AppCompatActivity {
 
+    private static final String TAG = "EDU_Lock";
     private static final String PREFS_NAME = "AdminPrefs";
     private static final String CAPACITOR_PREFS = "CapacitorStorage";
     private static final String KEY_UNLOCKED = "is_unlocked";
@@ -30,16 +35,21 @@ public class LockActivity extends AppCompatActivity {
 
     private FirebaseFirestore db = FirebaseFirestore.getInstance();
     private String deviceDocId = null;
-    
+
     private Handler autoCloseHandler = new Handler(Looper.getMainLooper());
     private Runnable autoCloseRunnable;
     private int secondsRemaining = 8;
+    private TextView tvTimer;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Bloqueo total de interacción con el sistema
+        if ((getIntent().getFlags() & Intent.FLAG_ACTIVITY_BROUGHT_TO_FRONT) != 0) {
+            finish();
+            return;
+        }
+
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
                 | WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
                 | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
@@ -49,11 +59,10 @@ public class LockActivity extends AppCompatActivity {
         SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
         deviceDocId = capPrefs.getString("deviceId", null);
 
-        // UI Dinámica
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setGravity(Gravity.CENTER);
-        layout.setBackgroundColor(Color.parseColor("#1A1A1A")); // Gris muy oscuro, más profesional
+        layout.setBackgroundColor(Color.parseColor("#1A1A1A"));
         layout.setPadding(60, 60, 60, 60);
 
         TextView tvTitle = new TextView(this);
@@ -64,8 +73,8 @@ public class LockActivity extends AppCompatActivity {
         tvTitle.setGravity(Gravity.CENTER);
         tvTitle.setPadding(0, 0, 0, 20);
 
-        TextView tvTimer = new TextView(this);
-        tvTimer.setText("Retornando en: 8s");
+        tvTimer = new TextView(this);
+        tvTimer.setText("Retornando en: " + secondsRemaining + "s");
         tvTimer.setTextColor(Color.YELLOW);
         tvTimer.setTextSize(16);
         tvTimer.setGravity(Gravity.CENTER);
@@ -84,14 +93,14 @@ public class LockActivity extends AppCompatActivity {
         inputPin.setTextColor(Color.BLACK);
         inputPin.setBackgroundColor(Color.WHITE);
         inputPin.setGravity(Gravity.CENTER);
-        inputPin.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
-        
+        inputPin.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+
         Button btnUnlock = new Button(this);
         btnUnlock.setText("DESBLOQUEAR (MODO DOCENTE)");
         btnUnlock.setPadding(0, 30, 0, 30);
         btnUnlock.setOnClickListener(v -> {
             SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-            String pinDispositivo = prefs.getString(KEY_BLOQUEO_PIN, "1234"); // Default seguro
+            String pinDispositivo = prefs.getString(KEY_BLOQUEO_PIN, "1234");
             String ingresado = inputPin.getText().toString();
 
             if (ingresado.equals(pinDispositivo)) {
@@ -111,17 +120,31 @@ public class LockActivity extends AppCompatActivity {
         layout.addView(btnUnlock);
 
         setContentView(layout);
-
-        iniciarCuentaRegresiva(tvTimer);
     }
 
-    private void iniciarCuentaRegresiva(TextView tv) {
+    @Override
+    protected void onResume() {
+        super.onResume();
+        iniciarCuentaRegresiva();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        cancelarAutoCierre();
+    }
+
+    private void iniciarCuentaRegresiva() {
+        cancelarAutoCierre();
+        secondsRemaining = 8;
+        tvTimer.setText("Retornando en: " + secondsRemaining + "s");
+
         autoCloseRunnable = new Runnable() {
             @Override
             public void run() {
                 if (secondsRemaining > 0) {
                     secondsRemaining--;
-                    tv.setText("Retornando en: " + secondsRemaining + "s");
+                    tvTimer.setText("Retornando en: " + secondsRemaining + "s");
                     autoCloseHandler.postDelayed(this, 1000);
                 } else {
                     finish();
@@ -132,7 +155,9 @@ public class LockActivity extends AppCompatActivity {
     }
 
     private void cancelarAutoCierre() {
-        if (autoCloseHandler != null) autoCloseHandler.removeCallbacksAndMessages(null);
+        if (autoCloseHandler != null && autoCloseRunnable != null) {
+            autoCloseHandler.removeCallbacks(autoCloseRunnable);
+        }
     }
 
     private void desbloquearDispositivo(SharedPreferences prefs) {
@@ -142,7 +167,8 @@ public class LockActivity extends AppCompatActivity {
             Map<String, Object> updates = new HashMap<>();
             updates.put("admin_mode_enable", true);
             updates.put("ultimoDesbloqueo", FieldValue.serverTimestamp());
-            db.collection("dispositivos").document(deviceDocId).update(updates);
+            db.collection("dispositivos").document(deviceDocId).update(updates)
+                    .addOnFailureListener(e -> Log.e(TAG, "Error al actualizar desbloqueo", e));
         }
 
         startActivity(new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
@@ -155,20 +181,16 @@ public class LockActivity extends AppCompatActivity {
         log.put("tipo", "ACCESO_FALLIDO_LOCAL");
         log.put("pin", pin);
         log.put("timestamp", FieldValue.serverTimestamp());
-        db.collection("dispositivos").document(deviceDocId).collection("incidencias").add(log);
+        db.collection("dispositivos").document(deviceDocId).collection("incidencias").add(log)
+                .addOnFailureListener(e -> Log.e(TAG, "Error al registrar intento fallido", e));
     }
 
     @Override
-    public void onBackPressed() { /* Bloqueado */ }
+    public void onBackPressed() { }
 
     @Override
-    protected void onPause() {
-        super.onPause();
-        // Si intentan usar el botón de "Recientes" para salir, la traemos de vuelta
-        if (secondsRemaining > 0) {
-            Intent intent = new Intent(this, LockActivity.class);
-            intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
-            startActivity(intent);
-        }
+    protected void onDestroy() {
+        cancelarAutoCierre();
+        super.onDestroy();
     }
 }

@@ -9,7 +9,6 @@ import android.net.Uri;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Log;
@@ -34,6 +33,7 @@ public class MainActivity extends BridgeActivity {
 
     private DevicePolicyManager dpm;
     private ComponentName adminComponent;
+    private boolean isRequestingBatteryOptimization = false;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -42,7 +42,6 @@ public class MainActivity extends BridgeActivity {
         dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
         adminComponent = new ComponentName(this, AdminReceiver.class);
 
-        // Registro de Plugins
         registerPlugin(DevicePlugin.class);
         try {
             registerPlugin(LiberarPlugin.class); 
@@ -50,14 +49,9 @@ public class MainActivity extends BridgeActivity {
             Log.e(TAG, "Error al registrar LiberarPlugin: " + e.getMessage());
         }
 
-        // --- FLUJO DE PROTECCIÓN V10.3 ---
-        // 1. Identidad Institucional y Admin
         checkSecurityPrivileges();
-
-        // 2. Verificar vinculación y lanzar verificador de permisos
         ejecutarFlujoConfiguracion();
 
-        // 3. Monitor de actualizaciones
         try {
             UpdateManager updateManager = new UpdateManager(this);
             updateManager.listenForUpdates();
@@ -66,12 +60,22 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    @Override
+    public void onResume() {   // Ahora es public para sobrescribir correctamente
+        super.onResume();
+        SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
+        String deviceId = capPrefs.getString(KEY_DEVICE_ID, null);
+        if (deviceId != null && !isRequestingBatteryOptimization) {
+            verificarYActivarTodo();
+        }
+        isRequestingBatteryOptimization = false;
+    }
+
     private void ejecutarFlujoConfiguracion() {
         SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
         String deviceId = capPrefs.getString(KEY_DEVICE_ID, null);
 
         if (deviceId != null) {
-            // Si ya está vinculado, nos aseguramos que todo esté encendido
             verificarYActivarTodo();
         } else {
             Log.d(TAG, "Esperando vinculación inicial vía QR...");
@@ -79,28 +83,24 @@ public class MainActivity extends BridgeActivity {
     }
 
     public void verificarYActivarTodo() {
-        // A. Optimización de Batería (Vital para que la VPN no muera)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
             if (!pm.isIgnoringBatteryOptimizations(getPackageName())) {
+                isRequestingBatteryOptimization = true;
                 Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
                 intent.setData(Uri.parse("package:" + getPackageName()));
                 startActivity(intent);
-                return; // Esperar a que el usuario acepte
+                return;
             }
         }
 
-        // B. Accesibilidad
         if (!isAccessibilityServiceEnabled()) {
-            Toast.makeText(this, "EDUControl: Active el Servicio de Monitoreo", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "EDUControl: Active el Servicio de Monitoreo en Accesibilidad", Toast.LENGTH_LONG).show();
             startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
             return;
         }
 
-        // C. VPN
         requestVpnPermissionAndConfigure();
-        
-        // D. Limpiar Apps de terceros
         disablePreinstalledVpnApps();
     }
 
@@ -112,7 +112,6 @@ public class MainActivity extends BridgeActivity {
     private void checkSecurityPrivileges() {
         if (dpm.isDeviceOwnerApp(getPackageName())) {
             try {
-                // Aplicar Identidad Institucional (Resuelve el ruido de notificaciones)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                     dpm.setOrganizationName(adminComponent, "EDUControlPro - Gestión Institucional");
                 }
@@ -140,14 +139,13 @@ public class MainActivity extends BridgeActivity {
 
     private void iniciarServicioVPN() {
         Intent vpnIntent = new Intent(this, EduVpnService.class);
-        vpnIntent.setAction("ACTION_START");
+        vpnIntent.setAction(EduVpnService.ACTION_START_VPN);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(vpnIntent);
         } else {
             startService(vpnIntent);
         }
         
-        // Configurar VPN Always-On
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && dpm.isAdminActive(adminComponent)) {
             try {
                 dpm.setAlwaysOnVpnPackage(adminComponent, getPackageName(), true);
@@ -158,14 +156,11 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
-    // --- MÉTODOS DE CONTROL (LIBERACIÓN Y RE-BLOQUEO) ---
-
     public void reactivarSeguridad() {
         getSharedPreferences(ADMIN_PREFS, MODE_PRIVATE).edit().putBoolean(KEY_UNLOCKED, false).apply();
         actualizarEstadoFirebase(false);
         Toast.makeText(this, "Seguridad activada", Toast.LENGTH_SHORT).show();
         
-        // Reiniciar Monitor para asegurar protección
         stopService(new Intent(this, MonitorService.class));
         startService(new Intent(this, MonitorService.class));
     }

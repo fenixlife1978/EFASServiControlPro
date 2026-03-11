@@ -12,11 +12,14 @@ import android.os.Looper;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+
 import androidx.core.app.NotificationCompat;
-import com.google.firebase.firestore.FirebaseFirestore;
-import com.google.firebase.firestore.ListenerRegistration;
+
 import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.FieldValue;
+import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.firestore.ListenerRegistration;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -27,18 +30,18 @@ public class MonitorService extends AccessibilityService {
 
     private static final String TAG = "EDU_Monitor";
     private FirebaseFirestore db = FirebaseFirestore.getInstance();
-    
+
     private String deviceDocId;
     private String InstitutoId;
     private String aulaId;
     private String seccion;
     private String nombreInstituto;
     private String alumnoAsignado = "";
-    
+
     private static final String PREFS_NAME = "AdminPrefs";
-    private static final String CAPACITOR_PREFS = "CapacitorStorage"; 
+    private static final String CAPACITOR_PREFS = "CapacitorStorage";
     private static final String KEY_UNLOCKED = "is_unlocked";
-    private static final String KEY_MASTER_PIN = "master_pin"; 
+    private static final String KEY_MASTER_PIN = "master_pin";
     private static final String KEY_DEVICE_ID = "deviceId";
     private static final String CHANNEL_ID = "EDU_Service_Channel";
 
@@ -48,45 +51,44 @@ public class MonitorService extends AccessibilityService {
     private boolean blockAllBrowsing = false;
     private boolean cortarNavegacion = false;
     private String bloqueoPin = "";
-    
-    private List<String> listaNegra = new ArrayList<>(); 
+
+    private List<String> listaNegra = new ArrayList<>();
     private List<String> whitelist = new ArrayList<>();
-    private boolean whitelistOnly = false; 
+    private boolean whitelistOnly = false;
     private boolean modoConcentracion = false;
 
-    // --- CORRECCIÓN LÓGICA DE GRACIA V10.3 ---
-    private long firstDetectionTime = 0; // Marca el inicio de los 8 segundos
-    private static final long GRACE_PERIOD = 8000; // 8 segundos de gracia
+    private long firstDetectionTime = 0;
+    private static final long GRACE_PERIOD = 8000;
     private long lastBlockTime = 0;
-    private static final long BLOCK_COOLDOWN = 10000; // No re-bloquear antes de 10s
+    private static final long BLOCK_COOLDOWN = 10000;
 
     private List<String> appsEducativas = Arrays.asList(
-        "com.microsoft.office.word", "com.microsoft.office.excel", "com.microsoft.office.powerpoint",
-        "com.google.android.apps.docs", "com.google.android.apps.classroom", "com.google.android.apps.photos",
-        "com.android.chrome", "org.mozilla.firefox", "com.google.android.gm", "com.google.android.calendar",
-        "com.google.android.apps.maps", "com.google.android.apps.drive", "com.google.android.apps.translate",
-        "org.wikipedia", "com.duolingo", "com.khanacademy.android"
+            "com.microsoft.office.word", "com.microsoft.office.excel", "com.microsoft.office.powerpoint",
+            "com.google.android.apps.docs", "com.google.android.apps.classroom", "com.google.android.apps.photos",
+            "com.android.chrome", "org.mozilla.firefox", "com.google.android.gm", "com.google.android.calendar",
+            "com.google.android.apps.maps", "com.google.android.apps.drive", "com.google.android.apps.translate",
+            "org.wikipedia", "com.duolingo", "com.khanacademy.android"
     );
 
     private List<String> appsProhibidas = Arrays.asList(
-        "com.android.vending", "com.google.android.gsf", "com.android.mms", "com.google.android.apps.messaging",
-        "tiktok", "instagram", "facebook", "youtube", "twitter", "whatsapp", "telegram", "snapchat", "discord",
-        "com.rovio.angrybirds", "com.supercell.clashofclans", "com.king.candycrushsaga", "com.mojang.minecraftpe",
-        "com.epicgames.fortnite", "com.tencent.ig", "com.dts.freefireth", "com.playrix.homescapes", "com.playrix.fishdom",
-        "com.netflix.mediaclient", "com.spotify.music", "com.amazon.avod.thirdpartyclient", "com.hulu.plus",
-        "com.disney.disneyplus", "com.crunchyroll.crunchyroid", "com.mercadopago.wallet", "com.paypal.android.p2pmobile",
-        "com.ubercab", "com.didiglobal.passenger", "com.alibaba.aliexpresshd", "com.amazon.mShop.android.shopping"
+            "com.android.vending", "com.google.android.gsf", "com.android.mms", "com.google.android.apps.messaging",
+            "tiktok", "instagram", "facebook", "youtube", "twitter", "whatsapp", "telegram", "snapchat", "discord",
+            "com.rovio.angrybirds", "com.supercell.clashofclans", "com.king.candycrushsaga", "com.mojang.minecraftpe",
+            "com.epicgames.fortnite", "com.tencent.ig", "com.dts.freefireth", "com.playrix.homescapes", "com.playrix.fishdom",
+            "com.netflix.mediaclient", "com.spotify.music", "com.amazon.avod.thirdpartyclient", "com.hulu.plus",
+            "com.disney.disneyplus", "com.crunchyroll.crunchyroid", "com.mercadopago.wallet", "com.paypal.android.p2pmobile",
+            "com.ubercab", "com.didiglobal.passenger", "com.alibaba.aliexpresshd", "com.amazon.mShop.android.shopping"
     );
 
     private List<String> listaBlancaSistema = Arrays.asList(
-        "com.android.packageinstaller", "com.google.android.packageinstaller", "com.educontrolpro",
-        "com.android.systemui", "com.google.android.googlequicksearchbox", "com.android.launcher3",
-        "com.google.android.inputmethod.latin"
+            "com.android.packageinstaller", "com.google.android.packageinstaller", "com.educontrolpro",
+            "com.android.systemui", "com.google.android.googlequicksearchbox", "com.android.launcher3",
+            "com.google.android.inputmethod.latin"
     );
 
     private static final List<String> PALABRAS_PROHIBIDAS = Arrays.asList(
-        "xxx", "porno", "pornos", "videos pornos", "juegos", "proxy", "vpn", "unblock", 
-        "bypass", "casino", "bet", "poker", "slot", "torrent", "piratebay"
+            "xxx", "porno", "pornos", "videos pornos", "juegos", "proxy", "vpn", "unblock",
+            "bypass", "casino", "bet", "poker", "slot", "torrent", "piratebay"
     );
 
     private ListenerRegistration deviceListener;
@@ -110,25 +112,25 @@ public class MonitorService extends AccessibilityService {
 
     private void cargarIdentidad() {
         SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
-        deviceDocId     = capPrefs.getString("deviceId", null);
-        InstitutoId     = capPrefs.getString("InstitutoId", null);
-        aulaId          = capPrefs.getString("aulaId", null);
-        seccion         = capPrefs.getString("seccion", null);
+        deviceDocId = capPrefs.getString("deviceId", null);
+        InstitutoId = capPrefs.getString("InstitutoId", null);
+        aulaId = capPrefs.getString("aulaId", null);
+        seccion = capPrefs.getString("seccion", null);
         nombreInstituto = capPrefs.getString("nombreInstituto", null);
 
         if (deviceDocId == null || InstitutoId == null) {
             SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
             deviceDocId = prefs.getString(KEY_DEVICE_ID, null);
         }
-        
+
         if (deviceDocId != null) {
             db.collection("dispositivos").document(deviceDocId).get()
-                .addOnSuccessListener(doc -> {
-                    if (doc.exists()) {
-                        alumnoAsignado = doc.getString("alumno_asignado");
-                        if (alumnoAsignado == null) alumnoAsignado = "";
-                    }
-                });
+                    .addOnSuccessListener(doc -> {
+                        if (doc.exists()) {
+                            alumnoAsignado = doc.getString("alumno_asignado");
+                            if (alumnoAsignado == null) alumnoAsignado = "";
+                        }
+                    });
         }
     }
 
@@ -175,7 +177,7 @@ public class MonitorService extends AccessibilityService {
             public void run() {
                 if (deviceDocId != null) {
                     db.collection("dispositivos").document(deviceDocId)
-                        .update("online", true, "ultimoAcceso", FieldValue.serverTimestamp());
+                            .update("online", true, "ultimoAcceso", FieldValue.serverTimestamp());
                 }
                 heartbeatHandler.postDelayed(this, HEARTBEAT_INTERVAL);
             }
@@ -185,33 +187,33 @@ public class MonitorService extends AccessibilityService {
 
     private void iniciarListeners(String docId, String instId) {
         deviceListener = db.collection("dispositivos").document(docId)
-            .addSnapshotListener((snapshot, e) -> {
-                if (snapshot != null && snapshot.exists()) procesarCambiosDispositivo(snapshot);
-            });
+                .addSnapshotListener((snapshot, e) -> {
+                    if (snapshot != null && snapshot.exists()) procesarCambiosDispositivo(snapshot);
+                });
 
         institutionListener = db.collection("institutions").document(instId)
-            .addSnapshotListener((snapshot, e) -> {
-                if (snapshot != null && snapshot.exists()) procesarCambiosInstitucion(snapshot);
-            });
+                .addSnapshotListener((snapshot, e) -> {
+                    if (snapshot != null && snapshot.exists()) procesarCambiosInstitucion(snapshot);
+                });
 
         if (aulaId != null) {
             aulaListener = db.collection("institutions").document(instId)
-                .collection("Aulas").document(aulaId)
-                .addSnapshotListener((snapshot, e) -> {
-                    if (snapshot != null && snapshot.exists()) {
-                        Boolean concentracion = snapshot.getBoolean("modoConcentracion");
-                        modoConcentracion = (concentracion != null && concentracion);
-                    }
-                });
+                    .collection("Aulas").document(aulaId)
+                    .addSnapshotListener((snapshot, e) -> {
+                        if (snapshot != null && snapshot.exists()) {
+                            Boolean concentracion = snapshot.getBoolean("modoConcentracion");
+                            modoConcentracion = (concentracion != null && concentracion);
+                        }
+                    });
         }
 
         securityListener = db.collection("system_config").document("security")
-            .addSnapshotListener((snapshot, e) -> {
-                if (snapshot != null && snapshot.exists()) {
-                    String pin = snapshot.getString("master_pin");
-                    if (pin != null) saveMasterPin(pin);
-                }
-            });
+                .addSnapshotListener((snapshot, e) -> {
+                    if (snapshot != null && snapshot.exists()) {
+                        String pin = snapshot.getString("master_pin");
+                        if (pin != null) saveMasterPin(pin);
+                    }
+                });
     }
 
     private void procesarCambiosDispositivo(DocumentSnapshot snapshot) {
@@ -219,20 +221,20 @@ public class MonitorService extends AccessibilityService {
         Boolean shield = snapshot.getBoolean("shieldMode");
         Boolean cortarNav = snapshot.getBoolean("cortarNavegacion");
         Boolean bloquearCmd = snapshot.getBoolean("bloquear");
-        
+
         this.shieldMode = (shield != null && shield);
         this.cortarNavegacion = (cortarNav != null && cortarNav);
-        
+
         String pinCmd = snapshot.getString("pinBloqueo");
         if (pinCmd != null && !pinCmd.isEmpty()) {
             this.bloqueoPin = pinCmd;
             saveUnlockPin(pinCmd);
         }
-        
+
         saveUnlockState(adminEnabled != null && adminEnabled);
-        
+
         if (bloquearCmd != null && bloquearCmd) {
-            dispararBloqueoConDuracion(8000); 
+            dispararBloqueoConDuracion(8000);
             db.collection("dispositivos").document(deviceDocId).update("bloquear", false);
         }
 
@@ -251,10 +253,10 @@ public class MonitorService extends AccessibilityService {
         this.useBlacklist = Boolean.TRUE.equals(snapshot.getBoolean("useBlacklist"));
         this.useWhitelist = Boolean.TRUE.equals(snapshot.getBoolean("useWhitelist"));
         this.whitelistOnly = Boolean.TRUE.equals(snapshot.getBoolean("whitelistOnly"));
-        
+
         List<String> bl = (List<String>) snapshot.get("blacklist");
         this.listaNegra = (bl != null) ? bl : new ArrayList<>();
-        
+
         List<String> wl = (List<String>) snapshot.get("whitelist");
         this.whitelist = (wl != null) ? wl : new ArrayList<>();
     }
@@ -280,7 +282,7 @@ public class MonitorService extends AccessibilityService {
         urlData.put("ultimaUrl", url);
         urlData.put("ultimaUrlTimestamp", FieldValue.serverTimestamp());
         db.collection("dispositivos").document(deviceDocId).update(urlData);
-        
+
         Map<String, Object> history = new HashMap<>();
         history.put("deviceId", deviceDocId);
         history.put("url", url);
@@ -300,7 +302,7 @@ public class MonitorService extends AccessibilityService {
         inc.put("timestamp", FieldValue.serverTimestamp());
         inc.put("resuelta", false);
         db.collection("dispositivos").document(deviceDocId).collection("incidencias").add(inc);
-        
+
         Map<String, Object> alerta = new HashMap<>(inc);
         alerta.put("deviceId", deviceDocId);
         alerta.put("InstitutoId", InstitutoId);
@@ -311,18 +313,17 @@ public class MonitorService extends AccessibilityService {
 
     private synchronized void dispararBloqueoConDuracion(int duracionMs) {
         long now = System.currentTimeMillis();
-        // Cooldown para evitar que la pantalla de bloqueo parpadee
         if (now - lastBlockTime < BLOCK_COOLDOWN) return;
 
         if (!getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(KEY_UNLOCKED, false)) {
             lastBlockTime = now;
-            firstDetectionTime = 0; // Reseteamos la gracia tras el bloqueo
+            firstDetectionTime = 0;
             Log.d(TAG, "🔒 EXPULSIÓN EJECUTADA");
-            
+
             Intent lockIntent = new Intent(this, LockActivity.class);
             lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             startActivity(lockIntent);
-            
+
             new Handler(Looper.getMainLooper()).postDelayed(() -> {
                 sendBroadcast(new Intent("ACTION_CLOSE_LOCK"));
             }, duracionMs);
@@ -335,7 +336,7 @@ public class MonitorService extends AccessibilityService {
         String packageName = (event.getPackageName() != null) ? event.getPackageName().toString() : "";
 
         if (listaBlancaSistema.contains(packageName)) {
-            firstDetectionTime = 0; // Reset si sale a app segura
+            firstDetectionTime = 0;
             return;
         }
 
@@ -344,8 +345,8 @@ public class MonitorService extends AccessibilityService {
         }
 
         if (esNavegador(packageName)) {
-            if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
-                eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                    eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
                 analizarContenido(getRootInActiveWindow());
             }
         }
@@ -375,58 +376,65 @@ public class MonitorService extends AccessibilityService {
 
     private boolean esNavegador(String pkg) {
         String p = pkg.toLowerCase();
-        return p.contains("chrome") || p.contains("browser") || p.contains("firefox") || 
-               p.contains("opera") || p.contains("edge") || p.contains("brave");
+        return p.contains("chrome") || p.contains("browser") || p.contains("firefox") ||
+                p.contains("opera") || p.contains("edge") || p.contains("brave");
     }
 
     private void analizarContenido(AccessibilityNodeInfo node) {
         if (node == null) return;
 
-        // Búsqueda de URL en barra de Chrome
-        List<AccessibilityNodeInfo> urlNodes = node.findAccessibilityNodeInfosByViewId("com.android.chrome:id/url_bar");
-        if (urlNodes != null && !urlNodes.isEmpty()) {
-            CharSequence urlText = urlNodes.get(0).getText();
-            if (urlText != null) {
-                procesarUrlEncontrada(urlText.toString());
+        try {
+            List<AccessibilityNodeInfo> urlNodes = node.findAccessibilityNodeInfosByViewId("com.android.chrome:id/url_bar");
+            if (urlNodes != null && !urlNodes.isEmpty()) {
+                AccessibilityNodeInfo urlNode = urlNodes.get(0);
+                if (urlNode != null) {
+                    CharSequence urlText = urlNode.getText();
+                    if (urlText != null) {
+                        procesarUrlEncontrada(urlText.toString());
+                    }
+                    urlNode.recycle();
+                }
             }
-        }
 
-        if (node.getText() != null) {
-            String texto = node.getText().toString().toLowerCase();
-            boolean detectedForbidden = false;
+            if (node.getText() != null) {
+                String texto = node.getText().toString().toLowerCase();
+                boolean detectedForbidden = false;
 
-            for (String palabra : PALABRAS_PROHIBIDAS) {
-                if (texto.contains(palabra)) {
-                    if (node.isEditable() || node.getClassName().toString().contains("EditText") || esNodoUrl(node)) {
-                        detectedForbidden = true;
-                        
-                        long now = System.currentTimeMillis();
-                        if (firstDetectionTime == 0) {
-                            firstDetectionTime = now;
-                            Log.d(TAG, "⚠️ Aviso: Palabra prohibida detectada. Iniciando gracia de 8s.");
-                        } else if (now - firstDetectionTime > GRACE_PERIOD) {
-                            Log.d(TAG, "🚫 BLOQUEO: Tiempo de gracia agotado para: " + palabra);
-                            reportarIncidencia("CONTENIDO_PROHIBIDO", "Palabra detectada post-gracia: " + palabra, texto);
-                            dispararBloqueoConDuracion(8000);
-                            return;
+                for (String palabra : PALABRAS_PROHIBIDAS) {
+                    if (texto.contains(palabra)) {
+                        if (node.isEditable() || node.getClassName().toString().contains("EditText") || esNodoUrl(node)) {
+                            detectedForbidden = true;
+
+                            long now = System.currentTimeMillis();
+                            if (firstDetectionTime == 0) {
+                                firstDetectionTime = now;
+                                Log.d(TAG, "⚠️ Aviso: Palabra prohibida detectada. Iniciando gracia de 8s.");
+                            } else if (now - firstDetectionTime > GRACE_PERIOD) {
+                                Log.d(TAG, "🚫 BLOQUEO: Tiempo de gracia agotado para: " + palabra);
+                                reportarIncidencia("CONTENIDO_PROHIBIDO", "Palabra detectada post-gracia: " + palabra, texto);
+                                dispararBloqueoConDuracion(8000);
+                                return;
+                            }
                         }
+                    }
+                }
+
+                if (!detectedForbidden && System.currentTimeMillis() - lastBlockTime > BLOCK_COOLDOWN) {
+                    if (texto.contains(".") && (texto.contains("http") || texto.length() > 6)) {
+                        procesarUrlEncontrada(texto);
                     }
                 }
             }
 
-            // Si no detectamos nada prohibido en este nodo, pero teníamos una alerta activa,
-            // no reseteamos aquí para evitar falsos positivos por parpadeo de nodos.
-            // El reset se hace al cambiar de App o detectar URL segura.
-
-            if (!detectedForbidden && System.currentTimeMillis() - lastBlockTime > BLOCK_COOLDOWN) {
-                if (texto.contains(".") && (texto.contains("http") || texto.length() > 6)) {
-                    procesarUrlEncontrada(texto);
+            for (int i = 0; i < node.getChildCount(); i++) {
+                AccessibilityNodeInfo child = node.getChild(i);
+                if (child != null) {
+                    analizarContenido(child);
+                    child.recycle();
                 }
             }
-        }
-
-        for (int i = 0; i < node.getChildCount(); i++) {
-            analizarContenido(node.getChild(i));
+        } catch (Exception e) {
+            Log.e(TAG, "Error analizando contenido: " + e.getMessage());
         }
     }
 
@@ -447,7 +455,8 @@ public class MonitorService extends AccessibilityService {
             boolean permitido = false;
             for (String sitio : whitelist) {
                 if (url.toLowerCase().contains(sitio.toLowerCase())) {
-                    permitido = true; break;
+                    permitido = true;
+                    break;
                 }
             }
             if (!permitido) urlBlocked = true;
@@ -456,7 +465,8 @@ public class MonitorService extends AccessibilityService {
         if (!urlBlocked && useBlacklist) {
             for (String sitio : listaNegra) {
                 if (url.toLowerCase().contains(sitio.toLowerCase())) {
-                    urlBlocked = true; break;
+                    urlBlocked = true;
+                    break;
                 }
             }
         }
@@ -471,7 +481,6 @@ public class MonitorService extends AccessibilityService {
                 dispararBloqueoConDuracion(8000);
             }
         } else {
-            // Si la URL es segura, reseteamos el tiempo de gracia de palabras prohibidas
             firstDetectionTime = 0;
             reportarUrlActual(url);
         }
@@ -489,5 +498,7 @@ public class MonitorService extends AccessibilityService {
     }
 
     @Override
-    public void onInterrupt() { }
+    public void onInterrupt() {
+        Log.d(TAG, "Servicio de accesibilidad interrumpido");
+    }
 }
