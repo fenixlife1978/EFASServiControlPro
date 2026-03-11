@@ -42,7 +42,7 @@ public class MonitorService extends AccessibilityService {
     private static final String KEY_DEVICE_ID = "deviceId";
     private static final String CHANNEL_ID = "EDU_Service_Channel";
 
-    // VARIABLES DE ESTADO Y COMANDOS
+    // VARIABLES DE ESTADO Y CONTROL DE BLOQUEO
     private boolean shieldMode = false;
     private boolean useBlacklist = false;
     private boolean useWhitelist = false;
@@ -52,9 +52,12 @@ public class MonitorService extends AccessibilityService {
     private List<String> listaNegra = new ArrayList<>();
     private List<String> whitelist = new ArrayList<>();
     private boolean whitelistOnly = false; 
-    
     private boolean modoConcentracion = false;
-    
+
+    // LÓGICA DE SENSIBILIDAD (NUEVO)
+    private long lastBlockTime = 0;
+    private static final long BLOCK_COOLDOWN = 4000; // 4 segundos para permitir corrección del alumno
+
     // Apps educativas
     private List<String> appsEducativas = Arrays.asList(
         "com.microsoft.office.word", "com.microsoft.office.excel", "com.microsoft.office.powerpoint",
@@ -270,21 +273,14 @@ public class MonitorService extends AccessibilityService {
 
     private void reportarUrlActual(String url) {
         if (deviceDocId == null || url == null || url.isEmpty() || url.equals(ultimaUrlReportada)) return;
-        
-        // Evitar reportar URLs internas o vacías
         if (url.contains("about:blank") || url.length() < 4) return;
 
         ultimaUrlReportada = url;
-        Log.d("EDU_Monitor", "🌐 REPORTE INSTANTÁNEO URL: " + url);
-        
         Map<String, Object> urlData = new HashMap<>();
         urlData.put("ultimaUrl", url);
         urlData.put("ultimaUrlTimestamp", FieldValue.serverTimestamp());
-        
-        // 1. Actualización inmediata en el dispositivo
         db.collection("dispositivos").document(deviceDocId).update(urlData);
         
-        // 2. Historial para el panel de control
         Map<String, Object> history = new HashMap<>();
         history.put("deviceId", deviceDocId);
         history.put("url", url);
@@ -292,7 +288,6 @@ public class MonitorService extends AccessibilityService {
         history.put("InstitutoId", InstitutoId);
         history.put("aulaId", aulaId);
         history.put("alumno", alumnoAsignado);
-        
         db.collection("web_history").add(history);
     }
 
@@ -304,7 +299,6 @@ public class MonitorService extends AccessibilityService {
         inc.put("url", url);
         inc.put("timestamp", FieldValue.serverTimestamp());
         inc.put("resuelta", false);
-        
         db.collection("dispositivos").document(deviceDocId).collection("incidencias").add(inc);
         
         Map<String, Object> alerta = new HashMap<>(inc);
@@ -316,7 +310,12 @@ public class MonitorService extends AccessibilityService {
     }
 
     private void dispararBloqueoConDuracion(int duracionMs) {
+        long currentTime = System.currentTimeMillis();
+        // COOLDOWN: No volver a bloquear si acabamos de hacerlo hace menos de 4 segundos
+        if (currentTime - lastBlockTime < BLOCK_COOLDOWN) return;
+
         if (!getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(KEY_UNLOCKED, false)) {
+            lastBlockTime = currentTime;
             Intent lockIntent = new Intent(this, LockActivity.class);
             lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             startActivity(lockIntent);
@@ -334,13 +333,10 @@ public class MonitorService extends AccessibilityService {
 
         if (listaBlancaSistema.contains(packageName)) return;
 
-        // ACCIÓN 1: Detectar cambios de ventana (Nuevas Apps)
         if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             procesarCambioApp(packageName);
         }
 
-        // ACCIÓN 2: Detectar URLs y contenido (Navegadores)
-        // Añadimos TYPE_WINDOW_CONTENT_CHANGED para detectar cambios de URL sin cerrar el navegador
         if (esNavegador(packageName)) {
             if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
                 eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
@@ -355,19 +351,19 @@ public class MonitorService extends AccessibilityService {
 
         if (modoConcentracion && !appsEducativas.contains(packageName) && !whitelist.contains(packageName)) {
             reportarIncidencia("MODO_CONCENTRACION", "App bloqueada: " + packageName, packageName);
-            dispararBloqueoConDuracion(5000);
+            dispararBloqueoConDuracion(3000);
             return;
         }
 
         for (String prohibida : appsProhibidas) {
             if (packageName.toLowerCase().contains(prohibida)) {
-                dispararBloqueoConDuracion(5000);
+                dispararBloqueoConDuracion(3000);
                 return;
             }
         }
 
         if (packageName.contains("settings") && !isUnlocked) {
-            dispararBloqueoConDuracion(5000);
+            dispararBloqueoConDuracion(3000);
         }
     }
 
@@ -380,8 +376,10 @@ public class MonitorService extends AccessibilityService {
     private void analizarContenido(AccessibilityNodeInfo node) {
         if (node == null) return;
 
-        // Intentar capturar la barra de direcciones directamente (Optimizado para Chrome y similares)
-        // Muchos navegadores usan un ID específico para la barra de direcciones
+        // Si estamos en periodo de gracia (cooldown), no analizamos palabras para permitir borrar
+        if (System.currentTimeMillis() - lastBlockTime < BLOCK_COOLDOWN) return;
+
+        // 1. Detección directa de URL en barra de direcciones (Chrome)
         List<AccessibilityNodeInfo> urlNodes = node.findAccessibilityNodeInfosByViewId("com.android.chrome:id/url_bar");
         if (urlNodes != null && !urlNodes.isEmpty()) {
             CharSequence urlText = urlNodes.get(0).getText();
@@ -390,21 +388,23 @@ public class MonitorService extends AccessibilityService {
             }
         }
 
-        // Barrido general de nodos de texto/edición
+        // 2. Análisis de texto en pantalla y campos de entrada
         if (node.getText() != null) {
-            String texto = node.getText().toString();
+            String texto = node.getText().toString().toLowerCase();
             
-            // Check palabras prohibidas
             for (String palabra : PALABRAS_PROHIBIDAS) {
-                if (texto.toLowerCase().contains(palabra)) {
-                    reportarIncidencia("CONTENIDO_PROHIBIDO", "Detectado: " + palabra, texto);
-                    dispararBloqueoConDuracion(5000);
-                    return;
+                if (texto.contains(palabra)) {
+                    // Solo bloqueamos si el nodo es editable (el alumno escribe) o es la URL
+                    if (node.isEditable() || node.getClassName().toString().contains("EditText") || esNodoUrl(node)) {
+                        reportarIncidencia("CONTENIDO_PROHIBIDO", "Palabra detectada: " + palabra, texto);
+                        dispararBloqueoConDuracion(3000); // Bloqueo de 3 segundos
+                        return;
+                    }
                 }
             }
 
-            // Si parece URL por patrón
-            if (texto.contains(".") && (texto.contains("http") || texto.length() > 5)) {
+            // Reporte de URL por patrón
+            if (texto.contains(".") && (texto.contains("http") || texto.length() > 6)) {
                 procesarUrlEncontrada(texto);
             }
         }
@@ -414,11 +414,17 @@ public class MonitorService extends AccessibilityService {
         }
     }
 
+    private boolean esNodoUrl(AccessibilityNodeInfo node) {
+        if (node.getViewIdResourceName() != null) {
+            String id = node.getViewIdResourceName();
+            return id.contains("url") || id.contains("location") || id.contains("address");
+        }
+        return false;
+    }
+
     private void procesarUrlEncontrada(String url) {
-        // Limpieza básica
         if (!url.contains(".") || url.contains(" ") || url.length() < 4) return;
 
-        // Lógica de Whitelist/Blacklist
         if (whitelistOnly) {
             boolean permitido = false;
             for (String sitio : whitelist) {
@@ -428,7 +434,7 @@ public class MonitorService extends AccessibilityService {
             }
             if (!permitido) {
                 reportarIncidencia("WHITELIST_ONLY", "Sitio no autorizado", url);
-                dispararBloqueoConDuracion(5000);
+                dispararBloqueoConDuracion(3000);
                 return;
             }
         }
@@ -437,7 +443,7 @@ public class MonitorService extends AccessibilityService {
             for (String sitio : listaNegra) {
                 if (url.toLowerCase().contains(sitio.toLowerCase())) {
                     reportarIncidencia("LISTA_NEGRA", "Sitio bloqueado", url);
-                    dispararBloqueoConDuracion(5000);
+                    dispararBloqueoConDuracion(3000);
                     return;
                 }
             }
@@ -451,7 +457,9 @@ public class MonitorService extends AccessibilityService {
         super.onDestroy();
         if (deviceListener != null) deviceListener.remove();
         if (institutionListener != null) institutionListener.remove();
-        if (heartbeatHandler != null) heartbeatHandler.removeCallbacks(heartbeatRunnable);
+        if (aulaListener != null) aulaListener.remove();
+        if (securityListener != null) securityListener.remove();
+        heartbeatHandler.removeCallbacks(heartbeatRunnable);
         if (deviceDocId != null) db.collection("dispositivos").document(deviceDocId).update("online", false);
     }
 
