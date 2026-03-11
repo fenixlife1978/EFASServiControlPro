@@ -1,6 +1,8 @@
 package com.educontrolpro;
 
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.WindowManager;
 import androidx.appcompat.app.AppCompatActivity;
 import android.widget.TextView;
@@ -28,11 +30,16 @@ public class LockActivity extends AppCompatActivity {
 
     private FirebaseFirestore db = FirebaseFirestore.getInstance();
     private String deviceDocId = null;
+    
+    // Temporizador para auto-cierre (8 segundos de gracia)
+    private Handler autoCloseHandler = new Handler(Looper.getMainLooper());
+    private Runnable autoCloseRunnable;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        // Configuración de ventana para mostrarse sobre el lockscreen
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
                 | WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
                 | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
@@ -41,6 +48,7 @@ public class LockActivity extends AppCompatActivity {
         SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
         deviceDocId = capPrefs.getString("deviceId", null);
 
+        // --- DISEÑO DE UI ---
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setGravity(Gravity.CENTER);
@@ -48,7 +56,7 @@ public class LockActivity extends AppCompatActivity {
         layout.setPadding(60, 60, 60, 60);
 
         TextView tvTitle = new TextView(this);
-        tvTitle.setText("SITIO BLOQUEADO");
+        tvTitle.setText("SITIO O CONTENIDO BLOQUEADO");
         tvTitle.setTextColor(Color.RED);
         tvTitle.setTextSize(24);
         tvTitle.setTypeface(null, android.graphics.Typeface.BOLD);
@@ -56,14 +64,14 @@ public class LockActivity extends AppCompatActivity {
         tvTitle.setPadding(0, 0, 0, 30);
 
         TextView tvMessage = new TextView(this);
-        tvMessage.setText("Este sitio ha sido bloqueado por políticas educativas.\n\nSi eres docente, introduce tu PIN para continuar.");
+        tvMessage.setText("Se ha detectado contenido no permitido.\nEsta pantalla se quitará en 8 segundos.\n\nDocente: Ingrese PIN para Modo Administrador.");
         tvMessage.setTextColor(Color.WHITE);
         tvMessage.setTextSize(18);
         tvMessage.setGravity(Gravity.CENTER);
         tvMessage.setPadding(0, 0, 0, 50);
 
         EditText inputPin = new EditText(this);
-        inputPin.setHint("INTRODUCE PIN DOCENTE");
+        inputPin.setHint("PIN DOCENTE");
         inputPin.setHintTextColor(Color.GRAY);
         inputPin.setTextColor(Color.BLACK);
         inputPin.setBackgroundColor(Color.WHITE);
@@ -72,19 +80,17 @@ public class LockActivity extends AppCompatActivity {
         inputPin.setPadding(20, 20, 20, 20);
 
         Button btnUnlock = new Button(this);
-        btnUnlock.setText("INGRESAR");
+        btnUnlock.setText("INGRESAR MODO ADMIN");
         btnUnlock.setOnClickListener(v -> {
             SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
             String pinDispositivo = prefs.getString(KEY_BLOQUEO_PIN, "");
             String ingresado = inputPin.getText().toString();
 
-            // Si el PIN del dispositivo está vacío (primer uso), se desbloquea sin PIN
-            if (pinDispositivo.isEmpty()) {
-                desbloquearDispositivo(prefs);
-            } else if (ingresado.equals(pinDispositivo)) {
+            if (pinDispositivo.isEmpty() || ingresado.equals(pinDispositivo)) {
+                cancelarAutoCierre(); // Detener el reloj si el PIN es correcto
                 desbloquearDispositivo(prefs);
             } else {
-                Toast.makeText(this, "PIN Incorrecto - Intento registrado", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "PIN Incorrecto", Toast.LENGTH_SHORT).show();
                 registrarIntentoFallido(ingresado);
             }
         });
@@ -94,7 +100,7 @@ public class LockActivity extends AppCompatActivity {
         btnEmergency.setBackgroundColor(Color.parseColor("#333333"));
         btnEmergency.setTextColor(Color.WHITE);
         btnEmergency.setOnClickListener(v -> {
-            Toast.makeText(this, "Comunícate con el administrador de la sede", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Comunícate con el administrador", Toast.LENGTH_LONG).show();
         });
 
         layout.addView(tvTitle);
@@ -104,6 +110,23 @@ public class LockActivity extends AppCompatActivity {
         layout.addView(btnEmergency);
 
         setContentView(layout);
+
+        // --- LÓGICA DE AUTO-CIERRE (8 SEGUNDOS) ---
+        iniciarTemporizadorGracia();
+    }
+
+    private void iniciarTemporizadorGracia() {
+        autoCloseRunnable = () -> {
+            Log.d("LockActivity", "Tiempo de gracia cumplido. Cerrando bloqueo.");
+            finish();
+        };
+        autoCloseHandler.postDelayed(autoCloseRunnable, 8000); // 8000ms = 8 segundos
+    }
+
+    private void cancelarAutoCierre() {
+        if (autoCloseHandler != null && autoCloseRunnable != null) {
+            autoCloseHandler.removeCallbacks(autoCloseRunnable);
+        }
     }
 
     private void desbloquearDispositivo(SharedPreferences prefs) {
@@ -119,8 +142,8 @@ public class LockActivity extends AppCompatActivity {
 
             db.collection("dispositivos").document(deviceDocId)
                 .update(updates)
-                .addOnSuccessListener(aVoid -> Log.d("LockActivity", "Dispositivo desbloqueado en Firestore"))
-                .addOnFailureListener(e -> Log.e("LockActivity", "Error actualizando Firestore", e));
+                .addOnSuccessListener(aVoid -> Log.d("LockActivity", "Modo Admin en Firestore"))
+                .addOnFailureListener(e -> Log.e("LockActivity", "Error Firestore", e));
         }
 
         Toast.makeText(this, "MODO ADMINISTRADOR ACTIVADO", Toast.LENGTH_SHORT).show();
@@ -143,18 +166,24 @@ public class LockActivity extends AppCompatActivity {
 
         db.collection("dispositivos").document(deviceDocId)
             .collection("intentos_fallidos")
-            .add(intento)
-            .addOnFailureListener(e -> Log.e("LockActivity", "Error registrando intento", e));
+            .add(intento);
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        cancelarAutoCierre(); // Limpieza de memoria
     }
 
     @Override
     public void onBackPressed() {
-        Toast.makeText(this, "Acción no permitida", Toast.LENGTH_SHORT).show();
+        // Bloqueado
     }
 
     @Override
     protected void onUserLeaveHint() {
         super.onUserLeaveHint();
+        // Si intentan salir con el botón Home, volvemos al frente
         Intent intent = new Intent(this, LockActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
         startActivity(intent);

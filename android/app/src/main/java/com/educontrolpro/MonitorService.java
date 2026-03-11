@@ -25,6 +25,7 @@ import java.util.Map;
 
 public class MonitorService extends AccessibilityService {
 
+    private static final String TAG = "EDU_Monitor";
     private FirebaseFirestore db = FirebaseFirestore.getInstance();
     
     // VARIABLES DE IDENTIDAD
@@ -49,14 +50,16 @@ public class MonitorService extends AccessibilityService {
     private boolean blockAllBrowsing = false;
     private boolean cortarNavegacion = false;
     private String bloqueoPin = "";
-    private List<String> listaNegra = new ArrayList<>();
+    
+    // CORRECCIÓN: Nombre unificado a listaNegra para resolver error de compilación
+    private List<String> listaNegra = new ArrayList<>(); 
     private List<String> whitelist = new ArrayList<>();
     private boolean whitelistOnly = false; 
     private boolean modoConcentracion = false;
 
-    // LÓGICA DE SENSIBILIDAD (NUEVO)
+    // LÓGICA DE SENSIBILIDAD AJUSTADA (8 SEGUNDOS)
     private long lastBlockTime = 0;
-    private static final long BLOCK_COOLDOWN = 4000; // 4 segundos para permitir corrección del alumno
+    private static final long BLOCK_COOLDOWN = 8000;
 
     // Apps educativas
     private List<String> appsEducativas = Arrays.asList(
@@ -232,7 +235,7 @@ public class MonitorService extends AccessibilityService {
         saveUnlockState(adminEnabled != null && adminEnabled);
         
         if (bloquearCmd != null && bloquearCmd) {
-            dispararBloqueoConDuracion(5000);
+            dispararBloqueoConDuracion(8000); 
             db.collection("dispositivos").document(deviceDocId).update("bloquear", false);
         }
 
@@ -310,12 +313,10 @@ public class MonitorService extends AccessibilityService {
     }
 
     private void dispararBloqueoConDuracion(int duracionMs) {
-        long currentTime = System.currentTimeMillis();
-        // COOLDOWN: No volver a bloquear si acabamos de hacerlo hace menos de 4 segundos
-        if (currentTime - lastBlockTime < BLOCK_COOLDOWN) return;
-
         if (!getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(KEY_UNLOCKED, false)) {
-            lastBlockTime = currentTime;
+            lastBlockTime = System.currentTimeMillis();
+            Log.d(TAG, "🔒 EXPULSIÓN DISPARADA");
+            
             Intent lockIntent = new Intent(this, LockActivity.class);
             lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             startActivity(lockIntent);
@@ -351,19 +352,19 @@ public class MonitorService extends AccessibilityService {
 
         if (modoConcentracion && !appsEducativas.contains(packageName) && !whitelist.contains(packageName)) {
             reportarIncidencia("MODO_CONCENTRACION", "App bloqueada: " + packageName, packageName);
-            dispararBloqueoConDuracion(3000);
+            dispararBloqueoConDuracion(8000);
             return;
         }
 
         for (String prohibida : appsProhibidas) {
             if (packageName.toLowerCase().contains(prohibida)) {
-                dispararBloqueoConDuracion(3000);
+                dispararBloqueoConDuracion(8000);
                 return;
             }
         }
 
         if (packageName.contains("settings") && !isUnlocked) {
-            dispararBloqueoConDuracion(3000);
+            dispararBloqueoConDuracion(8000);
         }
     }
 
@@ -376,10 +377,6 @@ public class MonitorService extends AccessibilityService {
     private void analizarContenido(AccessibilityNodeInfo node) {
         if (node == null) return;
 
-        // Si estamos en periodo de gracia (cooldown), no analizamos palabras para permitir borrar
-        if (System.currentTimeMillis() - lastBlockTime < BLOCK_COOLDOWN) return;
-
-        // 1. Detección directa de URL en barra de direcciones (Chrome)
         List<AccessibilityNodeInfo> urlNodes = node.findAccessibilityNodeInfosByViewId("com.android.chrome:id/url_bar");
         if (urlNodes != null && !urlNodes.isEmpty()) {
             CharSequence urlText = urlNodes.get(0).getText();
@@ -388,24 +385,24 @@ public class MonitorService extends AccessibilityService {
             }
         }
 
-        // 2. Análisis de texto en pantalla y campos de entrada
         if (node.getText() != null) {
             String texto = node.getText().toString().toLowerCase();
             
             for (String palabra : PALABRAS_PROHIBIDAS) {
                 if (texto.contains(palabra)) {
-                    // Solo bloqueamos si el nodo es editable (el alumno escribe) o es la URL
                     if (node.isEditable() || node.getClassName().toString().contains("EditText") || esNodoUrl(node)) {
+                        Log.d(TAG, "🚫 Palabra prohibida: " + palabra);
                         reportarIncidencia("CONTENIDO_PROHIBIDO", "Palabra detectada: " + palabra, texto);
-                        dispararBloqueoConDuracion(3000); // Bloqueo de 3 segundos
+                        dispararBloqueoConDuracion(8000); 
                         return;
                     }
                 }
             }
 
-            // Reporte de URL por patrón
-            if (texto.contains(".") && (texto.contains("http") || texto.length() > 6)) {
-                procesarUrlEncontrada(texto);
+            if (System.currentTimeMillis() - lastBlockTime > BLOCK_COOLDOWN) {
+                if (texto.contains(".") && (texto.contains("http") || texto.length() > 6)) {
+                    procesarUrlEncontrada(texto);
+                }
             }
         }
 
@@ -434,7 +431,7 @@ public class MonitorService extends AccessibilityService {
             }
             if (!permitido) {
                 reportarIncidencia("WHITELIST_ONLY", "Sitio no autorizado", url);
-                dispararBloqueoConDuracion(3000);
+                dispararBloqueoConDuracion(8000);
                 return;
             }
         }
@@ -443,7 +440,7 @@ public class MonitorService extends AccessibilityService {
             for (String sitio : listaNegra) {
                 if (url.toLowerCase().contains(sitio.toLowerCase())) {
                     reportarIncidencia("LISTA_NEGRA", "Sitio bloqueado", url);
-                    dispararBloqueoConDuracion(3000);
+                    dispararBloqueoConDuracion(8000);
                     return;
                 }
             }

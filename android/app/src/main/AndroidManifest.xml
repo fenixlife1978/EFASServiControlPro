@@ -1,33 +1,26 @@
 <?xml version='1.0' encoding='utf-8'?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
-    package="com.educontrolpro">
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Permisos de red y almacenamiento -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" /> 
 
-    <!-- Permisos para instalación y arranque -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     
-    <!-- Permisos de servicio en primer plano -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     
-    <!-- Permiso para VPN Service -->
     <uses-permission android:name="android.permission.BIND_VPN_SERVICE" />
     
-    <!-- Permiso para estadísticas de uso -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     
-    <!-- Permisos de cámara para escáner QR -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
-    <!-- Permiso para reordenar tareas -->
     <uses-permission android:name="android.permission.REORDER_TASKS" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:allowBackup="false"
@@ -38,7 +31,6 @@
         android:theme="@style/AppTheme"
         android:hardwareAccelerated="true">
 
-        <!-- FileProvider para actualizaciones -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.provider"
@@ -49,10 +41,8 @@
                 android:resource="@xml/file_paths" />
         </provider>
         
-        <!-- Dependencias de ML Kit para escáner QR -->
         <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="barcode" />
 
-        <!-- AdminReceiver -->
         <receiver android:name=".AdminReceiver" 
             android:permission="android.permission.BIND_DEVICE_ADMIN" 
             android:exported="true"> 
@@ -64,17 +54,15 @@
             </intent-filter> 
         </receiver>
 
-        <!-- BootReceiver -->
         <receiver android:name=".BootReceiver" 
             android:exported="true"
             android:enabled="true">
-            <intent-filter>
+            <intent-filter android:priority="999">
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
 
-        <!-- MonitorService (AccessibilityService) -->
         <service android:name=".MonitorService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:label="Servicio de Monitoreo EDUControlPro"
@@ -87,24 +75,21 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- CORREGIDO: EduVpnService (nombre correcto) -->
         <service android:name=".EduVpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"
             android:exported="true"
-            android:foregroundServiceType="specialUse">  <!-- Usamos specialUse para compatibilidad -->
+            android:foregroundServiceType="specialUse"> 
             <intent-filter>
                 <action android:name="android.net.VpnService" />
             </intent-filter>
         </service>
 
-        <!-- MainActivity -->
         <activity
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
             android:name="com.educontrolpro.MainActivity"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTop"
-            android:excludeFromRecents="false"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -112,16 +97,15 @@
             </intent-filter>
         </activity>
 
-        <!-- LockActivity -->
         <activity android:name=".LockActivity"
             android:theme="@style/Theme.AppCompat.NoActionBar"
             android:launchMode="singleInstance"
             android:stateNotNeeded="true"
             android:excludeFromRecents="true"
             android:showWhenLocked="true"
-            android:turnScreenOn="true" />
+            android:turnScreenOn="true"
+            android:noHistory="true" />
 
-        <!-- MessageActivity -->
         <activity android:name=".MessageActivity"
             android:theme="@style/Theme.AppCompat.NoActionBar"
             android:launchMode="singleInstance"
