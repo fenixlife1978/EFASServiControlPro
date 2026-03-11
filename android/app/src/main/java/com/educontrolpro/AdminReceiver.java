@@ -23,31 +23,35 @@ public class AdminReceiver extends DeviceAdminReceiver {
         ComponentName adminComponent = new ComponentName(context, AdminReceiver.class);
 
         try {
+            // --- IDENTIDAD INSTITUCIONAL (Resuelve el "ruido" de notificaciones) ---
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 dpm.setOrganizationName(adminComponent, "EDUControlPro - Gestión Institucional");
             }
 
+            // --- RESTRICCIONES DE DEVICE OWNER (Blindaje V10.3) ---
+            
+            // 1. Bloqueo de Desinstalación
             dpm.setUninstallBlocked(adminComponent, context.getPackageName(), true);
+            
+            // 2. Bloqueo de Restablecimiento y Usuarios
             dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_FACTORY_RESET);
             dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_ADD_USER);
             
+            // 3. Bloqueo de Modos de Evasión (Modo Seguro y Debug USB)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_SAFE_BOOT);
             }
             dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_DEBUGGING_FEATURES);
-            dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_CONFIG_VPN);
             
+            // 4. Control de Red y VPN (Mantiene el túnel siempre activo)
+            dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_CONFIG_VPN);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                try {
-                    dpm.setAlwaysOnVpnPackage(adminComponent, context.getPackageName(), true);
-                } catch (Exception e) {
-                    Log.e(TAG, "No se pudo establecer Always-On VPN (puede que no sea Device Owner)");
-                }
+                dpm.setAlwaysOnVpnPackage(adminComponent, context.getPackageName(), true);
             }
 
-            Log.d(TAG, "Políticas de administrador aplicadas correctamente.");
+            Log.d(TAG, "Políticas de Device Owner aplicadas correctamente.");
         } catch (SecurityException e) {
-            Log.e(TAG, "Error: Permisos insuficientes. La app debe ser administrador de dispositivo.");
+            Log.e(TAG, "Error: Permisos insuficientes. La app debe ser Device Owner.");
         } catch (Exception e) {
             Log.e(TAG, "Error en configuración: " + e.getMessage());
         }
@@ -57,13 +61,10 @@ public class AdminReceiver extends DeviceAdminReceiver {
 
     @Override
     public CharSequence onDisableRequested(Context context, Intent intent) {
-        try {
-            Intent lockIntent = new Intent(context, LockActivity.class);
-            lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-            context.startActivity(lockIntent);
-        } catch (Exception e) {
-            Log.e(TAG, "Error al mostrar pantalla de bloqueo: " + e.getMessage());
-        }
+        // Interrupción proactiva: Si intentan entrar a desactivarlo, disparamos el bloqueo
+        Intent lockIntent = new Intent(context, LockActivity.class);
+        lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        context.startActivity(lockIntent);
 
         return "ADVERTENCIA: Si desactiva la protección, el dispositivo perderá acceso a la red institucional y será reportado.";
     }
@@ -73,5 +74,6 @@ public class AdminReceiver extends DeviceAdminReceiver {
         super.onDisabled(context, intent);
         Log.w(TAG, "Admin deshabilitado");
         Toast.makeText(context, "EDUControlPro: La protección ha sido desactivada", Toast.LENGTH_SHORT).show();
+ 
     }
 }
