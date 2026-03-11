@@ -18,7 +18,7 @@ import com.google.firebase.firestore.ListenerRegistration;
 
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.io.IOException; // Importación corregida
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.HashSet;
 import java.util.List;
@@ -30,7 +30,6 @@ public class EduVpnService extends VpnService {
 
     private static final String TAG = "EDU_Vpn";
     private static final String VPN_ADDRESS = "10.0.0.2"; 
-    private static final String VPN_ROUTE = "0.0.0.0";   
     private static final int DNS_PORT = 53;
     private static final int NOTIFICATION_ID = 2;
     private static final String CHANNEL_ID = "VPN_CHANNEL";
@@ -40,7 +39,6 @@ public class EduVpnService extends VpnService {
     private ParcelFileDescriptor vpnInterface;
     private ExecutorService executorService;
     private volatile boolean isRunning = false;
-    private boolean vpnEnabledFromFirestore = false;
 
     private Set<String> blacklist = new HashSet<>();
     private FirebaseFirestore db = FirebaseFirestore.getInstance();
@@ -61,23 +59,7 @@ public class EduVpnService extends VpnService {
         if (institutoId != null) {
             listenForBlacklistUpdates(institutoId);
             listenForVpnEnabled(institutoId);
-        } else {
-            Log.e(TAG, "Error: No se encontró InstitutoId");
         }
-    }
-
-    @Override
-    public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null) {
-            String action = intent.getAction();
-            if (ACTION_STOP_VPN.equals(action)) {
-                stopVpn();
-                return START_NOT_STICKY;
-            } else if (ACTION_START_VPN.equals(action)) {
-                startVpn();
-            }
-        }
-        return START_STICKY;
     }
 
     private synchronized void startVpn() {
@@ -86,45 +68,41 @@ public class EduVpnService extends VpnService {
         try {
             Builder builder = new Builder();
             builder.setSession("EDUControlPro Protection");
-
-            builder.addAddress(VPN_ADDRESS, 24); 
-            builder.addRoute(VPN_ROUTE, 0); 
+            builder.addAddress(VPN_ADDRESS, 32); 
             
+            // --- LA CLAVE PARA QUE NO SE CORTE EL INTERNET ---
+            // Solo interceptamos las peticiones DNS (8.8.8.8)
+            // El resto del tráfico (WhatsApp, YouTube, etc.) irá por la red normal
+            builder.addRoute("8.8.8.8", 32);
+            builder.addRoute("1.1.1.1", 32);
             builder.addDnsServer("8.8.8.8");
-            builder.addDnsServer("1.1.1.1");
 
-            // Evitar que la app se filtre a sí misma
+            // Evitar conflictos con Firebase
             builder.addDisallowedApplication(getPackageName());
+            // Permitir WhatsApp fuera de la VPN para que no se corte
+            try { builder.addDisallowedApplication("com.whatsapp"); } catch (Exception ignored) {}
 
             builder.setMtu(1500);
-            builder.setBlocking(true); 
+            builder.setBlocking(false); // Cambiado a false para evitar lags
 
             vpnInterface = builder.establish();
             
-            if (vpnInterface == null) {
-                Log.e(TAG, "No se pudo establecer la interfaz VPN");
-                return;
+            if (vpnInterface != null) {
+                startForeground(NOTIFICATION_ID, getNotification());
+                isRunning = true;
+                executorService = Executors.newSingleThreadExecutor();
+                executorService.submit(this::runVpnLoop);
+                Log.d(TAG, "🛡️ VPN DNS-Filter Iniciada");
             }
 
-            startForeground(NOTIFICATION_ID, getNotification());
-
-            isRunning = true;
-            executorService = Executors.newSingleThreadExecutor();
-            executorService.submit(this::runVpnLoop);
-            
-            Log.d(TAG, "🛡️ VPN Iniciada correctamente");
-
         } catch (Exception e) {
-            Log.e(TAG, "Error crítico al iniciar VPN", e);
+            Log.e(TAG, "Error al iniciar VPN", e);
             stopVpn();
         }
     }
 
     private void runVpnLoop() {
-        // Usamos try-with-resources para asegurar el cierre de descriptores
-        try (FileInputStream in = new FileInputStream(vpnInterface.getFileDescriptor());
-             FileOutputStream out = new FileOutputStream(vpnInterface.getFileDescriptor())) {
-            
+        try (FileInputStream in = new FileInputStream(vpnInterface.getFileDescriptor())) {
             ByteBuffer buffer = ByteBuffer.allocate(32767);
 
             while (isRunning) {
@@ -135,15 +113,18 @@ public class EduVpnService extends VpnService {
                     if (isDnsPacket(buffer.array(), length)) {
                         String domain = extractDomainFromDns(buffer.array(), length);
                         if (domain != null && isBlocked(domain)) {
-                            Log.d(TAG, "🚫 Bloqueando dominio: " + domain);
+                            Log.w(TAG, "🚫 BLOQUEADO: " + domain);
+                            // Al no escribir el paquete de vuelta, la petición muere aquí.
                             continue; 
                         }
                     }
-                    out.write(buffer.array(), 0, length);
+                    // NOTA: No escribimos de vuelta en 'out' porque solo capturamos DNS
+                    // El SO se encarga del resto del tráfico al no estar en las rutas.
                 }
+                Thread.sleep(10); // Evitar consumo excesivo de CPU
             }
-        } catch (IOException e) {
-            Log.e(TAG, "Error en el flujo de datos VPN", e);
+        } catch (Exception e) {
+            Log.e(TAG, "Loop error", e);
         } finally {
             stopVpn();
         }
@@ -152,15 +133,13 @@ public class EduVpnService extends VpnService {
     private boolean isDnsPacket(byte[] data, int length) {
         if (length < 28) return false;
         int ipHeaderLen = (data[0] & 0x0F) * 4;
-        boolean isUdp = data[9] == 17;
-        int destPort = ((data[ipHeaderLen + 2] & 0xFF) << 8) | (data[ipHeaderLen + 3] & 0xFF);
-        return isUdp && destPort == DNS_PORT;
+        return data[9] == 17; // Es UDP
     }
 
     private String extractDomainFromDns(byte[] data, int length) {
         try {
             int ipHeaderLen = (data[0] & 0x0F) * 4;
-            int pos = ipHeaderLen + 8 + 12; 
+            int pos = ipHeaderLen + 8 + 12; // Saltamos IP, UDP y Header DNS
             StringBuilder domain = new StringBuilder();
             
             while (pos < length) {
@@ -178,11 +157,22 @@ public class EduVpnService extends VpnService {
     }
 
     private boolean isBlocked(String domain) {
-        String host = domain.toLowerCase();
         for (String b : blacklist) {
-            if (host.contains(b.toLowerCase())) return true;
+            if (domain.toLowerCase().contains(b.toLowerCase())) return true;
         }
         return false;
+    }
+
+    // ... (Mantén tus métodos de Listeners, Notifications y stopVpn igual)
+    
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null && ACTION_START_VPN.equals(intent.getAction())) {
+            startVpn();
+        } else if (intent != null && ACTION_STOP_VPN.equals(intent.getAction())) {
+            stopVpn();
+        }
+        return START_STICKY;
     }
 
     private void listenForBlacklistUpdates(String instId) {
@@ -203,9 +193,10 @@ public class EduVpnService extends VpnService {
             .addSnapshotListener((snapshot, error) -> {
                 if (snapshot != null && snapshot.exists()) {
                     Boolean enabled = snapshot.getBoolean("vpn_enabled");
-                    vpnEnabledFromFirestore = (enabled != null && enabled);
-                    if (vpnEnabledFromFirestore && !isRunning) startVpn();
-                    else if (!vpnEnabledFromFirestore && isRunning) stopVpn();
+                    if (enabled != null) {
+                        if (enabled && !isRunning) startVpn();
+                        else if (!enabled && isRunning) stopVpn();
+                    }
                 }
             });
     }
@@ -221,7 +212,7 @@ public class EduVpnService extends VpnService {
         PendingIntent pi = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("EDUControlPro activo")
-                .setContentText("Filtrado de contenido en ejecución")
+                .setContentText("Filtrado DNS en ejecución")
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
                 .setContentIntent(pi)
                 .setOngoing(true)
@@ -238,7 +229,6 @@ public class EduVpnService extends VpnService {
             }
         } catch (Exception ignored) {}
         stopForeground(true);
-        Log.d(TAG, "VPN Detenida");
     }
 
     @Override
