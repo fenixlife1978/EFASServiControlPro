@@ -9,7 +9,6 @@ import android.net.Uri;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Log;
@@ -19,14 +18,11 @@ import com.getcapacitor.BridgeActivity;
 import com.capacitorjs.plugins.device.DevicePlugin;
 import com.google.firebase.firestore.FirebaseFirestore;
 
-import java.util.HashMap;
-import java.util.Map;
-
 public class MainActivity extends BridgeActivity {
     private static final int DEVICE_ADMIN_REQUEST = 101;
     private static final int VPN_PREPARE_REQUEST = 102;
     private static final String TAG = "EDU_Status";
-    
+
     private static final String CAPACITOR_PREFS = "CapacitorStorage";
     private static final String ADMIN_PREFS = "AdminPrefs";
     private static final String KEY_UNLOCKED = "is_unlocked";
@@ -38,14 +34,14 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        
+
         dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
         adminComponent = new ComponentName(this, AdminReceiver.class);
 
         // Registro de Plugins
         registerPlugin(DevicePlugin.class);
         try {
-            registerPlugin(LiberarPlugin.class); 
+            registerPlugin(LiberarPlugin.class);
         } catch (Exception e) {
             Log.e(TAG, "Error al registrar LiberarPlugin: " + e.getMessage());
         }
@@ -99,13 +95,16 @@ public class MainActivity extends BridgeActivity {
 
         // C. VPN
         requestVpnPermissionAndConfigure();
-        
+
         // D. Limpiar Apps de terceros
         disablePreinstalledVpnApps();
     }
 
     private boolean isAccessibilityServiceEnabled() {
-        String pref = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        String pref = Settings.Secure.getString(
+                getContentResolver(),
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        );
         return pref != null && pref.contains(getPackageName());
     }
 
@@ -124,7 +123,10 @@ public class MainActivity extends BridgeActivity {
         } else if (!dpm.isAdminActive(adminComponent)) {
             Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
             intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent);
-            intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Protección obligatoria para EDUControlPro.");
+            intent.putExtra(
+                    DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                    "Protección obligatoria para EDUControlPro."
+            );
             startActivityForResult(intent, DEVICE_ADMIN_REQUEST);
         }
     }
@@ -140,13 +142,15 @@ public class MainActivity extends BridgeActivity {
 
     private void iniciarServicioVPN() {
         Intent vpnIntent = new Intent(this, EduVpnService.class);
-        vpnIntent.setAction("ACTION_START");
+        // Usar la acción correcta definida en el servicio
+        vpnIntent.setAction(EduVpnService.ACTION_START_VPN);
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(vpnIntent);
         } else {
             startService(vpnIntent);
         }
-        
+
         // Configurar VPN Always-On
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && dpm.isAdminActive(adminComponent)) {
             try {
@@ -161,10 +165,13 @@ public class MainActivity extends BridgeActivity {
     // --- MÉTODOS DE CONTROL (LIBERACIÓN Y RE-BLOQUEO) ---
 
     public void reactivarSeguridad() {
-        getSharedPreferences(ADMIN_PREFS, MODE_PRIVATE).edit().putBoolean(KEY_UNLOCKED, false).apply();
+        getSharedPreferences(ADMIN_PREFS, MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_UNLOCKED, false)
+                .apply();
         actualizarEstadoFirebase(false);
         Toast.makeText(this, "Seguridad activada", Toast.LENGTH_SHORT).show();
-        
+
         // Reiniciar Monitor para asegurar protección
         stopService(new Intent(this, MonitorService.class));
         startService(new Intent(this, MonitorService.class));
@@ -176,7 +183,7 @@ public class MainActivity extends BridgeActivity {
                 dpm.setUninstallBlocked(adminComponent, getPackageName(), false);
                 dpm.clearUserRestriction(adminComponent, android.os.UserManager.DISALLOW_FACTORY_RESET);
                 dpm.clearDeviceOwnerApp(getPackageName());
-                
+
                 stopService(new Intent(this, MonitorService.class));
                 stopService(new Intent(this, EduVpnService.class));
 
@@ -192,18 +199,29 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void actualizarEstadoFirebase(boolean enabled) {
-        String deviceId = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE).getString(KEY_DEVICE_ID, null);
+        String deviceId = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE)
+                .getString(KEY_DEVICE_ID, null);
         if (deviceId != null) {
-            FirebaseFirestore.getInstance().collection("dispositivos").document(deviceId)
+            FirebaseFirestore.getInstance()
+                    .collection("dispositivos")
+                    .document(deviceId)
                     .update("admin_mode_enable", enabled);
         }
     }
 
     private void disablePreinstalledVpnApps() {
         if (!dpm.isAdminActive(adminComponent)) return;
-        String[] vpnPackages = {"com.secure.vpn", "com.hotspotshield.android", "com.tunnelbear.android", "com.nordvpn.android"};
+        String[] vpnPackages = {
+                "com.secure.vpn",
+                "com.hotspotshield.android",
+                "com.tunnelbear.android",
+                "com.nordvpn.android"
+        };
         for (String pkg : vpnPackages) {
-            try { dpm.setApplicationHidden(adminComponent, pkg, true); } catch (Exception e) {}
+            try {
+                dpm.setApplicationHidden(adminComponent, pkg, true);
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -219,8 +237,11 @@ public class MainActivity extends BridgeActivity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         if (intent != null) {
-            if ("ACTION_LIBERAR_TAB".equals(intent.getAction())) liberarDispositivoTotal();
-            else if ("ACTION_REBLOQUEAR_TAB".equals(intent.getAction())) reactivarSeguridad();
+            if ("ACTION_LIBERAR_TAB".equals(intent.getAction())) {
+                liberarDispositivoTotal();
+            } else if ("ACTION_REBLOQUEAR_TAB".equals(intent.getAction())) {
+                reactivarSeguridad();
+            }
         }
     }
 }

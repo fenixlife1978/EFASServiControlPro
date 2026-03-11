@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.VpnService;
 import android.util.Log;
 
 public class BootReceiver extends BroadcastReceiver {
@@ -12,6 +13,7 @@ public class BootReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
+
         if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction()) ||
                 "android.intent.action.QUICKBOOT_POWERON".equals(intent.getAction())) {
 
@@ -21,7 +23,7 @@ public class BootReceiver extends BroadcastReceiver {
             if (deviceId != null) {
                 Log.d("EDU_Boot", "Dispositivo vinculado, iniciando servicios...");
 
-                // 1. Iniciar MonitorService (Accessibility)
+                // 1. Iniciar MonitorService (Accesibilidad)
                 Intent serviceIntent = new Intent(context, MonitorService.class);
                 try {
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -34,19 +36,23 @@ public class BootReceiver extends BroadcastReceiver {
                     Log.e("EDU_Boot", "Error al iniciar MonitorService: " + e.getMessage());
                 }
 
-                // 2. Iniciar EduVpnService (si está habilitado)
-                // La decisión de iniciarlo o no la tomaremos en base a un flag en Firestore,
-                // pero por ahora lo iniciamos siempre y que el propio servicio consulte.
-                Intent vpnIntent = new Intent(context, EduVpnService.class);
-                try {
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                        context.startForegroundService(vpnIntent);
-                    } else {
-                        context.startService(vpnIntent);
+                // 2. Iniciar EduVpnService SOLO si ya tiene permiso
+                if (VpnService.prepare(context) == null) {
+                    Intent vpnIntent = new Intent(context, EduVpnService.class);
+                    vpnIntent.setAction(EduVpnService.ACTION_START_VPN);
+
+                    try {
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                            context.startForegroundService(vpnIntent);
+                        } else {
+                            context.startService(vpnIntent);
+                        }
+                        Log.d("EDU_Boot", "EduVpnService iniciado correctamente");
+                    } catch (Exception e) {
+                        Log.e("EDU_Boot", "Error al iniciar EduVpnService: " + e.getMessage());
                     }
-                    Log.d("EDU_Boot", "EduVpnService iniciado correctamente");
-                } catch (Exception e) {
-                    Log.e("EDU_Boot", "Error al iniciar EduVpnService: " + e.getMessage());
+                } else {
+                    Log.w("EDU_Boot", "VPN no iniciada: falta permiso del usuario");
                 }
 
             } else {
