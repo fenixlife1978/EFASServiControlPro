@@ -28,7 +28,6 @@ public class MonitorService extends AccessibilityService {
     private static final String TAG = "EDU_Monitor";
     private FirebaseFirestore db = FirebaseFirestore.getInstance();
     
-    // VARIABLES DE IDENTIDAD
     private String deviceDocId;
     private String InstitutoId;
     private String aulaId;
@@ -43,7 +42,6 @@ public class MonitorService extends AccessibilityService {
     private static final String KEY_DEVICE_ID = "deviceId";
     private static final String CHANNEL_ID = "EDU_Service_Channel";
 
-    // VARIABLES DE ESTADO Y CONTROL DE BLOQUEO
     private boolean shieldMode = false;
     private boolean useBlacklist = false;
     private boolean useWhitelist = false;
@@ -51,17 +49,17 @@ public class MonitorService extends AccessibilityService {
     private boolean cortarNavegacion = false;
     private String bloqueoPin = "";
     
-    // CORRECCIÓN: Nombre unificado a listaNegra para resolver error de compilación
     private List<String> listaNegra = new ArrayList<>(); 
     private List<String> whitelist = new ArrayList<>();
     private boolean whitelistOnly = false; 
     private boolean modoConcentracion = false;
 
-    // LÓGICA DE SENSIBILIDAD AJUSTADA (8 SEGUNDOS)
+    // --- CORRECCIÓN LÓGICA DE GRACIA V10.3 ---
+    private long firstDetectionTime = 0; // Marca el inicio de los 8 segundos
+    private static final long GRACE_PERIOD = 8000; // 8 segundos de gracia
     private long lastBlockTime = 0;
-    private static final long BLOCK_COOLDOWN = 8000;
+    private static final long BLOCK_COOLDOWN = 10000; // No re-bloquear antes de 10s
 
-    // Apps educativas
     private List<String> appsEducativas = Arrays.asList(
         "com.microsoft.office.word", "com.microsoft.office.excel", "com.microsoft.office.powerpoint",
         "com.google.android.apps.docs", "com.google.android.apps.classroom", "com.google.android.apps.photos",
@@ -70,7 +68,6 @@ public class MonitorService extends AccessibilityService {
         "org.wikipedia", "com.duolingo", "com.khanacademy.android"
     );
 
-    // Apps prohibidas
     private List<String> appsProhibidas = Arrays.asList(
         "com.android.vending", "com.google.android.gsf", "com.android.mms", "com.google.android.apps.messaging",
         "tiktok", "instagram", "facebook", "youtube", "twitter", "whatsapp", "telegram", "snapchat", "discord",
@@ -145,8 +142,8 @@ public class MonitorService extends AccessibilityService {
 
     private Notification getNotification() {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("EDUControlPro Activo")
-                .setContentText("Protección activa en el Instituto")
+                .setContentTitle("EDUControlPro")
+                .setContentText("Protección de aula activa")
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true)
@@ -312,10 +309,15 @@ public class MonitorService extends AccessibilityService {
         db.collection("alertas").add(alerta);
     }
 
-    private void dispararBloqueoConDuracion(int duracionMs) {
+    private synchronized void dispararBloqueoConDuracion(int duracionMs) {
+        long now = System.currentTimeMillis();
+        // Cooldown para evitar que la pantalla de bloqueo parpadee
+        if (now - lastBlockTime < BLOCK_COOLDOWN) return;
+
         if (!getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(KEY_UNLOCKED, false)) {
-            lastBlockTime = System.currentTimeMillis();
-            Log.d(TAG, "🔒 EXPULSIÓN DISPARADA");
+            lastBlockTime = now;
+            firstDetectionTime = 0; // Reseteamos la gracia tras el bloqueo
+            Log.d(TAG, "🔒 EXPULSIÓN EJECUTADA");
             
             Intent lockIntent = new Intent(this, LockActivity.class);
             lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -332,7 +334,10 @@ public class MonitorService extends AccessibilityService {
         int eventType = event.getEventType();
         String packageName = (event.getPackageName() != null) ? event.getPackageName().toString() : "";
 
-        if (listaBlancaSistema.contains(packageName)) return;
+        if (listaBlancaSistema.contains(packageName)) {
+            firstDetectionTime = 0; // Reset si sale a app segura
+            return;
+        }
 
         if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             procesarCambioApp(packageName);
@@ -377,6 +382,7 @@ public class MonitorService extends AccessibilityService {
     private void analizarContenido(AccessibilityNodeInfo node) {
         if (node == null) return;
 
+        // Búsqueda de URL en barra de Chrome
         List<AccessibilityNodeInfo> urlNodes = node.findAccessibilityNodeInfosByViewId("com.android.chrome:id/url_bar");
         if (urlNodes != null && !urlNodes.isEmpty()) {
             CharSequence urlText = urlNodes.get(0).getText();
@@ -387,19 +393,32 @@ public class MonitorService extends AccessibilityService {
 
         if (node.getText() != null) {
             String texto = node.getText().toString().toLowerCase();
-            
+            boolean detectedForbidden = false;
+
             for (String palabra : PALABRAS_PROHIBIDAS) {
                 if (texto.contains(palabra)) {
                     if (node.isEditable() || node.getClassName().toString().contains("EditText") || esNodoUrl(node)) {
-                        Log.d(TAG, "🚫 Palabra prohibida: " + palabra);
-                        reportarIncidencia("CONTENIDO_PROHIBIDO", "Palabra detectada: " + palabra, texto);
-                        dispararBloqueoConDuracion(8000); 
-                        return;
+                        detectedForbidden = true;
+                        
+                        long now = System.currentTimeMillis();
+                        if (firstDetectionTime == 0) {
+                            firstDetectionTime = now;
+                            Log.d(TAG, "⚠️ Aviso: Palabra prohibida detectada. Iniciando gracia de 8s.");
+                        } else if (now - firstDetectionTime > GRACE_PERIOD) {
+                            Log.d(TAG, "🚫 BLOQUEO: Tiempo de gracia agotado para: " + palabra);
+                            reportarIncidencia("CONTENIDO_PROHIBIDO", "Palabra detectada post-gracia: " + palabra, texto);
+                            dispararBloqueoConDuracion(8000);
+                            return;
+                        }
                     }
                 }
             }
 
-            if (System.currentTimeMillis() - lastBlockTime > BLOCK_COOLDOWN) {
+            // Si no detectamos nada prohibido en este nodo, pero teníamos una alerta activa,
+            // no reseteamos aquí para evitar falsos positivos por parpadeo de nodos.
+            // El reset se hace al cambiar de App o detectar URL segura.
+
+            if (!detectedForbidden && System.currentTimeMillis() - lastBlockTime > BLOCK_COOLDOWN) {
                 if (texto.contains(".") && (texto.contains("http") || texto.length() > 6)) {
                     procesarUrlEncontrada(texto);
                 }
@@ -422,6 +441,8 @@ public class MonitorService extends AccessibilityService {
     private void procesarUrlEncontrada(String url) {
         if (!url.contains(".") || url.contains(" ") || url.length() < 4) return;
 
+        boolean urlBlocked = false;
+
         if (whitelistOnly) {
             boolean permitido = false;
             for (String sitio : whitelist) {
@@ -429,24 +450,31 @@ public class MonitorService extends AccessibilityService {
                     permitido = true; break;
                 }
             }
-            if (!permitido) {
-                reportarIncidencia("WHITELIST_ONLY", "Sitio no autorizado", url);
-                dispararBloqueoConDuracion(8000);
-                return;
-            }
+            if (!permitido) urlBlocked = true;
         }
 
-        if (useBlacklist) {
+        if (!urlBlocked && useBlacklist) {
             for (String sitio : listaNegra) {
                 if (url.toLowerCase().contains(sitio.toLowerCase())) {
-                    reportarIncidencia("LISTA_NEGRA", "Sitio bloqueado", url);
-                    dispararBloqueoConDuracion(8000);
-                    return;
+                    urlBlocked = true; break;
                 }
             }
         }
 
-        reportarUrlActual(url);
+        if (urlBlocked) {
+            long now = System.currentTimeMillis();
+            if (firstDetectionTime == 0) {
+                firstDetectionTime = now;
+                Log.d(TAG, "⚠️ URL Bloqueada: " + url + ". Iniciando gracia.");
+            } else if (now - firstDetectionTime > GRACE_PERIOD) {
+                reportarIncidencia("WEB_BLOCK", "URL restringida", url);
+                dispararBloqueoConDuracion(8000);
+            }
+        } else {
+            // Si la URL es segura, reseteamos el tiempo de gracia de palabras prohibidas
+            firstDetectionTime = 0;
+            reportarUrlActual(url);
+        }
     }
 
     @Override

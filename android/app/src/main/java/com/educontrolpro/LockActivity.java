@@ -31,161 +31,144 @@ public class LockActivity extends AppCompatActivity {
     private FirebaseFirestore db = FirebaseFirestore.getInstance();
     private String deviceDocId = null;
     
-    // Temporizador para auto-cierre (8 segundos de gracia)
     private Handler autoCloseHandler = new Handler(Looper.getMainLooper());
     private Runnable autoCloseRunnable;
+    private int secondsRemaining = 8;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Configuración de ventana para mostrarse sobre el lockscreen
+        // Bloqueo total de interacción con el sistema
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
                 | WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
                 | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-                | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+                | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN);
 
         SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
         deviceDocId = capPrefs.getString("deviceId", null);
 
-        // --- DISEÑO DE UI ---
+        // UI Dinámica
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setGravity(Gravity.CENTER);
-        layout.setBackgroundColor(Color.BLACK);
+        layout.setBackgroundColor(Color.parseColor("#1A1A1A")); // Gris muy oscuro, más profesional
         layout.setPadding(60, 60, 60, 60);
 
         TextView tvTitle = new TextView(this);
-        tvTitle.setText("SITIO O CONTENIDO BLOQUEADO");
-        tvTitle.setTextColor(Color.RED);
-        tvTitle.setTextSize(24);
+        tvTitle.setText("CONTENIDO RESTRINGIDO");
+        tvTitle.setTextColor(Color.parseColor("#FF4444"));
+        tvTitle.setTextSize(26);
         tvTitle.setTypeface(null, android.graphics.Typeface.BOLD);
         tvTitle.setGravity(Gravity.CENTER);
-        tvTitle.setPadding(0, 0, 0, 30);
+        tvTitle.setPadding(0, 0, 0, 20);
+
+        TextView tvTimer = new TextView(this);
+        tvTimer.setText("Retornando en: 8s");
+        tvTimer.setTextColor(Color.YELLOW);
+        tvTimer.setTextSize(16);
+        tvTimer.setGravity(Gravity.CENTER);
+        tvTimer.setPadding(0, 0, 0, 40);
 
         TextView tvMessage = new TextView(this);
-        tvMessage.setText("Se ha detectado contenido no permitido.\nEsta pantalla se quitará en 8 segundos.\n\nDocente: Ingrese PIN para Modo Administrador.");
+        tvMessage.setText("El acceso a este sitio o app no está permitido en horario escolar.");
         tvMessage.setTextColor(Color.WHITE);
-        tvMessage.setTextSize(18);
+        tvMessage.setTextSize(16);
         tvMessage.setGravity(Gravity.CENTER);
-        tvMessage.setPadding(0, 0, 0, 50);
+        tvMessage.setPadding(0, 0, 0, 60);
 
         EditText inputPin = new EditText(this);
         inputPin.setHint("PIN DOCENTE");
-        inputPin.setHintTextColor(Color.GRAY);
+        inputPin.setHintTextColor(Color.LTGRAY);
         inputPin.setTextColor(Color.BLACK);
         inputPin.setBackgroundColor(Color.WHITE);
         inputPin.setGravity(Gravity.CENTER);
         inputPin.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
-        inputPin.setPadding(20, 20, 20, 20);
-
+        
         Button btnUnlock = new Button(this);
-        btnUnlock.setText("INGRESAR MODO ADMIN");
+        btnUnlock.setText("DESBLOQUEAR (MODO DOCENTE)");
+        btnUnlock.setPadding(0, 30, 0, 30);
         btnUnlock.setOnClickListener(v -> {
             SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-            String pinDispositivo = prefs.getString(KEY_BLOQUEO_PIN, "");
+            String pinDispositivo = prefs.getString(KEY_BLOQUEO_PIN, "1234"); // Default seguro
             String ingresado = inputPin.getText().toString();
 
-            if (pinDispositivo.isEmpty() || ingresado.equals(pinDispositivo)) {
-                cancelarAutoCierre(); // Detener el reloj si el PIN es correcto
+            if (ingresado.equals(pinDispositivo)) {
+                cancelarAutoCierre();
                 desbloquearDispositivo(prefs);
             } else {
-                Toast.makeText(this, "PIN Incorrecto", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "PIN INCORRECTO", Toast.LENGTH_SHORT).show();
                 registrarIntentoFallido(ingresado);
+                inputPin.setText("");
             }
         });
 
-        Button btnEmergency = new Button(this);
-        btnEmergency.setText("CONTACTAR SOPORTE");
-        btnEmergency.setBackgroundColor(Color.parseColor("#333333"));
-        btnEmergency.setTextColor(Color.WHITE);
-        btnEmergency.setOnClickListener(v -> {
-            Toast.makeText(this, "Comunícate con el administrador", Toast.LENGTH_LONG).show();
-        });
-
         layout.addView(tvTitle);
+        layout.addView(tvTimer);
         layout.addView(tvMessage);
         layout.addView(inputPin);
         layout.addView(btnUnlock);
-        layout.addView(btnEmergency);
 
         setContentView(layout);
 
-        // --- LÓGICA DE AUTO-CIERRE (8 SEGUNDOS) ---
-        iniciarTemporizadorGracia();
+        iniciarCuentaRegresiva(tvTimer);
     }
 
-    private void iniciarTemporizadorGracia() {
-        autoCloseRunnable = () -> {
-            Log.d("LockActivity", "Tiempo de gracia cumplido. Cerrando bloqueo.");
-            finish();
+    private void iniciarCuentaRegresiva(TextView tv) {
+        autoCloseRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (secondsRemaining > 0) {
+                    secondsRemaining--;
+                    tv.setText("Retornando en: " + secondsRemaining + "s");
+                    autoCloseHandler.postDelayed(this, 1000);
+                } else {
+                    finish();
+                }
+            }
         };
-        autoCloseHandler.postDelayed(autoCloseRunnable, 8000); // 8000ms = 8 segundos
+        autoCloseHandler.postDelayed(autoCloseRunnable, 1000);
     }
 
     private void cancelarAutoCierre() {
-        if (autoCloseHandler != null && autoCloseRunnable != null) {
-            autoCloseHandler.removeCallbacks(autoCloseRunnable);
-        }
+        if (autoCloseHandler != null) autoCloseHandler.removeCallbacksAndMessages(null);
     }
 
     private void desbloquearDispositivo(SharedPreferences prefs) {
-        SharedPreferences.Editor editor = prefs.edit();
-        editor.putBoolean(KEY_UNLOCKED, true);
-        editor.apply();
+        prefs.edit().putBoolean(KEY_UNLOCKED, true).apply();
 
         if (deviceDocId != null) {
             Map<String, Object> updates = new HashMap<>();
             updates.put("admin_mode_enable", true);
-            updates.put("ultimoAcceso", FieldValue.serverTimestamp());
             updates.put("ultimoDesbloqueo", FieldValue.serverTimestamp());
-
-            db.collection("dispositivos").document(deviceDocId)
-                .update(updates)
-                .addOnSuccessListener(aVoid -> Log.d("LockActivity", "Modo Admin en Firestore"))
-                .addOnFailureListener(e -> Log.e("LockActivity", "Error Firestore", e));
+            db.collection("dispositivos").document(deviceDocId).update(updates);
         }
 
-        Toast.makeText(this, "MODO ADMINISTRADOR ACTIVADO", Toast.LENGTH_SHORT).show();
-
-        Intent intent = new Intent(Settings.ACTION_SETTINGS);
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        startActivity(intent);
-
+        startActivity(new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         finish();
     }
 
-    private void registrarIntentoFallido(String pinIngresado) {
+    private void registrarIntentoFallido(String pin) {
         if (deviceDocId == null) return;
-
-        Map<String, Object> intento = new HashMap<>();
-        intento.put("tipo", "PIN_INCORRECTO");
-        intento.put("pin_intentado", pinIngresado);
-        intento.put("timestamp", FieldValue.serverTimestamp());
-        intento.put("deviceId", deviceDocId);
-
-        db.collection("dispositivos").document(deviceDocId)
-            .collection("intentos_fallidos")
-            .add(intento);
+        Map<String, Object> log = new HashMap<>();
+        log.put("tipo", "ACCESO_FALLIDO_LOCAL");
+        log.put("pin", pin);
+        log.put("timestamp", FieldValue.serverTimestamp());
+        db.collection("dispositivos").document(deviceDocId).collection("incidencias").add(log);
     }
 
     @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        cancelarAutoCierre(); // Limpieza de memoria
-    }
+    public void onBackPressed() { /* Bloqueado */ }
 
     @Override
-    public void onBackPressed() {
-        // Bloqueado
-    }
-
-    @Override
-    protected void onUserLeaveHint() {
-        super.onUserLeaveHint();
-        // Si intentan salir con el botón Home, volvemos al frente
-        Intent intent = new Intent(this, LockActivity.class);
-        intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
-        startActivity(intent);
+    protected void onPause() {
+        super.onPause();
+        // Si intentan usar el botón de "Recientes" para salir, la traemos de vuelta
+        if (secondsRemaining > 0) {
+            Intent intent = new Intent(this, LockActivity.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+            startActivity(intent);
+        }
     }
 }

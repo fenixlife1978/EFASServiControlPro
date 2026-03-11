@@ -5,10 +5,13 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.util.Log;
 import android.widget.Toast;
 
@@ -16,126 +19,107 @@ import com.getcapacitor.BridgeActivity;
 import com.capacitorjs.plugins.device.DevicePlugin;
 import com.google.firebase.firestore.FirebaseFirestore;
 
+import java.util.HashMap;
+import java.util.Map;
+
 public class MainActivity extends BridgeActivity {
     private static final int DEVICE_ADMIN_REQUEST = 101;
     private static final int VPN_PREPARE_REQUEST = 102;
+    private static final String TAG = "EDU_Status";
+    
     private static final String CAPACITOR_PREFS = "CapacitorStorage";
     private static final String ADMIN_PREFS = "AdminPrefs";
     private static final String KEY_UNLOCKED = "is_unlocked";
     private static final String KEY_DEVICE_ID = "deviceId";
 
+    private DevicePolicyManager dpm;
+    private ComponentName adminComponent;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
+        dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
+        adminComponent = new ComponentName(this, AdminReceiver.class);
+
         // Registro de Plugins
         registerPlugin(DevicePlugin.class);
         try {
             registerPlugin(LiberarPlugin.class); 
         } catch (Exception e) {
-            Log.e("EDU_Status", "Error al registrar LiberarPlugin: " + e.getMessage());
+            Log.e(TAG, "Error al registrar LiberarPlugin: " + e.getMessage());
         }
 
-        // 1. Lógica de seguridad (Administrador de dispositivo)
+        // --- FLUJO DE PROTECCIÓN V10.3 ---
+        // 1. Identidad Institucional y Admin
         checkSecurityPrivileges();
 
-        // 2. Verificar vinculación e iniciar servicios (Monitor y VPN)
-        checkVinculacionYEstado();
+        // 2. Verificar vinculación y lanzar verificador de permisos
+        ejecutarFlujoConfiguracion();
 
-        // Monitor de actualizaciones
+        // 3. Monitor de actualizaciones
         try {
             UpdateManager updateManager = new UpdateManager(this);
             updateManager.listenForUpdates();
         } catch (Exception e) {
-            Log.e("EDU_Status", "UpdateManager no inicializado: " + e.getMessage());
+            Log.e(TAG, "UpdateManager no inicializado.");
         }
     }
 
-    // --- RE-ACTIVAR BLOQUEO DE ALUMNO ---
-    public void reactivarSeguridad() {
-        SharedPreferences prefs = getSharedPreferences(ADMIN_PREFS, MODE_PRIVATE);
-        prefs.edit().putBoolean(KEY_UNLOCKED, false).apply();
-        
+    private void ejecutarFlujoConfiguracion() {
         SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
         String deviceId = capPrefs.getString(KEY_DEVICE_ID, null);
-        
+
         if (deviceId != null) {
-            try {
-                FirebaseFirestore.getInstance().collection("dispositivos")
-                    .document(deviceId)
-                    .update("admin_mode_enable", false);
-            } catch (Exception e) {
-                Log.e("EDU_Status", "No se pudo actualizar Firebase, pero el bloqueo local es efectivo.");
-            }
-        }
-
-        Toast.makeText(this, "Seguridad activada: Ajustes bloqueados", Toast.LENGTH_LONG).show();
-        reiniciarMonitorService();
-    }
-
-    // --- FUNCIÓN PARA LIBERAR DISPOSITIVO TOTALMENTE ---
-    public void liberarDispositivoTotal() {
-        DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
-        ComponentName adminComponent = new ComponentName(this, AdminReceiver.class);
-
-        try {
-            if (dpm.isDeviceOwnerApp(getPackageName())) {
-                dpm.setUninstallBlocked(adminComponent, getPackageName(), false);
-                dpm.clearUserRestriction(adminComponent, android.os.UserManager.DISALLOW_FACTORY_RESET);
-                dpm.clearDeviceOwnerApp(getPackageName());
-                
-                stopService(new Intent(this, MonitorService.class));
-                stopService(new Intent(this, EduVpnService.class));
-
-                Log.d("EDU_Status", "¡DISPOSITIVO LIBERADO!");
-                Toast.makeText(this, "Dispositivo Liberado. Reiniciando...", Toast.LENGTH_LONG).show();
-                
-                SharedPreferences.Editor editor = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE).edit();
-                editor.clear();
-                editor.apply();
-
-                finishAffinity();
-            } else {
-                dpm.removeActiveAdmin(adminComponent);
-                Toast.makeText(this, "Admin eliminado.", Toast.LENGTH_SHORT).show();
-            }
-        } catch (Exception e) {
-            Log.e("EDU_Status", "Error al liberar: " + e.getMessage());
-        }
-    }
-
-    private void reiniciarMonitorService() {
-        stopService(new Intent(this, MonitorService.class));
-        Intent serviceIntent = new Intent(this, MonitorService.class);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent);
+            // Si ya está vinculado, nos aseguramos que todo esté encendido
+            verificarYActivarTodo();
         } else {
-            startService(serviceIntent);
+            Log.d(TAG, "Esperando vinculación inicial vía QR...");
         }
     }
 
-    @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        if (intent != null) {
-            if ("ACTION_LIBERAR_TAB".equals(intent.getAction())) {
-                liberarDispositivoTotal();
-            } else if ("ACTION_REBLOQUEAR_TAB".equals(intent.getAction())) {
-                reactivarSeguridad();
+    public void verificarYActivarTodo() {
+        // A. Optimización de Batería (Vital para que la VPN no muera)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (!pm.isIgnoringBatteryOptimizations(getPackageName())) {
+                Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                intent.setData(Uri.parse("package:" + getPackageName()));
+                startActivity(intent);
+                return; // Esperar a que el usuario acepte
             }
         }
+
+        // B. Accesibilidad
+        if (!isAccessibilityServiceEnabled()) {
+            Toast.makeText(this, "EDUControl: Active el Servicio de Monitoreo", Toast.LENGTH_LONG).show();
+            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+            return;
+        }
+
+        // C. VPN
+        requestVpnPermissionAndConfigure();
+        
+        // D. Limpiar Apps de terceros
+        disablePreinstalledVpnApps();
+    }
+
+    private boolean isAccessibilityServiceEnabled() {
+        String pref = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        return pref != null && pref.contains(getPackageName());
     }
 
     private void checkSecurityPrivileges() {
-        DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
-        ComponentName adminComponent = new ComponentName(this, AdminReceiver.class);
-
         if (dpm.isDeviceOwnerApp(getPackageName())) {
             try {
+                // Aplicar Identidad Institucional (Resuelve el ruido de notificaciones)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    dpm.setOrganizationName(adminComponent, "EDUControlPro - Gestión Institucional");
+                }
                 dpm.setUninstallBlocked(adminComponent, getPackageName(), true);
-                Log.d("EDU_Status", "Modo DEVICE OWNER activo.");
+                Log.d(TAG, "Modo DEVICE OWNER y Organización configurados.");
             } catch (Exception e) {
-                Log.e("EDU_Status", "Error en Device Owner: " + e.getMessage());
+                Log.e(TAG, "Error configurando privilegios: " + e.getMessage());
             }
         } else if (!dpm.isAdminActive(adminComponent)) {
             Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
@@ -145,115 +129,98 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
-    private void checkVinculacionYEstado() {
-        SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
-        String deviceId = capPrefs.getString(KEY_DEVICE_ID, null);
-        String institutoId = capPrefs.getString("InstitutoId", null);
-
-        if (deviceId == null || institutoId == null) {
-            Log.d("EDU_Status", "Dispositivo NO vinculado.");
-        } else {
-            Log.d("EDU_Status", "Vinculado a: " + institutoId + " con ID: " + deviceId);
-            
-            disablePreinstalledVpnApps();
-
-            // 1. Iniciar MonitorService (Accesibilidad)
-            try {
-                Intent serviceIntent = new Intent(this, MonitorService.class);
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    startForegroundService(serviceIntent);
-                } else {
-                    startService(serviceIntent);
-                }
-            } catch (Exception e) {
-                Log.e("EDU_Status", "Error al iniciar MonitorService: " + e.getMessage());
-            }
-
-            // 2. Intentar lanzar diálogo de VPN automáticamente tras 2 segundos
-            new Handler().postDelayed(this::requestVpnPermissionAndConfigure, 2000);
-        }
-    }
-
-    /**
-     * Lógica automática para solicitar permiso de VPN.
-     */
     private void requestVpnPermissionAndConfigure() {
-        Log.d("EDU_Status", "Solicitando permiso de red (VPN)...");
         Intent prepareIntent = VpnService.prepare(this);
         if (prepareIntent != null) {
-            // El usuario aún no ha concedido permiso, lanzamos el diálogo oficial de Android
             startActivityForResult(prepareIntent, VPN_PREPARE_REQUEST);
         } else {
-            // Ya tiene permiso, procedemos a activar el servicio
-            Log.d("EDU_Status", "Permiso VPN ya existente. Iniciando tunel...");
             iniciarServicioVPN();
         }
     }
 
     private void iniciarServicioVPN() {
         Intent vpnIntent = new Intent(this, EduVpnService.class);
-        vpnIntent.setAction("ACTION_START"); // Acción para que el servicio sepa que debe establecerse
+        vpnIntent.setAction("ACTION_START");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(vpnIntent);
         } else {
             startService(vpnIntent);
         }
-        configureVpnAlwaysOn();
-    }
-
-    private void configureVpnAlwaysOn() {
-        DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
-        ComponentName adminComponent = new ComponentName(this, AdminReceiver.class);
-
-        if (dpm.isDeviceOwnerApp(getPackageName()) || dpm.isAdminActive(adminComponent)) {
+        
+        // Configurar VPN Always-On
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && dpm.isAdminActive(adminComponent)) {
             try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    dpm.setAlwaysOnVpnPackage(adminComponent, getPackageName(), true);
-                    Log.d("EDU_Status", "VPN configurada como 'Siempre Activa'.");
-                }
+                dpm.setAlwaysOnVpnPackage(adminComponent, getPackageName(), true);
+                Log.d(TAG, "Always-On VPN activado.");
             } catch (Exception e) {
-                Log.e("EDU_Status", "Error en Always-On: " + e.getMessage());
+                Log.e(TAG, "Error Always-On: " + e.getMessage());
             }
         }
     }
 
+    // --- MÉTODOS DE CONTROL (LIBERACIÓN Y RE-BLOQUEO) ---
+
+    public void reactivarSeguridad() {
+        getSharedPreferences(ADMIN_PREFS, MODE_PRIVATE).edit().putBoolean(KEY_UNLOCKED, false).apply();
+        actualizarEstadoFirebase(false);
+        Toast.makeText(this, "Seguridad activada", Toast.LENGTH_SHORT).show();
+        
+        // Reiniciar Monitor para asegurar protección
+        stopService(new Intent(this, MonitorService.class));
+        startService(new Intent(this, MonitorService.class));
+    }
+
+    public void liberarDispositivoTotal() {
+        try {
+            if (dpm.isDeviceOwnerApp(getPackageName())) {
+                dpm.setUninstallBlocked(adminComponent, getPackageName(), false);
+                dpm.clearUserRestriction(adminComponent, android.os.UserManager.DISALLOW_FACTORY_RESET);
+                dpm.clearDeviceOwnerApp(getPackageName());
+                
+                stopService(new Intent(this, MonitorService.class));
+                stopService(new Intent(this, EduVpnService.class));
+
+                getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE).edit().clear().apply();
+                finishAffinity();
+            } else {
+                dpm.removeActiveAdmin(adminComponent);
+            }
+            Toast.makeText(this, "¡DISPOSITIVO LIBERADO!", Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Log.e(TAG, "Error al liberar: " + e.getMessage());
+        }
+    }
+
+    private void actualizarEstadoFirebase(boolean enabled) {
+        String deviceId = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE).getString(KEY_DEVICE_ID, null);
+        if (deviceId != null) {
+            FirebaseFirestore.getInstance().collection("dispositivos").document(deviceId)
+                    .update("admin_mode_enable", enabled);
+        }
+    }
+
     private void disablePreinstalledVpnApps() {
-        DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
-        ComponentName adminComponent = new ComponentName(this, AdminReceiver.class);
-
         if (!dpm.isAdminActive(adminComponent)) return;
-
-        String[] vpnPackages = {
-            "com.secure.vpn", "com.hotspotshield.android", "com.tunnelbear.android",
-            "org.getlantern.lantern", "com.windscribe.vpn", "com.expressvpn.vpn", "com.nordvpn.android"
-        };
-
+        String[] vpnPackages = {"com.secure.vpn", "com.hotspotshield.android", "com.tunnelbear.android", "com.nordvpn.android"};
         for (String pkg : vpnPackages) {
-            try {
-                dpm.setApplicationHidden(adminComponent, pkg, true);
-            } catch (Exception e) { /* Ignorar si no existe la app */ }
+            try { dpm.setApplicationHidden(adminComponent, pkg, true); } catch (Exception e) {}
         }
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        
-        if (requestCode == VPN_PREPARE_REQUEST) {
-            if (resultCode == RESULT_OK) {
-                Log.d("EDU_Status", "Permiso VPN concedido por el alumno.");
-                iniciarServicioVPN();
-            } else {
-                Log.e("EDU_Status", "Permiso VPN rechazado.");
-                Toast.makeText(this, "Debe aceptar el permiso de red para continuar.", Toast.LENGTH_LONG).show();
-                // Opcional: Re-intentar tras un momento
-                new Handler().postDelayed(this::requestVpnPermissionAndConfigure, 3000);
-            }
+        if (requestCode == VPN_PREPARE_REQUEST && resultCode == RESULT_OK) {
+            iniciarServicioVPN();
         }
     }
 
     @Override
-    public void onDestroy() {
-        super.onDestroy();
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (intent != null) {
+            if ("ACTION_LIBERAR_TAB".equals(intent.getAction())) liberarDispositivoTotal();
+            else if ("ACTION_REBLOQUEAR_TAB".equals(intent.getAction())) reactivarSeguridad();
+        }
     }
 }
