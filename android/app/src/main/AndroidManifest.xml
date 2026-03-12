@@ -1,25 +1,21 @@
-<?xml version='1.0' encoding='utf-8'?>
+<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.educontrolpro">
 
+    <!-- Permisos -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" /> 
-    
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    
     <uses-permission android:name="android.permission.BIND_VPN_SERVICE" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
-    
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
-
     <uses-permission android:name="android.permission.REORDER_TASKS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
@@ -44,7 +40,8 @@
         
         <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="barcode" />
 
-        <receiver android:name=".AdminReceiver" 
+        <!-- Admin Receiver -->
+        <receiver android:name="com.educontrolpro.AdminReceiver" 
             android:permission="android.permission.BIND_DEVICE_ADMIN" 
             android:exported="true"> 
             <meta-data android:name="android.app.device_admin"
@@ -55,7 +52,8 @@
             </intent-filter> 
         </receiver>
 
-        <receiver android:name=".BootReceiver" 
+        <!-- Boot Receiver -->
+        <receiver android:name="com.educontrolpro.BootReceiver" 
             android:exported="true"
             android:enabled="true">
             <intent-filter android:priority="999">
@@ -64,7 +62,8 @@
             </intent-filter>
         </receiver>
 
-        <service android:name=".MonitorService"
+        <!-- Accessibility Service -->
+        <service android:name="com.educontrolpro.MonitorService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:label="Servicio de Monitoreo EDUControlPro"
             android:exported="true"
@@ -78,9 +77,10 @@
                 android:value="Monitoreo educativo y protección de menores para cumplimiento de normativas escolares." />
         </service>
 
-        <service android:name=".EduVpnService"
+        <!-- VPN Service -->
+        <service android:name="com.educontrolpro.ParentalControlVpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"
-            android:exported="true"
+            android:exported="false"
             android:foregroundServiceType="specialUse"> 
             <intent-filter>
                 <action android:name="android.net.VpnService" />
@@ -89,6 +89,7 @@
                 android:value="Filtrado de contenido web y control parental seguro mediante túnel local." />
         </service>
 
+        <!-- Main Activity -->
         <activity
             android:name="com.educontrolpro.MainActivity"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
@@ -102,7 +103,8 @@
             </intent-filter>
         </activity>
 
-        <activity android:name=".LockActivity"
+        <!-- Lock Activity -->
+        <activity android:name="com.educontrolpro.LockActivity"
             android:theme="@style/Theme.AppCompat.NoActionBar"
             android:launchMode="singleInstance"
             android:stateNotNeeded="true"
@@ -112,7 +114,8 @@
             android:screenOrientation="portrait"
             android:noHistory="true" />
 
-        <activity android:name=".MessageActivity"
+        <!-- Message Activity -->
+        <activity android:name="com.educontrolpro.MessageActivity"
             android:theme="@style/Theme.AppCompat.NoActionBar"
             android:launchMode="singleInstance"
             android:excludeFromRecents="true"

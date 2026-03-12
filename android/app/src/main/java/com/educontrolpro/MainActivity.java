@@ -7,12 +7,15 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.net.VpnService;
+import com.educontrolpro.NotificationUtils;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Log;
 import android.widget.Toast;
+
+import androidx.core.app.NotificationManagerCompat;
 
 import com.getcapacitor.BridgeActivity;
 import com.capacitorjs.plugins.device.DevicePlugin;
@@ -34,6 +37,11 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Crear canal de notificaciones para Android 8+ (necesario para el servicio VPN foreground)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationUtils.createNotificationChannel(this);
+        }
 
         dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
         adminComponent = new ComponentName(this, AdminReceiver.class);
@@ -141,9 +149,9 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void iniciarServicioVPN() {
-        Intent vpnIntent = new Intent(this, EduVpnService.class);
-        // Usar la acción correcta definida en el servicio
-        vpnIntent.setAction(EduVpnService.ACTION_START_VPN);
+        Intent vpnIntent = new Intent(this, ParentalControlVpnService.class);
+        // Usar la acción definida en el servicio (opcional, pero si la necesitas)
+        vpnIntent.setAction(ParentalControlVpnService.ACTION_START_VPN);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(vpnIntent);
@@ -185,7 +193,7 @@ public class MainActivity extends BridgeActivity {
                 dpm.clearDeviceOwnerApp(getPackageName());
 
                 stopService(new Intent(this, MonitorService.class));
-                stopService(new Intent(this, EduVpnService.class));
+                stopService(new Intent(this, ParentalControlVpnService.class));
 
                 getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE).edit().clear().apply();
                 finishAffinity();
