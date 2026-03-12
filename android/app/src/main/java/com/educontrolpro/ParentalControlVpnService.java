@@ -26,10 +26,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class ParentalControlVpnService extends VpnService {
 
     private static final String TAG = "ParentalControlVpn";
-    private static final String VPN_ADDRESS = "172.16.0.2"; // IP virtual del dispositivo
+    private static final String VPN_ADDRESS = "172.16.0.2";
     private static final int VPN_MTU = 1500;
     private static final int DNS_PORT = 53;
-    private static final int DNS_TIMEOUT = 5000; // 5 segundos
+    private static final int DNS_TIMEOUT = 5000;
 
     public static final String ACTION_START_VPN = "com.educontrolpro.START_VPN";
 
@@ -68,8 +68,18 @@ public class ParentalControlVpnService extends VpnService {
             Builder builder = new Builder();
             builder.setSession(getString(R.string.app_name));
             builder.addAddress(VPN_ADDRESS, 32);
+            
+            // Enrutar todo el tráfico IPv4
             builder.addRoute("0.0.0.0", 0);
-            builder.addDnsServer("8.8.8.8");
+            
+            // Excluir nuestra propia app para evitar loops
+            try {
+                builder.addDisallowedApplication(getPackageName());
+                SimpleLogger.i("VPN Service - App excluida del túnel: " + getPackageName());
+            } catch (Exception e) {
+                SimpleLogger.e("Error excluyendo app: " + e.getMessage());
+            }
+            
             builder.setMtu(VPN_MTU);
 
             SimpleLogger.i("VPN Service - Builder configurado, llamando a establish()");
@@ -77,13 +87,11 @@ public class ParentalControlVpnService extends VpnService {
             
             if (vpnInterface == null) {
                 SimpleLogger.e("VPN Service - ERROR CRÍTICO: builder.establish() devolvió NULL");
-                SimpleLogger.e("VPN Service - Posibles causas: permisos no concedidos o otra VPN activa");
                 stopVpn();
                 return;
             }
             
             SimpleLogger.i("VPN Service - ÉXITO: Interfaz VPN establecida correctamente");
-            SimpleLogger.i("VPN Service - FileDescriptor: " + vpnInterface.getFileDescriptor());
 
             FileInputStream in = new FileInputStream(vpnInterface.getFileDescriptor());
             FileOutputStream out = new FileOutputStream(vpnInterface.getFileDescriptor());
@@ -91,7 +99,7 @@ public class ParentalControlVpnService extends VpnService {
             ByteBuffer packet = ByteBuffer.allocate(VPN_MTU);
             int packetCount = 0;
             
-            SimpleLogger.i("VPN Service - Entrando en bucle principal de lectura de paquetes");
+            SimpleLogger.i("VPN Service - Entrando en bucle principal de lectura");
             
             while (isRunning.get()) {
                 packet.clear();
@@ -99,45 +107,102 @@ public class ParentalControlVpnService extends VpnService {
                 if (length > 0) {
                     packetCount++;
                     packet.limit(length);
-                    if (packetCount % 100 == 0) { // Log cada 100 paquetes para no saturar
+                    
+                    // Procesar el paquete (DNS o reenviar)
+                    processPacket(packet, out);
+                    
+                    if (packetCount % 1000 == 0) {
                         SimpleLogger.i("VPN Service - Paquetes procesados: " + packetCount);
                     }
-                    processPacket(packet, out);
                 }
             }
         } catch (Exception e) {
-            SimpleLogger.e("VPN Service - Excepción en bucle principal: " + e.getMessage());
+            SimpleLogger.e("VPN Service - Excepción: " + e.getMessage());
             StringWriter sw = new StringWriter();
             e.printStackTrace(new PrintWriter(sw));
             SimpleLogger.e("VPN Service - Stacktrace: " + sw.toString());
         } finally {
-            SimpleLogger.i("VPN Service - Saliendo de startVpn(), llamando a stopVpn()");
+            SimpleLogger.i("VPN Service - Saliendo de startVpn()");
             stopVpn();
         }
     }
 
     private void processPacket(ByteBuffer packet, FileOutputStream out) {
         try {
+            // Guardar una copia del paquete original para reenviarlo si no es DNS
+            byte[] originalPacket = new byte[packet.limit()];
             packet.position(0);
-
+            packet.get(originalPacket);
+            
+            // Analizar el paquete
+            packet.position(0);
+            
             // Cabecera IP
             byte versionIhl = packet.get();
             int headerLength = (versionIhl & 0x0F) * 4;
             if (headerLength < 20) {
+                // Paquete inválido, reenviar original
+                forwardPacket(out, originalPacket);
                 return;
             }
 
             packet.position(9);
             byte protocol = packet.get();
-            if (protocol != 17) { // UDP
+            
+            // Si no es UDP, reenviar sin procesar
+            if (protocol != 17) {
+                forwardPacket(out, originalPacket);
                 return;
             }
+
+            // Verificar si es DNS (puerto 53)
+            packet.position(headerLength + 2); // Offset al puerto destino en UDP
+            int dstPort = packet.getShort() & 0xFFFF;
+            
+            if (dstPort != DNS_PORT) {
+                // No es DNS, reenviar sin procesar
+                forwardPacket(out, originalPacket);
+                return;
+            }
+
+            // Es un paquete DNS, procesarlo
+            packet.position(0); // Reiniciar para el procesamiento DNS
+            processDnsPacket(packet, out, originalPacket);
+            
+        } catch (Exception e) {
+            SimpleLogger.e("Error en processPacket: " + e.getMessage());
+            // En caso de error, intentar reenviar el paquete original
+            try {
+                forwardPacket(out, packet.array());
+            } catch (Exception ex) {
+                SimpleLogger.e("Error fatal: " + ex.getMessage());
+            }
+        }
+    }
+
+    private void forwardPacket(FileOutputStream out, byte[] packet) {
+        try {
+            synchronized (out) {
+                out.write(packet);
+                out.flush();
+            }
+        } catch (Exception e) {
+            SimpleLogger.e("Error reenviando paquete: " + e.getMessage());
+        }
+    }
+
+    private void processDnsPacket(ByteBuffer packet, FileOutputStream out, byte[] originalPacket) {
+        try {
+            packet.position(0);
+
+            // Cabecera IP
+            byte versionIhl = packet.get();
+            int headerLength = (versionIhl & 0x0F) * 4;
 
             packet.position(16);
             byte[] srcIp = new byte[4];
             packet.get(srcIp);
             byte[] dstIp = new byte[4];
-            packet.get(dstIp);
 
             // Cabecera UDP
             int udpHeaderStart = headerLength;
@@ -146,35 +211,37 @@ public class ParentalControlVpnService extends VpnService {
             int dstPort = packet.getShort() & 0xFFFF;
             int udpLength = packet.getShort() & 0xFFFF;
 
-            if (dstPort != DNS_PORT) {
-                return;
-            }
-
             // Payload DNS
             int dnsPayloadStart = udpHeaderStart + 8;
             packet.position(dnsPayloadStart);
             ByteBuffer dnsQuery = packet.slice();
             dnsQuery.limit(udpLength - 8);
 
+            // Extraer dominio
             String domain = extractDomainFromDnsQuery(dnsQuery.duplicate());
             if (domain == null) {
+                // No se pudo extraer dominio, reenviar original
+                forwardPacket(out, originalPacket);
                 return;
             }
 
             SimpleLogger.i("DNS Query: " + domain);
-            
+
             if (blacklistedDomains.contains(domain)) {
                 SimpleLogger.i("BLOQUEADO: " + domain);
                 reportBlockedDomain(domain);
+                // NO reenviar = bloqueo efectivo
                 return;
-            } else {
-                SimpleLogger.i("PERMITIDO: " + domain + " - reenviando");
             }
 
+            // Dominio permitido, reenviar consulta
+            SimpleLogger.i("PERMITIDO: " + domain);
             forwardDnsQuery(dnsQuery, dstIp, srcPort, srcIp, out);
 
         } catch (Exception e) {
-            SimpleLogger.e("Error processPacket: " + e.getMessage());
+            SimpleLogger.e("Error processDnsPacket: " + e.getMessage());
+            // En caso de error, reenviar original
+            forwardPacket(out, originalPacket);
         }
     }
 
@@ -287,15 +354,11 @@ public class ParentalControlVpnService extends VpnService {
                 return null;
             }
 
-            // Saltamos ancount, nscount, arcount
-            buffer.getShort();
-            buffer.getShort();
-            buffer.getShort();
+            buffer.getShort(); // ancount
+            buffer.getShort(); // nscount
+            buffer.getShort(); // arcount
 
-            String domain = readDomainName(buffer);
-            if (domain == null) return null;
-
-            return domain;
+            return readDomainName(buffer);
         } catch (Exception e) {
             SimpleLogger.e("Error parseando DNS: " + e.getMessage());
             return null;
@@ -310,9 +373,8 @@ public class ParentalControlVpnService extends VpnService {
 
         while (maxLoops-- > 0) {
             byte len = buffer.get();
-            if (len == 0) {
-                break;
-            }
+            if (len == 0) break;
+            
             if ((len & 0xC0) == 0xC0) {
                 int pointer = ((len & 0x3F) << 8) | (buffer.get() & 0xFF);
                 if (!jumped) {
@@ -322,26 +384,21 @@ public class ParentalControlVpnService extends VpnService {
                 buffer.position(pointer);
                 continue;
             }
-            if (buffer.remaining() < len) {
-                return null;
-            }
+            
+            if (buffer.remaining() < len) return null;
+            
             byte[] label = new byte[len];
             buffer.get(label);
-            if (domain.length() > 0) {
-                domain.append('.');
-            }
+            if (domain.length() > 0) domain.append('.');
             domain.append(new String(label));
         }
-        if (jumped) {
-            buffer.position(position);
-        }
+        
+        if (jumped) buffer.position(position);
         return domain.toString();
     }
 
     private void reportBlockedDomain(String domain) {
         SimpleLogger.i("Reportando bloqueo: " + domain);
-        // FirebaseHelper helper = new FirebaseHelper(this);
-        // helper.reportBlockAttempt(domain);
     }
 
     private void stopVpn() {
