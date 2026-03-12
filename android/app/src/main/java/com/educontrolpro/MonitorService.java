@@ -59,11 +59,10 @@ public class MonitorService extends AccessibilityService {
     private boolean modoConcentracion = false;
 
     private long firstDetectionTime = 0;
-    private static final long GRACE_PERIOD = 3000; // Reducido a 3 segundos
+    private static final long GRACE_PERIOD = 3000;
     private long lastBlockTime = 0;
-    private static final long BLOCK_COOLDOWN = 5000; // 5 segundos
+    private static final long BLOCK_COOLDOWN = 5000;
 
-    // NUEVO: Para controlar limpieza después de bloqueo
     private boolean bloqueoActivo = false;
     private String ultimaUrlProcesada = "";
     private long ultimoBloqueoTime = 0;
@@ -244,7 +243,7 @@ public class MonitorService extends AccessibilityService {
         saveUnlockState(adminEnabled != null && adminEnabled);
 
         if (bloquearCmd != null && bloquearCmd) {
-            dispararBloqueoConDuracion(0); // 0 = permanente hasta PIN
+            dispararBloqueoConDuracion(0);
             db.collection("dispositivos").document(deviceDocId).update("bloquear", false);
         }
 
@@ -343,39 +342,51 @@ public class MonitorService extends AccessibilityService {
             lastBlockTime = now;
             ultimoBloqueoTime = now;
             bloqueoActivo = true;
-            firstDetectionTime = 0; // Resetear detección
+            firstDetectionTime = 0;
 
             // Limpiar el texto del navegador después del bloqueo
             limpiarTextoNavegador();
 
             Intent lockIntent = new Intent(this, LockActivity.class);
-            lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
             
-            // Pasar la URL bloqueada para mostrarla
             if (!ultimaUrlProcesada.isEmpty()) {
                 lockIntent.putExtra("sitio_bloqueado", ultimaUrlProcesada);
             }
             
             startActivity(lockIntent);
 
-            // Si tiene duración (modo temporal), cerrar después
             if (duracionMs > 0) {
                 new Handler(Looper.getMainLooper()).postDelayed(() -> {
                     sendBroadcast(new Intent("ACTION_CLOSE_LOCK"));
                     bloqueoActivo = false;
                 }, duracionMs);
             }
-            // Si duracionMs = 0, es permanente (esperará PIN)
         }
     }
 
-    // NUEVO: Método para limpiar el texto del navegador
+    // NUEVO: Método específico para bloqueo de Configuración
+    private void dispararBloqueoConfiguracion() {
+        long now = System.currentTimeMillis();
+        if (now - lastBlockTime < BLOCK_COOLDOWN) return;
+        
+        boolean isUnlocked = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(KEY_UNLOCKED, false);
+        if (!isUnlocked) {
+            lastBlockTime = now;
+            ultimoBloqueoTime = now;
+            
+            Intent lockIntent = new Intent(this, LockActivity.class);
+            lockIntent.putExtra("tipo_bloqueo", "CONFIGURACION");
+            lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            startActivity(lockIntent);
+        }
+    }
+
     private void limpiarTextoNavegador() {
         try {
             AccessibilityNodeInfo root = getRootInActiveWindow();
             if (root == null) return;
 
-            // Buscar campo de URL en Chrome
             List<AccessibilityNodeInfo> urlNodes = root.findAccessibilityNodeInfosByViewId("com.android.chrome:id/url_bar");
             if (urlNodes != null && !urlNodes.isEmpty()) {
                 AccessibilityNodeInfo urlBar = urlNodes.get(0);
@@ -385,7 +396,6 @@ public class MonitorService extends AccessibilityService {
                 Log.d(TAG, "🧹 URL bar limpiada en Chrome");
             }
 
-            // Buscar campo de búsqueda/browser en otros navegadores
             List<String> searchViewIds = Arrays.asList(
                 "org.mozilla.firefox:id/url_bar",
                 "com.android.chrome:id/search_box_text",
@@ -403,7 +413,6 @@ public class MonitorService extends AccessibilityService {
                 }
             }
 
-            // Buscar EditTexts genéricos que puedan ser campos de búsqueda
             buscarYLimpiarEditTexts(root);
             
         } catch (Exception e) {
@@ -411,7 +420,6 @@ public class MonitorService extends AccessibilityService {
         }
     }
 
-    // NUEVO: Buscar recursivamente EditTexts y limpiarlos
     private void buscarYLimpiarEditTexts(AccessibilityNodeInfo node) {
         if (node == null) return;
 
@@ -439,7 +447,6 @@ public class MonitorService extends AccessibilityService {
             return;
         }
 
-        // Si estamos en período de cooldown después de un bloqueo, ignorar detecciones
         long now = System.currentTimeMillis();
         if (now - ultimoBloqueoTime < BLOCK_COOLDOWN) {
             return;
@@ -462,21 +469,24 @@ public class MonitorService extends AccessibilityService {
         boolean isUnlocked = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(KEY_UNLOCKED, false);
         if (isUnlocked && !shieldMode) return;
 
+        // Detectar intento de entrar a Configuración
+        if (packageName.contains("settings") || packageName.contains("com.android.settings")) {
+            Log.d(TAG, "🚫 Intento de acceso a Configuración detectado");
+            dispararBloqueoConfiguracion();
+            return;
+        }
+
         if (modoConcentracion && !appsEducativas.contains(packageName) && !whitelist.contains(packageName)) {
             reportarIncidencia("MODO_CONCENTRACION", "App bloqueada: " + packageName, packageName);
-            dispararBloqueoConDuracion(0); // Permanente
+            dispararBloqueoConDuracion(0);
             return;
         }
 
         for (String prohibida : appsProhibidas) {
             if (packageName.equalsIgnoreCase(prohibida) || packageName.toLowerCase().contains(prohibida)) {
-                dispararBloqueoConDuracion(0); // Permanente
+                dispararBloqueoConDuracion(0);
                 return;
             }
-        }
-
-        if (packageName.contains("settings") && !isUnlocked) {
-            dispararBloqueoConDuracion(0); // Permanente
         }
     }
 
@@ -508,19 +518,17 @@ public class MonitorService extends AccessibilityService {
                     } else if (now - firstDetectionTime > GRACE_PERIOD) {
                         reportarIncidencia("CONTENIDO_PROHIBIDO", "Palabra detectada: " + palabra, texto);
                         ultimaUrlProcesada = palabra;
-                        dispararBloqueoConDuracion(0); // Permanente
+                        dispararBloqueoConDuracion(0);
                         return;
                     }
                 }
             }
 
-            // Si contiene algo que parece URL
             if (texto.contains("http") || texto.contains("www.") || texto.contains(".")) {
                 procesarUrlEncontrada(texto);
             }
         }
 
-        // Recorrer hijos
         for (int i = 0; i < node.getChildCount(); i++) {
             analizarContenido(node.getChild(i));
         }
@@ -539,7 +547,6 @@ public class MonitorService extends AccessibilityService {
 
         if (!limpia.contains(".") || limpia.length() < 4) return;
 
-        // Guardar para referencia
         ultimaUrlProcesada = limpia;
 
         boolean urlBlocked = false;
@@ -580,22 +587,19 @@ public class MonitorService extends AccessibilityService {
             if (now - firstDetectionTime > GRACE_PERIOD) {
                 Log.d(TAG, "🚫 URL bloqueada tras gracia: " + limpia);
                 reportarIncidencia("WEB_BLOCK", "URL restringida", limpia);
-                dispararBloqueoConDuracion(0); // Permanente
+                dispararBloqueoConDuracion(0);
                 firstDetectionTime = 0;
             }
 
             return;
         }
 
-        // Si llegamos aquí, la URL es permitida
         firstDetectionTime = 0;
         reportarUrlActual(limpia);
     }
 
     @Override
-    public void onInterrupt() {
-        // No se requiere implementación
-    }
+    public void onInterrupt() {}
 
     @Override
     public void onDestroy() {
