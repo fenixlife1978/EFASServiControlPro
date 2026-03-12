@@ -1,8 +1,10 @@
 package com.educontrolpro;
 
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.WindowManager;
-import androidx.appcompat.app.AppCompatActivity;
+import android.view.inputmethod.EditorInfo;
 import android.widget.TextView;
 import android.widget.EditText;
 import android.widget.Button;
@@ -12,7 +14,9 @@ import android.view.Gravity;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.widget.Toast;
-import android.provider.Settings;
+
+import androidx.appcompat.app.AppCompatActivity;
+
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.FieldValue;
 import java.util.HashMap;
@@ -24,6 +28,7 @@ public class LockActivity extends AppCompatActivity {
     private static final String CAPACITOR_PREFS = "CapacitorStorage";
     private static final String KEY_UNLOCKED = "is_unlocked";
     private static final String KEY_BLOQUEO_PIN = "bloqueo_pin";
+    private static final String KEY_MASTER_PIN = "master_pin";
 
     private FirebaseFirestore db = FirebaseFirestore.getInstance();
     private String deviceDocId = null;
@@ -33,12 +38,12 @@ public class LockActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Obtener el sitio que se intentó bloquear (si viene en el intent)
+        // Obtener el sitio bloqueado
         if (getIntent() != null && getIntent().hasExtra("sitio_bloqueado")) {
             sitioBloqueado = getIntent().getStringExtra("sitio_bloqueado");
         }
 
-        // Bloqueo total de interacción con el sistema
+        // Bloqueo total - evitar que el usuario salga
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
                 | WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
                 | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
@@ -48,7 +53,7 @@ public class LockActivity extends AppCompatActivity {
         SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
         deviceDocId = capPrefs.getString("deviceId", null);
 
-        // UI Dinámica
+        // UI
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setGravity(Gravity.CENTER);
@@ -56,7 +61,7 @@ public class LockActivity extends AppCompatActivity {
         layout.setPadding(60, 60, 60, 60);
 
         TextView tvTitle = new TextView(this);
-        tvTitle.setText("🚫 CONTENIDO RESTRINGIDO 🚫");
+        tvTitle.setText("🔒 ACCESO RESTRINGIDO");
         tvTitle.setTextColor(Color.parseColor("#FF4444"));
         tvTitle.setTextSize(26);
         tvTitle.setTypeface(null, android.graphics.Typeface.BOLD);
@@ -65,9 +70,9 @@ public class LockActivity extends AppCompatActivity {
 
         TextView tvMessage = new TextView(this);
         if (!sitioBloqueado.isEmpty()) {
-            tvMessage.setText("⛔ Acceso bloqueado a:\n\n" + sitioBloqueado + "\n\nPara desbloquear, ingresa el PIN docente de 8 dígitos");
+            tvMessage.setText("⛔ Sitio bloqueado:\n\n" + sitioBloqueado + "\n\nPara desbloquear, ingresa el PIN de 8 dígitos");
         } else {
-            tvMessage.setText("⛔ Acceso no permitido en horario escolar ⛔\n\nPara desbloquear, ingresa el PIN docente de 8 dígitos");
+            tvMessage.setText("⛔ Acceso no permitido\n\nPara desbloquear, ingresa el PIN de 8 dígitos");
         }
         tvMessage.setTextColor(Color.WHITE);
         tvMessage.setTextSize(18);
@@ -75,12 +80,13 @@ public class LockActivity extends AppCompatActivity {
         tvMessage.setPadding(0, 0, 0, 60);
 
         EditText inputPin = new EditText(this);
-        inputPin.setHint("🔑 PIN DOCENTE (8 DÍGITOS)");
+        inputPin.setHint("🔑 PIN (8 DÍGITOS)");
         inputPin.setHintTextColor(Color.LTGRAY);
         inputPin.setTextColor(Color.BLACK);
         inputPin.setBackgroundColor(Color.WHITE);
         inputPin.setGravity(Gravity.CENTER);
         inputPin.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        inputPin.setMaxLines(1);
         
         Button btnUnlock = new Button(this);
         btnUnlock.setText("DESBLOQUEAR");
@@ -90,22 +96,21 @@ public class LockActivity extends AppCompatActivity {
         btnUnlock.setTextColor(Color.WHITE);
         
         btnUnlock.setOnClickListener(v -> {
-            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-            String pinDispositivo = prefs.getString(KEY_BLOQUEO_PIN, "12345678"); // Default 8 dígitos
-            String ingresado = inputPin.getText().toString();
-
-            // Verificar que el PIN tenga 8 dígitos
+            String ingresado = inputPin.getText().toString().trim();
+            
+            // Verificar longitud 8 dígitos
             if (ingresado.length() != 8) {
                 Toast.makeText(this, "❌ El PIN debe tener 8 dígitos", Toast.LENGTH_SHORT).show();
                 inputPin.setText("");
                 return;
             }
 
-            if (ingresado.equals(pinDispositivo)) {
-                desbloquearDispositivo(prefs);
-            } else if (ingresado.equals("00000000")) { // Master PIN de superadmin (8 ceros)
-                desbloquearDispositivo(prefs);
-                Toast.makeText(this, "⚠️ Master PIN usado", Toast.LENGTH_SHORT).show();
+            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            String pinDocente = prefs.getString(KEY_BLOQUEO_PIN, "12345678");
+            String masterPin = prefs.getString(KEY_MASTER_PIN, "00000000");
+
+            if (ingresado.equals(pinDocente) || ingresado.equals(masterPin)) {
+                desbloquearDispositivo();
             } else {
                 Toast.makeText(this, "❌ PIN INCORRECTO", Toast.LENGTH_SHORT).show();
                 registrarIntentoFallido(ingresado);
@@ -113,33 +118,16 @@ public class LockActivity extends AppCompatActivity {
             }
         });
 
-        // Botón para "Salir del sitio" - limpiar y volver
+        // Botón "SALIR DEL SITIO" - Limpia y cierra el bloqueo
         Button btnExit = new Button(this);
         btnExit.setText("🚪 SALIR DEL SITIO");
         btnExit.setPadding(0, 30, 0, 30);
         btnExit.setTextSize(16);
         btnExit.setBackgroundColor(Color.parseColor("#FF4444"));
         btnExit.setTextColor(Color.WHITE);
-        btnExit.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ));
         
         btnExit.setOnClickListener(v -> {
-            // Limpiar datos y volver al inicio
-            Toast.makeText(this, "Saliendo del sitio...", Toast.LENGTH_SHORT).show();
-            
-            // Limpiar caché del navegador (esto es un intento, depende del navegador)
-            try {
-                Intent intent = new Intent(Intent.ACTION_MAIN);
-                intent.addCategory(Intent.CATEGORY_HOME);
-                intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(intent);
-            } catch (Exception e) {
-                // Si no puede ir a home, solo cerrar
-            }
-            
-            // Registrar que el usuario salió voluntariamente
+            // Registrar salida voluntaria
             if (deviceDocId != null) {
                 Map<String, Object> log = new HashMap<>();
                 log.put("tipo", "SALIDA_VOLUNTARIA");
@@ -148,6 +136,7 @@ public class LockActivity extends AppCompatActivity {
                 db.collection("dispositivos").document(deviceDocId).collection("incidencias").add(log);
             }
             
+            // Cerrar bloqueo - permitir nueva búsqueda
             finish();
         });
 
@@ -156,7 +145,7 @@ public class LockActivity extends AppCompatActivity {
         layout.addView(inputPin);
         layout.addView(btnUnlock);
         
-        // Añadir separador
+        // Separador
         TextView tvSeparator = new TextView(this);
         tvSeparator.setText("──────────  O  ──────────");
         tvSeparator.setTextColor(Color.GRAY);
@@ -169,8 +158,12 @@ public class LockActivity extends AppCompatActivity {
         setContentView(layout);
     }
 
-    private void desbloquearDispositivo(SharedPreferences prefs) {
-        prefs.edit().putBoolean(KEY_UNLOCKED, true).apply();
+    private void desbloquearDispositivo() {
+        // Marcar como desbloqueado
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_UNLOCKED, true)
+                .apply();
 
         if (deviceDocId != null) {
             Map<String, Object> updates = new HashMap<>();
@@ -178,7 +171,7 @@ public class LockActivity extends AppCompatActivity {
             updates.put("ultimoDesbloqueo", FieldValue.serverTimestamp());
             db.collection("dispositivos").document(deviceDocId).update(updates);
             
-            // Registrar el desbloqueo
+            // Registrar desbloqueo
             Map<String, Object> log = new HashMap<>();
             log.put("tipo", "DESBLOQUEO_EXITOSO");
             log.put("sitio", sitioBloqueado);
@@ -188,15 +181,11 @@ public class LockActivity extends AppCompatActivity {
 
         Toast.makeText(this, "✅ Dispositivo desbloqueado", Toast.LENGTH_SHORT).show();
         
-        // Ir al sitio desbloqueado o a home
-        try {
-            Intent homeIntent = new Intent(Intent.ACTION_MAIN);
-            homeIntent.addCategory(Intent.CATEGORY_HOME);
-            homeIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(homeIntent);
-        } catch (Exception e) {
-            // Ignorar
-        }
+        // Ir a home
+        Intent homeIntent = new Intent(Intent.ACTION_MAIN);
+        homeIntent.addCategory(Intent.CATEGORY_HOME);
+        homeIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(homeIntent);
         
         finish();
     }
@@ -212,14 +201,14 @@ public class LockActivity extends AppCompatActivity {
     }
 
     @Override
-    public void onBackPressed() { 
-        // Bloqueado - no hace nada
+    public void onBackPressed() {
+        // Bloqueado - no hacer nada
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        // Si intentan minimizar la app, la traemos de vuelta
+        // Si intentan minimizar, regresar
         Intent intent = new Intent(this, LockActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
         if (!sitioBloqueado.isEmpty()) {

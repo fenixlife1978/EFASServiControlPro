@@ -27,7 +27,7 @@ public class ParentalControlVpnService extends VpnService {
     private static final String VPN_ADDRESS = "10.0.0.2";
     private static final int VPN_MTU = 1280;
     private static final int DNS_PORT = 53;
-    private static final String DNS_SERVER = "8.8.8.8"; // DNS de Google
+    private static final String FALLBACK_DNS = "8.8.8.8"; // DNS por defecto si necesitamos reenviar
 
     public static final String ACTION_START_VPN = "com.educontrolpro.START_VPN";
 
@@ -58,18 +58,15 @@ public class ParentalControlVpnService extends VpnService {
     }
 
     private void runVpn() {
-        SimpleLogger.i("VPN Service - Configurando interfaz con Filtrado DNS Selectivo");
+        SimpleLogger.i("VPN Service - Configurando interfaz");
         
         try {
             Builder builder = new Builder();
             builder.setSession("EDUControl VPN");
             builder.addAddress(VPN_ADDRESS, 32);
             
-            // CRÍTICO: Solo capturar tráfico hacia el servidor DNS específico
-            builder.addRoute(DNS_SERVER, 32);
-            
-            // Añadir servidor DNS
-            builder.addDnsServer(DNS_SERVER);
+            // CAPTURAR TODO EL TRÁFICO para poder ver TODAS las consultas DNS
+            builder.addRoute("0.0.0.0", 0);
             
             // EXCLUIR nuestra app para que pueda acceder a internet
             try {
@@ -89,9 +86,9 @@ public class ParentalControlVpnService extends VpnService {
             }
 
             SimpleLogger.i("VPN Service - Interfaz establecida correctamente");
-            SimpleLogger.i("VPN Service - Modo: Filtrado DNS Selectivo (solo 8.8.8.8)");
             
             FileInputStream in = new FileInputStream(vpnInterface.getFileDescriptor());
+            FileOutputStream out = new FileOutputStream(vpnInterface.getFileDescriptor());
             
             ByteBuffer packet = ByteBuffer.allocate(VPN_MTU);
             int packetCount = 0;
@@ -104,15 +101,12 @@ public class ParentalControlVpnService extends VpnService {
                 packet.limit(length);
                 packetCount++;
                 
-                // Procesar paquete DNS
-                processDnsPacket(packet);
+                // Procesar cada paquete
+                processPacket(packet, out);
                 
-                if (packetCount % 50 == 0) {
-                    SimpleLogger.d("VPN Service - Consultas DNS procesadas: " + packetCount);
+                if (packetCount % 1000 == 0) {
+                    SimpleLogger.d("VPN Service - Paquetes procesados: " + packetCount);
                 }
-                
-                // Pequeña pausa para no saturar CPU
-                Thread.sleep(10);
             }
             
         } catch (Exception e) {
@@ -122,7 +116,7 @@ public class ParentalControlVpnService extends VpnService {
         }
     }
 
-    private void processDnsPacket(ByteBuffer packet) {
+    private void processPacket(ByteBuffer packet, FileOutputStream out) {
         try {
             packet.position(0);
             
@@ -131,16 +125,12 @@ public class ParentalControlVpnService extends VpnService {
             int headerLen = (versionIhl & 0x0F) * 4;
             
             if (headerLen < 20) {
+                forwardPacket(out, packet);
                 return;
             }
             
             packet.position(9);
             byte protocol = packet.get();
-            
-            // Solo nos interesa UDP
-            if (protocol != 17) {
-                return;
-            }
             
             packet.position(12);
             byte[] srcIp = new byte[4];
@@ -148,137 +138,67 @@ public class ParentalControlVpnService extends VpnService {
             byte[] dstIp = new byte[4];
             packet.get(dstIp);
             
-            // Cabecera UDP
-            packet.position(headerLen);
-            int srcPort = packet.getShort() & 0xFFFF;
-            int dstPort = packet.getShort() & 0xFFFF;
-            int udpLen = packet.getShort() & 0xFFFF;
-            
-            // Verificar que es DNS (puerto 53)
-            if (dstPort != DNS_PORT) {
-                return;
+            // Verificar si es UDP (DNS siempre va por UDP, aunque existe TCP pero es raro)
+            if (protocol == 17) { // UDP
+                packet.position(headerLen + 2);
+                int dstPort = packet.getShort() & 0xFFFF;
+                
+                // Si es DNS (puerto 53) - SIN IMPORTAR LA IP DESTINO
+                if (dstPort == DNS_PORT) {
+                    // Guardar posición para restaurar después
+                    int pos = packet.position();
+                    
+                    // Obtener información UDP
+                    packet.position(headerLen);
+                    int srcPort = packet.getShort() & 0xFFFF;
+                    int udpLen = packet.getShort() & 0xFFFF;
+                    
+                    // Payload DNS
+                    packet.position(headerLen + 8);
+                    ByteBuffer dnsPayload = packet.slice();
+                    dnsPayload.limit(udpLen - 8);
+                    
+                    // Extraer dominio
+                    String domain = extractDomainFromDnsQuery(dnsPayload);
+                    if (domain != null) {
+                        SimpleLogger.i("📡 DNS Consulta: " + domain + " → servidor: " + ipToString(dstIp));
+                        
+                        if (blacklistedDomains.contains(domain)) {
+                            SimpleLogger.i("🚫 BLOQUEADO: " + domain);
+                            reportBlockedDomain(domain);
+                            // NO reenviar = bloqueo efectivo
+                            return;
+                        }
+                    }
+                    
+                    // Restaurar posición para reenviar el paquete original si no está bloqueado
+                    packet.position(pos);
+                }
             }
             
-            // Payload DNS
-            packet.position(headerLen + 8);
-            ByteBuffer dnsPayload = packet.slice();
-            dnsPayload.limit(udpLen - 8);
-            
-            // Extraer dominio
-            String domain = extractDomainFromDnsQuery(dnsPayload);
-            if (domain == null) {
-                // Si no podemos extraer dominio, permitimos
-                forwardDnsQuery(packet, srcIp, srcPort, dstIp);
-                return;
-            }
-            
-            SimpleLogger.i("📡 DNS Consulta: " + domain);
-            
-            if (blacklistedDomains.contains(domain)) {
-                SimpleLogger.i("🚫 BLOQUEADO: " + domain);
-                reportBlockedDomain(domain);
-                // NO reenviar = sitio bloqueado
-                return;
-            }
-            
-            // Dominio permitido - reenviar al DNS real
-            SimpleLogger.d("✅ PERMITIDO: " + domain);
-            forwardDnsQuery(packet, srcIp, srcPort, dstIp);
+            // Reenviar el paquete (no es DNS, DNS permitido, o no se pudo extraer dominio)
+            forwardPacket(out, packet);
             
         } catch (Exception e) {
-            SimpleLogger.e("Error processDnsPacket: " + e.getMessage());
+            SimpleLogger.e("Error processPacket: " + e.getMessage());
+            forwardPacket(out, packet);
         }
     }
 
-    private void forwardDnsQuery(ByteBuffer originalPacket, byte[] clientIp, int clientPort, byte[] dnsServerIp) {
-        executorService.submit(() -> {
-            DatagramSocket socket = null;
-            try {
-                socket = new DatagramSocket();
-                socket.setSoTimeout(5000);
-                
-                // Extraer solo el payload DNS del paquete original
-                ByteBuffer tempBuffer = originalPacket.duplicate();
-                tempBuffer.position(0);
-                
-                // Saltar cabeceras IP y UDP
-                byte versionIhl = tempBuffer.get();
-                int headerLen = (versionIhl & 0x0F) * 4;
-                tempBuffer.position(headerLen + 8);
-                
-                byte[] dnsQueryData = new byte[tempBuffer.remaining()];
-                tempBuffer.get(dnsQueryData);
-                
-                // Enviar al DNS real
-                InetAddress dnsAddress = InetAddress.getByName(DNS_SERVER);
-                DatagramPacket queryPacket = new DatagramPacket(dnsQueryData, dnsQueryData.length, dnsAddress, DNS_PORT);
-                socket.send(queryPacket);
-                
-                // Recibir respuesta
-                byte[] responseData = new byte[512];
-                DatagramPacket responsePacket = new DatagramPacket(responseData, responseData.length);
-                socket.receive(responsePacket);
-                
-                // Construir respuesta IP/UDP
-                byte[] responsePayload = new byte[responsePacket.getLength()];
-                System.arraycopy(responseData, 0, responsePayload, 0, responsePacket.getLength());
-                
-                byte[] ipResponse = buildDnsResponse(
-                    dnsAddress.getAddress(),  // IP origen (DNS real)
-                    clientIp,                  // IP destino (cliente)
-                    DNS_PORT,                  // Puerto origen (53)
-                    clientPort,                // Puerto destino (cliente)
-                    responsePayload
-                );
-                
-                // Escribir respuesta en el túnel
-                if (vpnInterface != null) {
-                    FileOutputStream out = new FileOutputStream(vpnInterface.getFileDescriptor());
-                    synchronized (out) {
-                        out.write(ipResponse);
-                        out.flush();
-                    }
-                    SimpleLogger.d("✅ Respuesta DNS enviada al cliente");
-                }
-                
-            } catch (Exception e) {
-                SimpleLogger.e("Error forward DNS: " + e.getMessage());
-            } finally {
-                if (socket != null) socket.close();
-            }
-        });
+    private String ipToString(byte[] ip) {
+        return (ip[0] & 0xFF) + "." + (ip[1] & 0xFF) + "." + 
+               (ip[2] & 0xFF) + "." + (ip[3] & 0xFF);
     }
 
-    private byte[] buildDnsResponse(byte[] srcIp, byte[] dstIp, int srcPort, int dstPort, byte[] payload) {
-        int ipHeaderLen = 20;
-        int udpHeaderLen = 8;
-        int totalLen = ipHeaderLen + udpHeaderLen + payload.length;
-        
-        ByteBuffer buffer = ByteBuffer.allocate(totalLen);
-        buffer.order(ByteOrder.BIG_ENDIAN);
-        
-        // Cabecera IP
-        buffer.put((byte) 0x45);
-        buffer.put((byte) 0x00);
-        buffer.putShort((short) totalLen);
-        buffer.putShort((short) 0);
-        buffer.putShort((short) 0x4000);
-        buffer.put((byte) 64);
-        buffer.put((byte) 17); // UDP
-        buffer.putShort((short) 0); // Checksum
-        buffer.put(srcIp);
-        buffer.put(dstIp);
-        
-        // Cabecera UDP
-        buffer.putShort((short) srcPort);
-        buffer.putShort((short) dstPort);
-        buffer.putShort((short) (udpHeaderLen + payload.length));
-        buffer.putShort((short) 0); // Checksum UDP
-        
-        // Payload
-        buffer.put(payload);
-        
-        return buffer.array();
+    private void forwardPacket(FileOutputStream out, ByteBuffer packet) {
+        try {
+            synchronized (out) {
+                out.write(packet.array(), 0, packet.limit());
+                out.flush();
+            }
+        } catch (IOException e) {
+            SimpleLogger.e("Error forwardPacket: " + e.getMessage());
+        }
     }
 
     private String extractDomainFromDnsQuery(ByteBuffer buffer) {
@@ -379,7 +299,7 @@ public class ParentalControlVpnService extends VpnService {
         
         return new NotificationCompat.Builder(this, NotificationUtils.CHANNEL_ID)
                 .setContentTitle("EDUControl VPN")
-                .setContentText("Filtrado DNS activo - Internet fluido")
+                .setContentText("Filtrado DNS activo - Todos los servidores")
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
