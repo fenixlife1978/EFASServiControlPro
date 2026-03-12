@@ -9,7 +9,6 @@ import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 
@@ -58,9 +57,14 @@ public class MonitorService extends AccessibilityService {
     private boolean modoConcentracion = false;
 
     private long firstDetectionTime = 0;
-    private static final long GRACE_PERIOD = 8000;
+    private static final long GRACE_PERIOD = 3000; // Reducido a 3 segundos
     private long lastBlockTime = 0;
-    private static final long BLOCK_COOLDOWN = 10000;
+    private static final long BLOCK_COOLDOWN = 5000; // 5 segundos
+
+    // NUEVO: Para controlar limpieza después de bloqueo
+    private boolean bloqueoActivo = false;
+    private String ultimaUrlProcesada = "";
+    private long ultimoBloqueoTime = 0;
 
     private List<String> appsEducativas = Arrays.asList(
             "com.microsoft.office.word", "com.microsoft.office.excel", "com.microsoft.office.powerpoint",
@@ -238,7 +242,7 @@ public class MonitorService extends AccessibilityService {
         saveUnlockState(adminEnabled != null && adminEnabled);
 
         if (bloquearCmd != null && bloquearCmd) {
-            dispararBloqueoConDuracion(8000);
+            dispararBloqueoConDuracion(0); // 0 = permanente hasta PIN
             db.collection("dispositivos").document(deviceDocId).update("bloquear", false);
         }
 
@@ -335,15 +339,91 @@ public class MonitorService extends AccessibilityService {
         boolean isUnlocked = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(KEY_UNLOCKED, false);
         if (!isUnlocked) {
             lastBlockTime = now;
-            firstDetectionTime = 0;
+            ultimoBloqueoTime = now;
+            bloqueoActivo = true;
+            firstDetectionTime = 0; // Resetear detección
+
+            // Limpiar el texto del navegador después del bloqueo
+            limpiarTextoNavegador();
 
             Intent lockIntent = new Intent(this, LockActivity.class);
             lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            
+            // Pasar la URL bloqueada para mostrarla
+            if (!ultimaUrlProcesada.isEmpty()) {
+                lockIntent.putExtra("sitio_bloqueado", ultimaUrlProcesada);
+            }
+            
             startActivity(lockIntent);
 
-            new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                sendBroadcast(new Intent("ACTION_CLOSE_LOCK"));
-            }, duracionMs);
+            // Si tiene duración (modo temporal), cerrar después
+            if (duracionMs > 0) {
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    sendBroadcast(new Intent("ACTION_CLOSE_LOCK"));
+                    bloqueoActivo = false;
+                }, duracionMs);
+            }
+            // Si duracionMs = 0, es permanente (esperará PIN)
+        }
+    }
+
+    // NUEVO: Método para limpiar el texto del navegador
+    private void limpiarTextoNavegador() {
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null) return;
+
+            // Buscar campo de URL en Chrome
+            List<AccessibilityNodeInfo> urlNodes = root.findAccessibilityNodeInfosByViewId("com.android.chrome:id/url_bar");
+            if (urlNodes != null && !urlNodes.isEmpty()) {
+                AccessibilityNodeInfo urlBar = urlNodes.get(0);
+                Bundle arguments = new Bundle();
+                arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "");
+                urlBar.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments);
+                Log.d(TAG, "🧹 URL bar limpiada en Chrome");
+            }
+
+            // Buscar campo de búsqueda/browser en otros navegadores
+            List<String> searchViewIds = Arrays.asList(
+                "org.mozilla.firefox:id/url_bar",
+                "com.android.chrome:id/search_box_text",
+                "com.android.browser:id/url",
+                "com.brave.browser:id/url_bar"
+            );
+
+            for (String viewId : searchViewIds) {
+                List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(viewId);
+                if (nodes != null && !nodes.isEmpty()) {
+                    Bundle args = new Bundle();
+                    args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "");
+                    nodes.get(0).performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
+                    Log.d(TAG, "🧹 Campo de texto limpiado en: " + viewId);
+                }
+            }
+
+            // Buscar EditTexts genéricos que puedan ser campos de búsqueda
+            buscarYLimpiarEditTexts(root);
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error limpiando texto: " + e.getMessage());
+        }
+    }
+
+    // NUEVO: Buscar recursivamente EditTexts y limpiarlos
+    private void buscarYLimpiarEditTexts(AccessibilityNodeInfo node) {
+        if (node == null) return;
+
+        if (node.getClassName() != null && node.getClassName().toString().contains("EditText")) {
+            if (node.getText() != null && node.getText().length() > 0) {
+                Bundle args = new Bundle();
+                args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "");
+                node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
+                Log.d(TAG, "🧹 EditText limpiado");
+            }
+        }
+
+        for (int i = 0; i < node.getChildCount(); i++) {
+            buscarYLimpiarEditTexts(node.getChild(i));
         }
     }
 
@@ -357,13 +437,20 @@ public class MonitorService extends AccessibilityService {
             return;
         }
 
+        // Si estamos en período de cooldown después de un bloqueo, ignorar detecciones
+        long now = System.currentTimeMillis();
+        if (now - ultimoBloqueoTime < BLOCK_COOLDOWN) {
+            return;
+        }
+
         if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             procesarCambioApp(packageName);
         }
 
         if (esNavegador(packageName)) {
             if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
-                    eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+                    eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
+                    eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
                 analizarContenido(getRootInActiveWindow());
             }
         }
@@ -375,19 +462,19 @@ public class MonitorService extends AccessibilityService {
 
         if (modoConcentracion && !appsEducativas.contains(packageName) && !whitelist.contains(packageName)) {
             reportarIncidencia("MODO_CONCENTRACION", "App bloqueada: " + packageName, packageName);
-            dispararBloqueoConDuracion(8000);
+            dispararBloqueoConDuracion(0); // Permanente
             return;
         }
 
         for (String prohibida : appsProhibidas) {
             if (packageName.equalsIgnoreCase(prohibida) || packageName.toLowerCase().contains(prohibida)) {
-                dispararBloqueoConDuracion(8000);
+                dispararBloqueoConDuracion(0); // Permanente
                 return;
             }
         }
 
         if (packageName.contains("settings") && !isUnlocked) {
-            dispararBloqueoConDuracion(8000);
+            dispararBloqueoConDuracion(0); // Permanente
         }
     }
 
@@ -415,9 +502,11 @@ public class MonitorService extends AccessibilityService {
                     long now = System.currentTimeMillis();
                     if (firstDetectionTime == 0) {
                         firstDetectionTime = now;
+                        Log.d(TAG, "⚠️ Palabra prohibida detectada: " + palabra);
                     } else if (now - firstDetectionTime > GRACE_PERIOD) {
                         reportarIncidencia("CONTENIDO_PROHIBIDO", "Palabra detectada: " + palabra, texto);
-                        dispararBloqueoConDuracion(8000);
+                        ultimaUrlProcesada = palabra;
+                        dispararBloqueoConDuracion(0); // Permanente
                         return;
                     }
                 }
@@ -447,6 +536,9 @@ public class MonitorService extends AccessibilityService {
                 .replace("\t", "");
 
         if (!limpia.contains(".") || limpia.length() < 4) return;
+
+        // Guardar para referencia
+        ultimaUrlProcesada = limpia;
 
         boolean urlBlocked = false;
 
@@ -486,13 +578,14 @@ public class MonitorService extends AccessibilityService {
             if (now - firstDetectionTime > GRACE_PERIOD) {
                 Log.d(TAG, "🚫 URL bloqueada tras gracia: " + limpia);
                 reportarIncidencia("WEB_BLOCK", "URL restringida", limpia);
-                dispararBloqueoConDuracion(8000);
+                dispararBloqueoConDuracion(0); // Permanente
                 firstDetectionTime = 0;
             }
 
             return;
         }
 
+        // Si llegamos aquí, la URL es permitida
         firstDetectionTime = 0;
         reportarUrlActual(limpia);
     }
@@ -507,7 +600,7 @@ public class MonitorService extends AccessibilityService {
         super.onDestroy();
 
         if (deviceListener != null) deviceListener.remove();
-        if (institutionListener != null) deviceListener.remove();
+        if (institutionListener != null) institutionListener.remove();
         if (aulaListener != null) aulaListener.remove();
         if (securityListener != null) securityListener.remove();
 
