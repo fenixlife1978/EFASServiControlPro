@@ -35,11 +35,18 @@ public class MainActivity extends BridgeActivity {
         SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
         String deviceId = capPrefs.getString(KEY_DEVICE_ID, "unknown");
         SimpleLogger.init(deviceId);
+        
+        // === LOGS DE PRUEBA PARA FIREBASE ===
         SimpleLogger.i("=== APP INICIADA ===");
+        SimpleLogger.d("Prueba de log - si ves esto en Firebase, el logger funciona");
+        SimpleLogger.i("Dispositivo ID: " + deviceId);
+        SimpleLogger.i("Android version: " + Build.VERSION.SDK_INT);
+        // ====================================
 
         // Canal notificaciones
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationUtils.createNotificationChannel(this);
+            SimpleLogger.i("Canal de notificaciones creado");
         }
 
         dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
@@ -48,8 +55,27 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(DevicePlugin.class);
         try {
             registerPlugin(LiberarPlugin.class);
+            SimpleLogger.i("LiberarPlugin registrado exitosamente");
         } catch (Exception e) {
             SimpleLogger.e("Error registrando LiberarPlugin: " + e.getMessage());
+        }
+
+        // Verificar conexión a Firestore
+        try {
+            FirebaseFirestore db = FirebaseFirestore.getInstance();
+            db.collection("app_logs").document("test_connection")
+                .set(new java.util.HashMap<String, Object>() {{
+                    put("timestamp", System.currentTimeMillis());
+                    put("message", "Prueba de conexión desde MainActivity");
+                }})
+                .addOnSuccessListener(aVoid -> {
+                    SimpleLogger.i("Firestore - Conexión exitosa");
+                })
+                .addOnFailureListener(e -> {
+                    SimpleLogger.e("Firestore - Error de conexión: " + e.getMessage());
+                });
+        } catch (Exception e) {
+            SimpleLogger.e("Error verificando Firestore: " + e.getMessage());
         }
 
         // FLUJO PRINCIPAL SIMPLIFICADO
@@ -89,7 +115,7 @@ public class MainActivity extends BridgeActivity {
             } catch (Exception e) {
                 SimpleLogger.e("Error al solicitar VPN: " + e.getMessage());
             }
-        }, 1000); // 1 segundo de retraso
+        }, 1000);
     }
 
     private void iniciarServicioVPN() {
@@ -99,16 +125,27 @@ public class MainActivity extends BridgeActivity {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(vpnIntent);
+            SimpleLogger.i("startForegroundService llamado");
         } else {
             startService(vpnIntent);
+            SimpleLogger.i("startService llamado");
         }
         
         Toast.makeText(this, "VPN solicitada - revisa la notificación", Toast.LENGTH_LONG).show();
+        SimpleLogger.i("VPN service iniciado correctamente");
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        
+        if (requestCode == DEVICE_ADMIN_REQUEST) {
+            if (resultCode == RESULT_OK) {
+                SimpleLogger.i("Permisos de administrador concedidos");
+            } else {
+                SimpleLogger.w("Permisos de administrador denegados");
+            }
+        }
         
         if (requestCode == VPN_PREPARE_REQUEST) {
             if (resultCode == RESULT_OK) {
@@ -122,7 +159,7 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
-    // Mantén tus métodos existentes de liberación, etc.
+    // Método de liberación existente
     public void liberarDispositivoTotal() {
         try {
             if (dpm.isDeviceOwnerApp(getPackageName())) {
@@ -133,8 +170,21 @@ public class MainActivity extends BridgeActivity {
                 dpm.removeActiveAdmin(adminComponent);
             }
             SimpleLogger.i("Dispositivo liberado");
+            Toast.makeText(this, "Dispositivo liberado", Toast.LENGTH_LONG).show();
         } catch (Exception e) {
             SimpleLogger.e("Error liberando: " + e.getMessage());
         }
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        SimpleLogger.d("MainActivity - onResume");
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        SimpleLogger.d("MainActivity - onPause");
     }
 }

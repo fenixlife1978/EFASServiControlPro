@@ -5,16 +5,14 @@ import android.app.PendingIntent;
 import android.content.Intent;
 import android.net.VpnService;
 import android.os.ParcelFileDescriptor;
+import android.os.Build;
 import androidx.core.app.NotificationCompat;
 
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.io.PrintWriter;
-import java.io.StringWriter;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.HashSet;
@@ -25,11 +23,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ParentalControlVpnService extends VpnService {
 
-    private static final String TAG = "ParentalControlVpn";
-    private static final String VPN_ADDRESS = "172.16.0.2";
+    private static final String VPN_ADDRESS = "172.16.0.2"; // IP local del cliente VPN
+    private static final String DNS_SERVER_VPN = "172.16.0.1"; // IP ficticia para capturar DNS
+    private static final String REAL_DNS_SERVER = "8.8.8.8"; // DNS real de Google
     private static final int VPN_MTU = 1500;
     private static final int DNS_PORT = 53;
-    private static final int DNS_TIMEOUT = 5000;
 
     public static final String ACTION_START_VPN = "com.educontrolpro.START_VPN";
 
@@ -41,324 +39,232 @@ public class ParentalControlVpnService extends VpnService {
     @Override
     public void onCreate() {
         super.onCreate();
-        SimpleLogger.i("VPN Service - onCreate() - Iniciando servicio VPN");
         executorService = Executors.newCachedThreadPool();
+        SimpleLogger.i("VPN Service - Creado");
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        SimpleLogger.i("VPN Service - onStartCommand() recibido");
+        SimpleLogger.i("VPN Service - Iniciando");
         
         if (!isRunning.get()) {
-            SimpleLogger.i("VPN Service - Iniciando VPN por primera vez");
             isRunning.set(true);
-            executorService.submit(this::startVpn);
+            executorService.submit(this::runVpn);
             startForeground(1, createNotification());
-            SimpleLogger.i("VPN Service - startForeground completado");
-        } else {
-            SimpleLogger.i("VPN Service - ya estaba en ejecución");
         }
         return START_STICKY;
     }
 
-    private void startVpn() {
-        SimpleLogger.i("VPN Service - startVpn() - Intentando establecer interfaz");
+    private void runVpn() {
+        SimpleLogger.i("VPN Service - Configurando interfaz");
         
         try {
             Builder builder = new Builder();
-            builder.setSession(getString(R.string.app_name));
+            builder.setSession("EDUControl VPN");
             builder.addAddress(VPN_ADDRESS, 32);
             
-            // Enrutar todo el tráfico IPv4
-            builder.addRoute("0.0.0.0", 0);
+            // SOLO capturar tráfico hacia nuestro DNS ficticio
+            builder.addRoute(DNS_SERVER_VPN, 32);
             
-            // Excluir nuestra propia app para evitar loops
+            // Opcional: excluir nuestra app del túnel
             try {
                 builder.addDisallowedApplication(getPackageName());
-                SimpleLogger.i("VPN Service - App excluida del túnel: " + getPackageName());
             } catch (Exception e) {
-                SimpleLogger.e("Error excluyendo app: " + e.getMessage());
+                // Ignorar
             }
             
             builder.setMtu(VPN_MTU);
-
-            SimpleLogger.i("VPN Service - Builder configurado, llamando a establish()");
-            vpnInterface = builder.establish();
             
+            vpnInterface = builder.establish();
             if (vpnInterface == null) {
-                SimpleLogger.e("VPN Service - ERROR CRÍTICO: builder.establish() devolvió NULL");
+                SimpleLogger.e("VPN Service - No se pudo establecer interfaz");
                 stopVpn();
                 return;
             }
+
+            SimpleLogger.i("VPN Service - Interfaz establecida");
             
-            SimpleLogger.i("VPN Service - ÉXITO: Interfaz VPN establecida correctamente");
-
             FileInputStream in = new FileInputStream(vpnInterface.getFileDescriptor());
-            FileOutputStream out = new FileOutputStream(vpnInterface.getFileDescriptor());
-
+            
             ByteBuffer packet = ByteBuffer.allocate(VPN_MTU);
             int packetCount = 0;
-            
-            SimpleLogger.i("VPN Service - Entrando en bucle principal de lectura");
             
             while (isRunning.get()) {
                 packet.clear();
                 int length = in.read(packet.array());
-                if (length > 0) {
-                    packetCount++;
-                    packet.limit(length);
-                    
-                    // Procesar el paquete (DNS o reenviar)
-                    processPacket(packet, out);
-                    
-                    if (packetCount % 1000 == 0) {
-                        SimpleLogger.i("VPN Service - Paquetes procesados: " + packetCount);
-                    }
+                if (length <= 0) continue;
+                
+                packet.limit(length);
+                packetCount++;
+                
+                // Procesar paquete DNS
+                processDnsPacket(packet);
+                
+                if (packetCount % 100 == 0) {
+                    SimpleLogger.i("VPN Service - Paquetes DNS procesados: " + packetCount);
                 }
             }
+            
         } catch (Exception e) {
-            SimpleLogger.e("VPN Service - Excepción: " + e.getMessage());
-            StringWriter sw = new StringWriter();
-            e.printStackTrace(new PrintWriter(sw));
-            SimpleLogger.e("VPN Service - Stacktrace: " + sw.toString());
+            SimpleLogger.e("VPN Service - Error: " + e.getMessage());
         } finally {
-            SimpleLogger.i("VPN Service - Saliendo de startVpn()");
             stopVpn();
         }
     }
 
-    private void processPacket(ByteBuffer packet, FileOutputStream out) {
+    private void processDnsPacket(ByteBuffer packet) {
         try {
-            // Guardar una copia del paquete original para reenviarlo si no es DNS
-            byte[] originalPacket = new byte[packet.limit()];
-            packet.position(0);
-            packet.get(originalPacket);
-            
-            // Analizar el paquete
             packet.position(0);
             
             // Cabecera IP
             byte versionIhl = packet.get();
-            int headerLength = (versionIhl & 0x0F) * 4;
-            if (headerLength < 20) {
-                // Paquete inválido, reenviar original
-                forwardPacket(out, originalPacket);
-                return;
-            }
-
-            packet.position(9);
-            byte protocol = packet.get();
+            int headerLen = (versionIhl & 0x0F) * 4;
             
-            // Si no es UDP, reenviar sin procesar
-            if (protocol != 17) {
-                forwardPacket(out, originalPacket);
-                return;
-            }
-
-            // Verificar si es DNS (puerto 53)
-            packet.position(headerLength + 2); // Offset al puerto destino en UDP
-            int dstPort = packet.getShort() & 0xFFFF;
-            
-            if (dstPort != DNS_PORT) {
-                // No es DNS, reenviar sin procesar
-                forwardPacket(out, originalPacket);
-                return;
-            }
-
-            // Es un paquete DNS, procesarlo
-            packet.position(0); // Reiniciar para el procesamiento DNS
-            processDnsPacket(packet, out, originalPacket);
-            
-        } catch (Exception e) {
-            SimpleLogger.e("Error en processPacket: " + e.getMessage());
-            // En caso de error, intentar reenviar el paquete original
-            try {
-                forwardPacket(out, packet.array());
-            } catch (Exception ex) {
-                SimpleLogger.e("Error fatal: " + ex.getMessage());
-            }
-        }
-    }
-
-    private void forwardPacket(FileOutputStream out, byte[] packet) {
-        try {
-            synchronized (out) {
-                out.write(packet);
-                out.flush();
-            }
-        } catch (Exception e) {
-            SimpleLogger.e("Error reenviando paquete: " + e.getMessage());
-        }
-    }
-
-    private void processDnsPacket(ByteBuffer packet, FileOutputStream out, byte[] originalPacket) {
-        try {
-            packet.position(0);
-
-            // Cabecera IP
-            byte versionIhl = packet.get();
-            int headerLength = (versionIhl & 0x0F) * 4;
-
             packet.position(16);
             byte[] srcIp = new byte[4];
             packet.get(srcIp);
             byte[] dstIp = new byte[4];
-
+            packet.get(dstIp);
+            
             // Cabecera UDP
-            int udpHeaderStart = headerLength;
-            packet.position(udpHeaderStart);
+            packet.position(headerLen);
             int srcPort = packet.getShort() & 0xFFFF;
             int dstPort = packet.getShort() & 0xFFFF;
-            int udpLength = packet.getShort() & 0xFFFF;
-
+            int udpLen = packet.getShort() & 0xFFFF;
+            
             // Payload DNS
-            int dnsPayloadStart = udpHeaderStart + 8;
-            packet.position(dnsPayloadStart);
-            ByteBuffer dnsQuery = packet.slice();
-            dnsQuery.limit(udpLength - 8);
-
+            packet.position(headerLen + 8);
+            ByteBuffer dnsPayload = packet.slice();
+            dnsPayload.limit(udpLen - 8);
+            
             // Extraer dominio
-            String domain = extractDomainFromDnsQuery(dnsQuery.duplicate());
+            String domain = extractDomainFromDnsQuery(dnsPayload);
             if (domain == null) {
-                // No se pudo extraer dominio, reenviar original
-                forwardPacket(out, originalPacket);
                 return;
             }
-
-            SimpleLogger.i("DNS Query: " + domain);
-
+            
+            SimpleLogger.i("DNS Consulta: " + domain);
+            
             if (blacklistedDomains.contains(domain)) {
                 SimpleLogger.i("BLOQUEADO: " + domain);
                 reportBlockedDomain(domain);
-                // NO reenviar = bloqueo efectivo
+                // No responder = bloqueo
                 return;
             }
-
-            // Dominio permitido, reenviar consulta
-            SimpleLogger.i("PERMITIDO: " + domain);
-            forwardDnsQuery(dnsQuery, dstIp, srcPort, srcIp, out);
-
+            
+            // Dominio permitido, reenviar a DNS real
+            forwardDnsQuery(dnsPayload, srcIp, srcPort);
+            
         } catch (Exception e) {
             SimpleLogger.e("Error processDnsPacket: " + e.getMessage());
-            // En caso de error, reenviar original
-            forwardPacket(out, originalPacket);
         }
     }
 
-    private void forwardDnsQuery(ByteBuffer dnsQuery, byte[] dnsServerIp, int clientPort, byte[] clientIp, FileOutputStream out) {
+    private void forwardDnsQuery(ByteBuffer dnsQuery, byte[] clientIp, int clientPort) {
         executorService.submit(() -> {
             DatagramSocket socket = null;
             try {
                 socket = new DatagramSocket();
-                socket.setSoTimeout(DNS_TIMEOUT);
-
-                InetAddress dnsAddress = InetAddress.getByAddress(dnsServerIp);
+                socket.setSoTimeout(5000);
+                
+                InetAddress dnsAddress = InetAddress.getByName(REAL_DNS_SERVER);
+                
                 byte[] queryData = new byte[dnsQuery.remaining()];
                 dnsQuery.get(queryData);
-
+                
                 DatagramPacket queryPacket = new DatagramPacket(queryData, queryData.length, dnsAddress, DNS_PORT);
                 socket.send(queryPacket);
-                SimpleLogger.i("DNS reenviado a " + dnsAddress.getHostAddress());
-
+                
                 byte[] responseData = new byte[512];
                 DatagramPacket responsePacket = new DatagramPacket(responseData, responseData.length);
                 socket.receive(responsePacket);
-
+                
+                // Construir respuesta IP/UDP
                 byte[] responsePayload = new byte[responsePacket.getLength()];
                 System.arraycopy(responseData, 0, responsePayload, 0, responsePacket.getLength());
-
-                byte[] ipPacket = buildIpPacket(
-                        dnsServerIp,
-                        clientIp,
-                        DNS_PORT,
-                        clientPort,
-                        responsePayload
+                
+                byte[] ipResponse = buildDnsResponse(
+                    REAL_DNS_SERVER,    // IP origen (DNS real)
+                    clientIp,           // IP destino (cliente)
+                    DNS_PORT,           // Puerto origen (53)
+                    clientPort,         // Puerto destino (cliente)
+                    responsePayload
                 );
-
+                
+                // Escribir respuesta en el túnel
+                FileOutputStream out = new FileOutputStream(vpnInterface.getFileDescriptor());
                 synchronized (out) {
-                    out.write(ipPacket);
+                    out.write(ipResponse);
                     out.flush();
                 }
-
-                SimpleLogger.i("Respuesta DNS inyectada al cliente");
-
-            } catch (SocketTimeoutException e) {
-                SimpleLogger.e("Timeout en consulta DNS");
+                
+                SimpleLogger.i("DNS Respuesta enviada al cliente");
+                
             } catch (Exception e) {
-                SimpleLogger.e("Error en forward DNS: " + e.getMessage());
+                SimpleLogger.e("Error forward DNS: " + e.getMessage());
             } finally {
                 if (socket != null) socket.close();
             }
         });
     }
 
-    private byte[] buildIpPacket(byte[] srcIp, byte[] dstIp, int srcPort, int dstPort, byte[] payload) {
-        int ipHeaderLen = 20;
-        int udpHeaderLen = 8;
-        int totalLen = ipHeaderLen + udpHeaderLen + payload.length;
-
-        ByteBuffer buffer = ByteBuffer.allocate(totalLen);
-        buffer.order(ByteOrder.BIG_ENDIAN);
-
-        // Cabecera IP
-        buffer.put((byte) 0x45);
-        buffer.put((byte) 0x00);
-        buffer.putShort((short) totalLen);
-        buffer.putShort((short) 0);
-        buffer.putShort((short) 0x4000);
-        buffer.put((byte) 64);
-        buffer.put((byte) 17);
-        buffer.putShort((short) 0);
-        buffer.put(srcIp);
-        buffer.put(dstIp);
-
-        int ipChecksum = calculateChecksum(buffer.array(), 0, ipHeaderLen);
-        buffer.putShort(10, (short) ipChecksum);
-
-        // Cabecera UDP
-        buffer.putShort((short) srcPort);
-        buffer.putShort((short) dstPort);
-        buffer.putShort((short) (udpHeaderLen + payload.length));
-        buffer.putShort((short) 0);
-
-        // Payload
-        buffer.put(payload);
-
-        return buffer.array();
-    }
-
-    private int calculateChecksum(byte[] data, int offset, int length) {
-        int sum = 0;
-        int i = offset;
-        while (length > 1) {
-            sum += ((data[i] & 0xFF) << 8) | (data[i + 1] & 0xFF);
-            i += 2;
-            length -= 2;
+    private byte[] buildDnsResponse(String srcIpStr, byte[] dstIp, int srcPort, int dstPort, byte[] payload) {
+        try {
+            InetAddress srcIp = InetAddress.getByName(srcIpStr);
+            byte[] srcIpBytes = srcIp.getAddress();
+            
+            int ipHeaderLen = 20;
+            int udpHeaderLen = 8;
+            int totalLen = ipHeaderLen + udpHeaderLen + payload.length;
+            
+            ByteBuffer buffer = ByteBuffer.allocate(totalLen);
+            buffer.order(ByteOrder.BIG_ENDIAN);
+            
+            // Cabecera IP
+            buffer.put((byte) 0x45);
+            buffer.put((byte) 0x00);
+            buffer.putShort((short) totalLen);
+            buffer.putShort((short) 0);
+            buffer.putShort((short) 0x4000);
+            buffer.put((byte) 64);
+            buffer.put((byte) 17); // UDP
+            buffer.putShort((short) 0); // Checksum
+            buffer.put(srcIpBytes);
+            buffer.put(dstIp);
+            
+            // Cabecera UDP
+            buffer.putShort((short) srcPort);
+            buffer.putShort((short) dstPort);
+            buffer.putShort((short) (udpHeaderLen + payload.length));
+            buffer.putShort((short) 0); // Checksum UDP
+            
+            // Payload
+            buffer.put(payload);
+            
+            return buffer.array();
+            
+        } catch (Exception e) {
+            SimpleLogger.e("Error buildDnsResponse: " + e.getMessage());
+            return new byte[0];
         }
-        if (length > 0) {
-            sum += (data[i] & 0xFF) << 8;
-        }
-        while ((sum >> 16) > 0) {
-            sum = (sum & 0xFFFF) + (sum >> 16);
-        }
-        return ~sum & 0xFFFF;
     }
 
     private String extractDomainFromDnsQuery(ByteBuffer buffer) {
         try {
-            int id = buffer.getShort() & 0xFFFF;
+            buffer.getShort(); // ID
             int flags = buffer.getShort() & 0xFFFF;
             int qdcount = buffer.getShort() & 0xFFFF;
-
+            
             if ((flags & 0x8000) != 0 || qdcount == 0) {
                 return null;
             }
-
+            
             buffer.getShort(); // ancount
             buffer.getShort(); // nscount
             buffer.getShort(); // arcount
-
+            
             return readDomainName(buffer);
+            
         } catch (Exception e) {
             SimpleLogger.e("Error parseando DNS: " + e.getMessage());
             return null;
@@ -367,22 +273,19 @@ public class ParentalControlVpnService extends VpnService {
 
     private String readDomainName(ByteBuffer buffer) {
         StringBuilder domain = new StringBuilder();
-        int position = buffer.position();
-        boolean jumped = false;
-        int maxLoops = 100;
-
-        while (maxLoops-- > 0) {
+        
+        while (true) {
             byte len = buffer.get();
             if (len == 0) break;
             
             if ((len & 0xC0) == 0xC0) {
+                // Compresión DNS (simplificado)
                 int pointer = ((len & 0x3F) << 8) | (buffer.get() & 0xFF);
-                if (!jumped) {
-                    position = buffer.position();
-                    jumped = true;
-                }
+                int currentPos = buffer.position();
                 buffer.position(pointer);
-                continue;
+                String compressed = readDomainName(buffer);
+                buffer.position(currentPos);
+                return compressed;
             }
             
             if (buffer.remaining() < len) return null;
@@ -393,7 +296,6 @@ public class ParentalControlVpnService extends VpnService {
             domain.append(new String(label));
         }
         
-        if (jumped) buffer.position(position);
         return domain.toString();
     }
 
@@ -402,28 +304,26 @@ public class ParentalControlVpnService extends VpnService {
     }
 
     private void stopVpn() {
-        SimpleLogger.i("VPN Service - Deteniendo VPN");
+        SimpleLogger.i("VPN Service - Deteniendo");
         isRunning.set(false);
         try {
             if (vpnInterface != null) {
                 vpnInterface.close();
-                SimpleLogger.i("VPN Service - Interfaz cerrada");
             }
         } catch (Exception e) {
-            SimpleLogger.e("Error al cerrar interfaz VPN: " + e.getMessage());
+            SimpleLogger.e("Error cerrando interfaz: " + e.getMessage());
         }
         stopForeground(true);
         stopSelf();
-        SimpleLogger.i("VPN Service - Detenido completamente");
     }
 
     private Notification createNotification() {
-        Intent notificationIntent = new Intent(this, VpnController.class);
-        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE);
+        Intent intent = new Intent(this, VpnController.class);
+        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE);
         
         return new NotificationCompat.Builder(this, NotificationUtils.CHANNEL_ID)
-                .setContentTitle("Control Parental Activo")
-                .setContentText("Filtrado DNS en ejecución")
+                .setContentTitle("EDUControl VPN")
+                .setContentText("Filtrado DNS activo")
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
                 .setContentIntent(pendingIntent)
                 .build();
@@ -431,19 +331,18 @@ public class ParentalControlVpnService extends VpnService {
 
     @Override
     public void onRevoke() {
-        SimpleLogger.i("VPN Service - Permisos revocados por el sistema");
+        SimpleLogger.i("VPN Service - Permisos revocados");
         stopVpn();
     }
 
     @Override
     public void onDestroy() {
-        SimpleLogger.i("VPN Service - onDestroy() llamado");
         super.onDestroy();
         stopVpn();
     }
 
     public void updateBlacklist(Set<String> newBlacklist) {
         this.blacklistedDomains = new HashSet<>(newBlacklist);
-        SimpleLogger.i("Lista negra actualizada. Tamaño: " + this.blacklistedDomains.size());
+        SimpleLogger.i("Lista negra actualizada: " + newBlacklist.size() + " dominios");
     }
 }
