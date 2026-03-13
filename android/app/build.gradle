@@ -8,8 +8,8 @@ android {
         applicationId "com.educontrolpro"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 7
-        versionName "2.1"
+        versionCode 8
+        versionName "2.2"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         
         aaptOptions {
@@ -24,37 +24,38 @@ android {
         }
     }
 
-    // Añadido para evitar conflictos de librerías de red (dnsjava)
+    // Evita conflictos de archivos duplicados de la librería DNS
     packagingOptions {
         resources {
-            excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE', 'META-INF/NOTICE']
+            excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE', 'META-INF/NOTICE', 'META-INF/INDEX.LIST']
         }
     }
 }
 
 repositories {
+    google()
+    mavenCentral()
     flatDir {
         dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
     }
 }
 
 dependencies {
+    // ESTA LÍNEA ES LA CLAVE: Lee el archivo que subas a la carpeta libs
     implementation fileTree(include: ['*.jar'], dir: 'libs')
+    
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     
-    // --- LIBRERÍA DNS PARA MONITORIZACIÓN ---
-    // Vital para que ParentalControlVpnService pueda leer las URLs
-    implementation 'org.dnsjava:dnsjava:3.6.0'
-    
     // Firebase
     implementation platform('com.google.firebase:firebase-bom:33.1.0')
     implementation 'com.google.firebase:firebase-firestore'
     implementation 'com.google.firebase:firebase-analytics'
+    implementation 'com.google.firebase:firebase-auth'
     
-    // ML Kit para escáner QR (Útil para vincular tablets rápido)
+    // ML Kit para QR
     implementation 'com.google.mlkit:barcode-scanning:17.2.0'
     implementation 'com.google.android.gms:play-services-mlkit-barcode-scanning:18.3.0'
 
