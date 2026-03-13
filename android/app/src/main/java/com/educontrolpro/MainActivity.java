@@ -32,99 +32,53 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
-        // 1. Registrar Plugins
+        // 1. Registro de Plugins
         registerPlugin(DevicePlugin.class);
-        try {
-            registerPlugin(LiberarPlugin.class);
-        } catch (Exception e) {
-            android.util.Log.e("MainActivity", "Error registrando LiberarPlugin", e);
-        }
+        try { registerPlugin(LiberarPlugin.class); } catch (Exception e) {}
 
-        // 2. Inicializar componentes
-        SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
-        String deviceId = capPrefs.getString(KEY_DEVICE_ID, "unknown");
-        SimpleLogger.init(deviceId);
-        
+        // 2. Inicialización de componentes
         dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
         adminComponent = new ComponentName(this, AdminReceiver.class);
 
-        // 3. Procesar Intent inicial (si se lanza desde una notificación o comando)
+        // 3. Obtener ID y Logger (Paso previo a la red)
+        SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
+        String deviceId = capPrefs.getString(KEY_DEVICE_ID, "DEV-0001");
+        SimpleLogger.init(deviceId);
+
+        // 4. INICIO DEL FLUJO EN ORDEN: Primero Admin, luego el resto
+        new Handler().postDelayed(this::checkDeviceAdmin, 1000);
+        
         handleIntent(getIntent());
-
-        // 4. Flujo de inicio
-        verificarConexionFirestore();
-        checkDeviceAdmin();
-        solicitarVPNInmediatamente();
-    }
-
-    // RECEPTOR DE INTENTS (Para LiberarPlugin)
-    @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        setIntent(intent);
-        handleIntent(intent);
-    }
-
-    private void handleIntent(Intent intent) {
-        if (intent != null && intent.getAction() != null) {
-            String action = intent.getAction();
-            SimpleLogger.i("Intent recibido en MainActivity: " + action);
-
-            if (action.equals("ACTION_LIBERAR_TAB")) {
-                liberarDispositivoTotal();
-            } else if (action.equals("ACTION_REBLOQUEAR_TAB")) {
-                // Aquí podrías forzar el re-bloqueo si es necesario
-                checkDeviceAdmin();
-                solicitarVPNInmediatamente();
-                SimpleLogger.i("Comando de rebloqueo ejecutado");
-            }
-        }
-    }
-
-    private void verificarConexionFirestore() {
-        try {
-            FirebaseFirestore db = FirebaseFirestore.getInstance();
-            Map<String, Object> testData = new HashMap<>();
-            testData.put("timestamp", System.currentTimeMillis());
-            testData.put("message", "Conexión desde MainActivity");
-
-            db.collection("app_logs").document("test_connection")
-                .set(testData)
-                .addOnSuccessListener(aVoid -> SimpleLogger.i("Firestore OK"))
-                .addOnFailureListener(e -> SimpleLogger.e("Firestore Error: " + e.getMessage()));
-        } catch (Exception e) {
-            SimpleLogger.e("Error Firestore: " + e.getMessage());
-        }
     }
 
     private void checkDeviceAdmin() {
         if (!dpm.isAdminActive(adminComponent)) {
+            SimpleLogger.i("Paso 1: Solicitando Administrador de Dispositivo");
             Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
             intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent);
-            intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Protección de EDUControlPro");
+            intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Protección activa de EduControlPro");
             startActivityForResult(intent, DEVICE_ADMIN_REQUEST);
+        } else {
+            SimpleLogger.i("Admin ya activo. Pasando a validar vinculación.");
+            verificarConexionFirestore(); // Aquí es donde validas el dispositivo
+            solicitarVPNInmediatamente();
         }
     }
 
     private void solicitarVPNInmediatamente() {
-        new Handler().postDelayed(() -> {
-            try {
-                Intent prepareIntent = VpnService.prepare(MainActivity.this);
-                if (prepareIntent != null) {
-                    startActivityForResult(prepareIntent, VPN_PREPARE_REQUEST);
-                } else {
-                    iniciarServicioVPN();
-                }
-            } catch (Exception e) {
-                SimpleLogger.e("Error VPN: " + e.getMessage());
-            }
-        }, 1500);
+        SimpleLogger.i("Paso 2: Preparando Túnel VPN");
+        Intent prepareIntent = VpnService.prepare(this);
+        if (prepareIntent != null) {
+            startActivityForResult(prepareIntent, VPN_PREPARE_REQUEST);
+        } else {
+            iniciarServicioVPN();
+        }
     }
 
     private void iniciarServicioVPN() {
+        SimpleLogger.i("Paso 3: Iniciando Servicio en Foreground");
         Intent vpnIntent = new Intent(this, ParentalControlVpnService.class);
         vpnIntent.setAction("START_VPN"); 
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(vpnIntent);
         } else {
@@ -135,27 +89,48 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == DEVICE_ADMIN_REQUEST && resultCode == RESULT_OK) {
-            SimpleLogger.i("Admin concedido");
+        
+        // Manejo secuencial: Si termina uno, dispara el otro
+        if (requestCode == DEVICE_ADMIN_REQUEST) {
+            if (resultCode == RESULT_OK) {
+                SimpleLogger.i("Admin concedido. Ahora pidiendo VPN.");
+                verificarConexionFirestore();
+                solicitarVPNInmediatamente();
+            } else {
+                SimpleLogger.e("Admin necesario. Re-intentando...");
+                checkDeviceAdmin();
+            }
         }
-        if (requestCode == VPN_PREPARE_REQUEST && resultCode == RESULT_OK) {
-            iniciarServicioVPN();
+
+        if (requestCode == VPN_PREPARE_REQUEST) {
+            if (resultCode == RESULT_OK) {
+                iniciarServicioVPN();
+            } else {
+                SimpleLogger.e("VPN necesaria para el filtrado. Re-intentando...");
+                solicitarVPNInmediatamente();
+            }
+        }
+    }
+
+    private void verificarConexionFirestore() {
+        FirebaseFirestore db = FirebaseFirestore.getInstance();
+        Map<String, Object> log = new HashMap<>();
+        log.put("timestamp", System.currentTimeMillis());
+        log.put("message", "Dispositivo vinculado y verificado");
+        db.collection("app_logs").document("test_connection").set(log);
+    }
+
+    private void handleIntent(Intent intent) {
+        if (intent != null && "ACTION_LIBERAR_TAB".equals(intent.getAction())) {
+            liberarDispositivoTotal();
         }
     }
 
     public void liberarDispositivoTotal() {
         try {
-            // Detener VPN primero
             stopService(new Intent(this, ParentalControlVpnService.class));
-
-            if (dpm.isDeviceOwnerApp(getPackageName())) {
-                dpm.setUninstallBlocked(adminComponent, getPackageName(), false);
-                dpm.clearDeviceOwnerApp(getPackageName());
-            }
             dpm.removeActiveAdmin(adminComponent);
-            
-            SimpleLogger.i("Dispositivo liberado exitosamente");
-            Toast.makeText(this, "Dispositivo Liberado", Toast.LENGTH_LONG).show();
+            SimpleLogger.i("Dispositivo liberado");
         } catch (Exception e) {
             SimpleLogger.e("Error liberando: " + e.getMessage());
         }
