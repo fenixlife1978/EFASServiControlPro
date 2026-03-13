@@ -3,21 +3,29 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.educontrolpro">
 
-    <!-- Permisos -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" /> 
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.BIND_VPN_SERVICE" />
+    
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.REORDER_TASKS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="false"
@@ -40,7 +48,6 @@
         
         <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="barcode" />
 
-        <!-- Admin Receiver -->
         <receiver android:name="com.educontrolpro.AdminReceiver" 
             android:permission="android.permission.BIND_DEVICE_ADMIN" 
             android:exported="true"> 
@@ -52,17 +59,16 @@
             </intent-filter> 
         </receiver>
 
-        <!-- Boot Receiver -->
         <receiver android:name="com.educontrolpro.BootReceiver" 
             android:exported="true"
             android:enabled="true">
             <intent-filter android:priority="999">
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
 
-        <!-- Accessibility Service -->
         <service android:name="com.educontrolpro.MonitorService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:label="Servicio de Monitoreo EDUControlPro"
@@ -74,22 +80,21 @@
             <meta-data android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Monitoreo educativo y protección de menores para cumplimiento de normativas escolares." />
+                android:value="Monitoreo educativo y protección de menores." />
         </service>
 
-        <!-- VPN Service -->
         <service android:name="com.educontrolpro.ParentalControlVpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"
             android:exported="false"
+            android:stopWithTask="false"
             android:foregroundServiceType="specialUse"> 
             <intent-filter>
                 <action android:name="android.net.VpnService" />
             </intent-filter>
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Filtrado de contenido web y control parental seguro mediante túnel local." />
+                android:value="Filtrado de contenido web educativo." />
         </service>
 
-        <!-- Main Activity -->
         <activity
             android:name="com.educontrolpro.MainActivity"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
@@ -103,7 +108,11 @@
             </intent-filter>
         </activity>
 
-        <!-- Lock Activity -->
+        <activity android:name="com.educontrolpro.VpnController"
+            android:label="Control de Seguridad VPN"
+            android:theme="@style/Theme.AppCompat.NoActionBar"
+            android:exported="true" />
+
         <activity android:name="com.educontrolpro.LockActivity"
             android:theme="@style/Theme.AppCompat.NoActionBar"
             android:launchMode="singleInstance"
@@ -114,7 +123,6 @@
             android:screenOrientation="portrait"
             android:noHistory="true" />
 
-        <!-- Message Activity -->
         <activity android:name="com.educontrolpro.MessageActivity"
             android:theme="@style/Theme.AppCompat.NoActionBar"
             android:launchMode="singleInstance"

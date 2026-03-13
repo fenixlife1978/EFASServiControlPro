@@ -27,15 +27,18 @@ public class FirebaseHelper {
                 for (QueryDocumentSnapshot document : task.getResult()) {
                     String domain = document.getString("domain");
                     if (domain != null) {
-                        domains.add(domain);
+                        domains.add(domain.toLowerCase().trim());
                     }
                 }
-                Log.d(TAG, "Sincronización exitosa. Dominios obtenidos: " + domains.size());
+                
+                SimpleLogger.i("Sincronización exitosa. Dominios en la nube: " + domains.size());
+                
                 if (vpnService != null) {
+                    // Llamamos al método en el servicio para actualizar la lista en memoria
                     vpnService.updateBlacklist(domains);
                 }
             } else {
-                Log.e(TAG, "Error al obtener la lista negra", task.getException());
+                SimpleLogger.e("Error al obtener la lista negra: " + task.getException());
             }
         });
     }
@@ -43,14 +46,21 @@ public class FirebaseHelper {
     public void reportBlockAttempt(String domain) {
         CollectionReference reportsRef = db.collection("blocked_attempts");
         BlockReport report = new BlockReport(domain, System.currentTimeMillis());
+        
         reportsRef.add(report)
-                .addOnSuccessListener(aVoid -> Log.d(TAG, "Intento reportado con éxito: " + domain))
-                .addOnFailureListener(e -> Log.e(TAG, "Error al reportar intento", e));
+                .addOnSuccessListener(documentReference -> {
+                    Log.d(TAG, "Intento reportado en Firestore: " + domain);
+                })
+                .addOnFailureListener(e -> {
+                    SimpleLogger.e("Error al reportar bloqueo de " + domain + ": " + e.getMessage());
+                });
     }
 
+    // Clase para el reporte de intentos
     static class BlockReport {
         public String domain;
         public long timestamp;
+        public String app = "EDUControlPro";
 
         public BlockReport(String domain, long timestamp) {
             this.domain = domain;

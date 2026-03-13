@@ -3,6 +3,7 @@ apply plugin: 'com.android.application'
 android {
     namespace "com.educontrolpro"
     compileSdk rootProject.ext.compileSdkVersion
+    
     defaultConfig {
         applicationId "com.educontrolpro"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -10,20 +11,29 @@ android {
         versionCode 7
         versionName "2.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        
         aaptOptions {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+
+    // Añadido para evitar conflictos de librerías de red (dnsjava)
+    packagingOptions {
+        resources {
+            excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE', 'META-INF/NOTICE']
+        }
+    }
 }
 
 repositories {
-    flatDir{
+    flatDir {
         dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
     }
 }
@@ -35,12 +45,16 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     
+    // --- LIBRERÍA DNS PARA MONITORIZACIÓN ---
+    // Vital para que ParentalControlVpnService pueda leer las URLs
+    implementation 'org.dnsjava:dnsjava:3.6.0'
+    
     // Firebase
     implementation platform('com.google.firebase:firebase-bom:33.1.0')
     implementation 'com.google.firebase:firebase-firestore'
     implementation 'com.google.firebase:firebase-analytics'
     
-    // ML Kit para escáner QR
+    // ML Kit para escáner QR (Útil para vincular tablets rápido)
     implementation 'com.google.mlkit:barcode-scanning:17.2.0'
     implementation 'com.google.android.gms:play-services-mlkit-barcode-scanning:18.3.0'
 

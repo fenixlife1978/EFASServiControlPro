@@ -1,164 +1,209 @@
 package com.educontrolpro;
 
 import android.app.Notification;
-import android.app.PendingIntent;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.content.Intent;
 import android.net.VpnService;
-import android.os.ParcelFileDescriptor;
 import android.os.Build;
+import android.os.ParcelFileDescriptor;
+import android.util.Log;
 import androidx.core.app.NotificationCompat;
-
+import org.xbill.DNS.Message;
+import org.xbill.DNS.Record;
+import org.xbill.DNS.Section;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 
-public class ParentalControlVpnService extends VpnService {
+public class ParentalControlVpnService extends VpnService implements Runnable {
 
-    private static final String VPN_ADDRESS = "10.0.0.2";
-    private static final int VPN_MTU = 1280;
+    private static final String TAG = "ParentalControlVpn";
+    private static final String CHANNEL_ID = "vpn_service_channel";
+    public static final String ACTION_START_VPN = "START_VPN";
+    public static final String ACTION_STOP_VPN = "STOP_VPN";
 
-    public static final String ACTION_START_VPN = "com.educontrolpro.START_VPN";
-
-    private ParcelFileDescriptor vpnInterface;
-    private AtomicBoolean isRunning = new AtomicBoolean(false);
     private Thread vpnThread;
+    private ParcelFileDescriptor vpnInterface;
+    private final HashSet<String> blacklist = new HashSet<>();
+    private final List<String> urlHistory = new ArrayList<>();
+    private FirebaseHelper firebaseHelper;
 
     @Override
     public void onCreate() {
         super.onCreate();
-        SimpleLogger.i("VPN Service - Modo puente simple (sin inspección)");
+        // Inicializar Helper de Firebase pasando este servicio como contexto
+        firebaseHelper = new FirebaseHelper(this);
+        
+        // Bloqueos de emergencia iniciales
+        synchronized (blacklist) {
+            blacklist.add("facebook.com");
+            blacklist.add("tiktok.com");
+            blacklist.add("instagram.com");
+        }
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        SimpleLogger.i("VPN Service - Iniciando modo puente");
-        
-        if (!isRunning.get()) {
-            isRunning.set(true);
-            vpnThread = new Thread(this::runVpn, "VpnThread");
-            vpnThread.start();
-            startForeground(1, createNotification());
+        if (intent != null) {
+            String action = intent.getAction();
+            if (ACTION_START_VPN.equals(action)) {
+                createNotificationChannel();
+                startForeground(1, getNotification());
+                SimpleLogger.i("VPN: Iniciando servicio en primer plano");
+                setupVpn();
+            } else if (ACTION_STOP_VPN.equals(action)) {
+                SimpleLogger.w("VPN: Deteniendo servicio");
+                stopVpn();
+            }
         }
         return START_STICKY;
     }
 
-    private void runVpn() {
-        SimpleLogger.i("VPN Service - Configurando túnel");
-        
+    private void setupVpn() {
+        if (vpnInterface != null) return;
+
+        // Disparar sincronización con Firestore
+        firebaseHelper.syncBlacklist();
+
         try {
             Builder builder = new Builder();
-            builder.setSession("EDUControl VPN");
-            builder.addAddress(VPN_ADDRESS, 32);
-            
-            // Capturar TODO el tráfico (necesario para "bloquear conexiones sin VPN")
-            builder.addRoute("0.0.0.0", 0);
-            
-            // Excluir nuestra app para evitar bucles
-            try {
-                builder.addDisallowedApplication(getPackageName());
-                SimpleLogger.i("VPN Service - App excluida del túnel: " + getPackageName());
-            } catch (Exception e) {
-                SimpleLogger.e("Error excluyendo app: " + e.getMessage());
-            }
-            
-            builder.setMtu(VPN_MTU);
-            
-            vpnInterface = builder.establish();
-            if (vpnInterface == null) {
-                SimpleLogger.e("VPN Service - No se pudo establecer interfaz");
-                stopVpn();
-                return;
-            }
+            builder.setSession("EduControlPro")
+                   .addAddress("10.0.0.2", 32)
+                   .addDnsServer("1.1.1.3") // DNS Cloudflare Families
+                   .addDnsServer("1.0.0.3")
+                   .addRoute("0.0.0.0", 0) 
+                   .setBlocking(true);
 
-            SimpleLogger.i("VPN Service - Túnel establecido, reenviando TODO el tráfico sin inspeccionar");
+            vpnInterface = builder.establish();
             
-            FileInputStream in = new FileInputStream(vpnInterface.getFileDescriptor());
-            FileOutputStream out = new FileOutputStream(vpnInterface.getFileDescriptor());
-            
-            ByteBuffer packet = ByteBuffer.allocate(VPN_MTU);
-            int packetCount = 0;
-            
-            while (isRunning.get() && !Thread.interrupted()) {
-                packet.clear();
-                int length = in.read(packet.array());
-                if (length <= 0) continue;
-                
-                // REENVIAR TODO SIN INSPECCIONAR NI FILTRAR
-                // El MonitorService (accesibilidad) se encarga de detectar y bloquear URLs
-                out.write(packet.array(), 0, length);
-                out.flush();
-                
-                packetCount++;
-                if (packetCount % 5000 == 0) {
-                    SimpleLogger.d("VPN Service - Paquetes reenviados: " + packetCount);
-                }
+            if (vpnInterface != null) {
+                SimpleLogger.i("VPN: Túnel establecido correctamente.");
+                vpnThread = new Thread(this, "ParentalControlVpnThread");
+                vpnThread.start();
             }
-            
         } catch (Exception e) {
-            SimpleLogger.e("VPN Service - Error: " + e.getMessage());
-        } finally {
-            stopVpn();
+            SimpleLogger.e("VPN Error: " + e.getMessage());
         }
     }
 
-    private void stopVpn() {
-        SimpleLogger.i("VPN Service - Deteniendo");
-        isRunning.set(false);
-        
-        if (vpnThread != null) {
-            vpnThread.interrupt();
-            try {
-                vpnThread.join(1000);
-            } catch (InterruptedException e) {
-                // Ignorar
-            }
-            vpnThread = null;
+    // Método que llama FirebaseHelper tras bajar los datos de Firestore
+    public void updateBlacklist(Set<String> newDomains) {
+        synchronized (blacklist) {
+            blacklist.clear();
+            blacklist.addAll(newDomains);
+            // Re-añadir críticos por seguridad
+            blacklist.add("facebook.com");
+            blacklist.add("tiktok.com");
         }
-        
+        SimpleLogger.i("VPN: Memoria actualizada con " + newDomains.size() + " dominios de la nube.");
+    }
+
+    private void stopVpn() {
+        if (vpnThread != null) vpnThread.interrupt();
         try {
             if (vpnInterface != null) {
                 vpnInterface.close();
                 vpnInterface = null;
             }
-        } catch (Exception e) {
-            SimpleLogger.e("Error cerrando interfaz: " + e.getMessage());
+        } catch (IOException e) {
+            SimpleLogger.e("VPN Stop Error: " + e.getMessage());
         }
-        
         stopForeground(true);
         stopSelf();
     }
 
-    private Notification createNotification() {
-        Intent intent = new Intent(this, VpnController.class);
-        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE);
-        
-        return new NotificationCompat.Builder(this, NotificationUtils.CHANNEL_ID)
-                .setContentTitle("EDUControl VPN")
-                .setContentText("Modo puente - Bloqueo por MonitorService")
-                .setSmallIcon(android.R.drawable.ic_lock_lock)
-                .setContentIntent(pendingIntent)
+    @Override
+    public void run() {
+        try (FileInputStream in = new FileInputStream(vpnInterface.getFileDescriptor());
+             FileOutputStream out = new FileOutputStream(vpnInterface.getFileDescriptor())) {
+
+            byte[] packet = new byte[32767];
+            while (!Thread.interrupted()) {
+                int length = in.read(packet);
+                if (length > 0) {
+                    String domain = extractDomain(packet, length);
+
+                    if (domain != null) {
+                        updateUrlHistory(domain);
+
+                        if (isDomainBlocked(domain)) {
+                            SimpleLogger.w("BLOQUEO DNS: " + domain);
+                            firebaseHelper.reportBlockAttempt(domain);
+                            continue; // Descarta el paquete (bloquea el acceso)
+                        }
+                    }
+                    out.write(packet, 0, length);
+                }
+            }
+        } catch (IOException e) {
+            SimpleLogger.e("VPN Loop Error: " + e.getMessage());
+        }
+    }
+
+    private boolean isDomainBlocked(String domain) {
+        synchronized (blacklist) {
+            for (String blocked : blacklist) {
+                if (domain.equals(blocked) || domain.endsWith("." + blocked)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private String extractDomain(byte[] packet, int length) {
+        try {
+            int dnsOffset = 28; 
+            if (length <= dnsOffset) return null;
+
+            byte[] dnsData = new byte[length - dnsOffset];
+            System.arraycopy(packet, dnsOffset, dnsData, 0, dnsData.length);
+
+            Message msg = new Message(dnsData);
+            Record[] records = msg.getSectionArray(Section.QUESTION);
+            if (records.length > 0) {
+                return records[0].getName().toString(true).toLowerCase();
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private void updateUrlHistory(String domain) {
+        synchronized (urlHistory) {
+            if (!urlHistory.isEmpty() && urlHistory.get(0).equals(domain)) return;
+            urlHistory.add(0, domain);
+            if (urlHistory.size() > 20) urlHistory.remove(urlHistory.size() - 1);
+            Log.d(TAG, "Tráfico: " + domain);
+        }
+    }
+
+    private void createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel serviceChannel = new NotificationChannel(
+                    CHANNEL_ID, "Servicio de Protección", NotificationManager.IMPORTANCE_LOW);
+            NotificationManager manager = getSystemService(NotificationManager.class);
+            if (manager != null) manager.createNotificationChannel(serviceChannel);
+        }
+    }
+
+    private Notification getNotification() {
+        return new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("EduControlPro Activo")
+                .setContentText("Filtrado de contenido en ejecución")
+                .setSmallIcon(android.R.drawable.ic_lock_lock) // Icono estándar de candado
                 .setOngoing(true)
                 .build();
     }
-
-    @Override
-    public void onRevoke() {
-        SimpleLogger.i("VPN Service - Permisos revocados");
-        stopVpn();
-    }
-
+    
     @Override
     public void onDestroy() {
-        super.onDestroy();
         stopVpn();
-    }
-
-    // Mantenemos este método por compatibilidad, pero ya no hace nada relevante
-    public void updateBlacklist(Set<String> newBlacklist) {
-        SimpleLogger.i("VPN Service - Lista negra ignorada (la maneja MonitorService)");
+        super.onDestroy();
+        
     }
 }
