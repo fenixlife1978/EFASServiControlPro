@@ -22,7 +22,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ParentalControlVpnService extends VpnService implements Runnable {
 
-    private static final String TAG = "ParentalControlVpn";
     private static final String CHANNEL_ID = "vpn_service_channel";
     public static final String ACTION_START_VPN = "START_VPN";
     public static final String ACTION_STOP_VPN = "STOP_VPN";
@@ -37,10 +36,20 @@ public class ParentalControlVpnService extends VpnService implements Runnable {
     public void onCreate() {
         super.onCreate();
         firebaseHelper = new FirebaseHelper(this);
-        // Bloqueos de prueba iniciales
+        
+        // Listener en tiempo real desde Firebase
+        firebaseHelper.listenForConfigChanges(new FirebaseHelper.ConfigListener() {
+            @Override
+            public void onBlacklistUpdated(Set<String> newBlacklist) {
+                updateBlacklist(newBlacklist);
+            }
+        });
+
+        // Bloqueos de seguridad persistentes
         synchronized (blacklist) {
             blacklist.add("facebook.com");
             blacklist.add("tiktok.com");
+            blacklist.add("instagram.com");
         }
     }
 
@@ -53,6 +62,7 @@ public class ParentalControlVpnService extends VpnService implements Runnable {
             }
         } else if (intent != null && ACTION_STOP_VPN.equals(intent.getAction())) {
             stopVpn();
+            stopSelf();
         }
         return START_STICKY;
     }
@@ -61,21 +71,18 @@ public class ParentalControlVpnService extends VpnService implements Runnable {
         try {
             Builder builder = new Builder();
             builder.setSession("EduControlPro")
-                   .setMtu(1280)
-                   .addAddress("10.0.0.2", 32);
+                    .setMtu(1500) // MTU estándar para evitar fragmentación de paquetes
+                    .addAddress("10.0.0.2", 32);
 
-            // LA CLAVE DEL ÉXITO: Solo interceptamos el tráfico DNS (8.8.8.8)
-            // Esto permite que el resto del internet (YouTube, Google, etc) 
-            // funcione por fuera del túnel, evitando que la app se quede sin red.
+            // Ruteamos SOLAMENTE el tráfico DNS (puerto 53) para no ralentizar la tablet
+            // Al agregar estas rutas específicas, el tráfico normal (HTTP/Video) no pasa por el túnel
             builder.addRoute("8.8.8.8", 32);
+            builder.addRoute("1.1.1.1", 32);
             builder.addDnsServer("8.8.8.8");
+            builder.addDnsServer("1.1.1.1");
 
-            // Excluir la propia app para que pueda hablar con Firebase
-            try {
-                builder.addDisallowedApplication(getPackageName());
-            } catch (Exception e) {
-                SimpleLogger.e("Error excluyendo app: " + e.getMessage());
-            }
+            // Excluir la app para que Firebase y el Logger funcionen fuera del túnel
+            builder.addDisallowedApplication(getPackageName());
 
             vpnInterface = builder.establish();
             
@@ -83,63 +90,77 @@ public class ParentalControlVpnService extends VpnService implements Runnable {
                 isRunning.set(true);
                 vpnThread = new Thread(this, "VpnThread");
                 vpnThread.start();
-                SimpleLogger.i("VPN: Túnel establecido (Modo Selectivo)");
+                SimpleLogger.i("VPN: Escudo DNS levantado.");
             }
         } catch (Exception e) {
-            SimpleLogger.e("VPN: Error al establecer: " + e.getMessage());
+            SimpleLogger.e("VPN: Error crítico en setup: " + e.getMessage());
         }
     }
 
     @Override
     public void run() {
+        // Usamos descriptores de archivo para lectura/escritura nativa
         try (FileInputStream in = new FileInputStream(vpnInterface.getFileDescriptor());
              FileOutputStream out = new FileOutputStream(vpnInterface.getFileDescriptor())) {
 
             byte[] packet = new byte[32767];
+            
             while (isRunning.get() && !Thread.interrupted()) {
                 int length = in.read(packet);
                 if (length > 0) {
                     String domain = extractDomain(packet, length);
 
                     if (domain != null && isDomainBlocked(domain)) {
-                        SimpleLogger.i("🚫 BLOQUEADO: " + domain);
+                        SimpleLogger.w("Bloqueo DNS: " + domain);
                         firebaseHelper.reportBlockAttempt(domain);
-                        continue; // No devolvemos el paquete = Bloqueo
+                        // No escribimos el paquete en 'out', matando la solicitud
+                        continue; 
                     }
                     
-                    // Si no es bloqueado, lo dejamos pasar
+                    // Reenviar paquete legítimo
                     out.write(packet, 0, length);
                 }
             }
         } catch (IOException e) {
-            SimpleLogger.e("VPN: Error en el hilo: " + e.getMessage());
+            if (isRunning.get()) {
+                SimpleLogger.e("VPN: Error de flujo: " + e.getMessage());
+            }
         } finally {
-            stopVpn();
+            cleanup();
         }
     }
 
     private String extractDomain(byte[] packet, int length) {
         try {
-            // Offset DNS estándar (IP 20 + UDP 8)
-            int dnsOffset = 28;
-            if (length <= dnsOffset) return null;
+            // Verificación rápida: ¿Es IPv4?
+            if ((packet[0] & 0xf0) != 0x40) return null;
 
-            byte[] dnsData = new byte[length - dnsOffset];
-            System.arraycopy(packet, dnsOffset, dnsData, 0, dnsData.length);
+            int ipHeaderLength = (packet[0] & 0x0f) * 4;
+            // ¿Es UDP?
+            if (packet[9] != 17) return null;
 
-            // Usamos dnsjava 3.5.3 que ya está en tu carpeta libs
+            // ¿Es Puerto 53?
+            int destPort = ((packet[ipHeaderLength + 2] & 0xff) << 8) | (packet[ipHeaderLength + 3] & 0xff);
+            if (destPort != 53) return null;
+
+            int dnsOffset = ipHeaderLength + 8;
+            int dnsLength = length - dnsOffset;
+            if (dnsLength <= 0) return null;
+
+            byte[] dnsData = new byte[dnsLength];
+            System.arraycopy(packet, dnsOffset, dnsData, 0, dnsLength);
+
             Message msg = new Message(dnsData);
             Record[] records = msg.getSectionArray(Section.QUESTION);
             if (records != null && records.length > 0) {
                 return records[0].getName().toString(true).toLowerCase();
             }
-        } catch (Exception e) {
-            // No es un paquete DNS válido, se ignora
-        }
+        } catch (Exception ignored) {}
         return null;
     }
 
     private boolean isDomainBlocked(String domain) {
+        if (domain == null) return false;
         synchronized (blacklist) {
             for (String blocked : blacklist) {
                 if (domain.equals(blocked) || domain.endsWith("." + blocked)) {
@@ -153,19 +174,20 @@ public class ParentalControlVpnService extends VpnService implements Runnable {
     private void iniciarForeground() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
-                    CHANNEL_ID, "Seguridad EduControl", NotificationManager.IMPORTANCE_LOW);
+                    CHANNEL_ID, "Servicio de Red", NotificationManager.IMPORTANCE_MIN);
             NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager != null) manager.createNotificationChannel(channel);
         }
 
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("EduControlPro Activo")
-                .setContentText("Protección de navegación habilitada")
-                .setSmallIcon(android.R.drawable.ic_lock_lock)
+                .setContentTitle("Protección de Red")
+                .setContentText("Filtrado de contenido educativo activo")
+                .setSmallIcon(android.R.drawable.ic_lock_power_off) // Icono discreto
+                .setPriority(NotificationCompat.PRIORITY_MIN) // Silenciosa
                 .setOngoing(true)
                 .build();
 
-        startForeground(1, notification);
+        startForeground(2, notification); // ID 2 para no chocar con MonitorService
     }
 
     public void updateBlacklist(Set<String> newDomains) {
@@ -173,12 +195,10 @@ public class ParentalControlVpnService extends VpnService implements Runnable {
             blacklist.clear();
             blacklist.addAll(newDomains);
         }
-        SimpleLogger.i("Lista negra actualizada: " + newDomains.size() + " sitios.");
     }
 
-    private void stopVpn() {
+    private void cleanup() {
         isRunning.set(false);
-        if (vpnThread != null) vpnThread.interrupt();
         try {
             if (vpnInterface != null) {
                 vpnInterface.close();
@@ -187,6 +207,11 @@ public class ParentalControlVpnService extends VpnService implements Runnable {
         } catch (Exception e) {
             SimpleLogger.e("Error cerrando VPN: " + e.getMessage());
         }
+    }
+
+    private void stopVpn() {
+        cleanup();
+        if (vpnThread != null) vpnThread.interrupt();
         stopForeground(true);
     }
 
@@ -194,6 +219,5 @@ public class ParentalControlVpnService extends VpnService implements Runnable {
     public void onDestroy() {
         stopVpn();
         super.onDestroy();
-        
     }
 }

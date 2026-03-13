@@ -3,20 +3,72 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:gravity="center_horizontal"
+    android:background="#F5F7FA"
+    android:padding="24dp">
 
-    <Button
-        android:id="@+id/button_start_vpn"
+    <ImageView
+        android:layout_width="80dp"
+        android:layout_height="80dp"
+        android:layout_marginTop="32dp"
+        android:src="@drawable/ic_security_shield" 
+        android:contentDescription="Escudo de Seguridad"
+        android:tint="#1A237E" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Protección de Red"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:textColor="#1A237E"
+        android:layout_marginTop="16dp"/>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Filtrado DNS activo para contenido educativo"
+        android:textSize="14sp"
+        android:textColor="#546E7A"
+        android:layout_marginBottom="40dp"
+        android:textAlignment="center"/>
+
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Iniciar VPN"
-        android:layout_marginBottom="16dp"/>
+        android:orientation="vertical"
+        android:background="@android:color/white"
+        android:elevation="4dp"
+        android:padding="20dp">
 
-    <Button
-        android:id="@+id/button_stop_vpn"
-        android:layout_width="match_parent"
+        <Button
+            android:id="@+id/button_start_vpn"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:text="ACTIVAR PROTECCIÓN"
+            android:backgroundTint="#FF9800"
+            android:textColor="@android:color/white"
+            android:textStyle="bold"
+            android:layout_marginBottom="12dp"/>
+
+        <Button
+            android:id="@+id/button_stop_vpn"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:text="DESACTIVAR"
+            android:backgroundTint="#E0E0E0"
+            android:textColor="#757575"
+            android:enabled="false"/>
+        
+    </LinearLayout>
+
+    <TextView
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Detener VPN"
-        android:enabled="false"/>
+        android:layout_marginTop="24dp"
+        android:text="Estado: Configurando políticas de administrador..."
+        android:textSize="12sp"
+        android:textColor="#90A4AE"
+        android:fontFamily="sans-serif-light"/>
 
 </LinearLayout>

@@ -10,30 +10,42 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 @CapacitorPlugin(name = "LiberarPlugin")
 public class LiberarPlugin extends Plugin {
 
-    // Cambié el nombre a 'liberar' para que coincida con lo que suele llamar el botón
+    /**
+     * Llama al proceso de liberación total. 
+     * Se usa 'runOnUiThread' para asegurar que el cambio de permisos de sistema
+     * y el cierre de la VPN no bloqueen la app.
+     */
     @PluginMethod
     public void liberar(PluginCall call) {
         try {
-            Intent intent = new Intent(getContext(), MainActivity.class);
-            // Esta acción debe ser procesada en el onNewIntent de MainActivity si quieres que sea instantáneo
-            intent.setAction("ACTION_LIBERAR_TAB");
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-            
-            getContext().startActivity(intent);
-
-            JSObject ret = new JSObject();
-            ret.put("status", "success");
-            ret.put("message", "Comando de liberación enviado al sistema nativo");
-            call.resolve(ret);
+            if (getActivity() instanceof MainActivity) {
+                MainActivity mainActivity = (MainActivity) getActivity();
+                
+                getActivity().runOnUiThread(() -> {
+                    mainActivity.liberarDispositivoTotal();
+                    
+                    JSObject ret = new JSObject();
+                    ret.put("status", "success");
+                    ret.put("message", "Dispositivo liberado satisfactoriamente");
+                    call.resolve(ret);
+                });
+            } else {
+                call.reject("No se pudo obtener la instancia de MainActivity");
+            }
         } catch (Exception e) {
-            call.reject("Error al enviar comando de liberación: " + e.getMessage());
+            SimpleLogger.e("Error en Plugin Liberar: " + e.getMessage());
+            call.reject("Error al procesar liberación: " + e.getMessage());
         }
     }
 
+    /**
+     * Reinicia el flujo de seguridad (Admin + VPN)
+     */
     @PluginMethod
     public void rebloquear(PluginCall call) {
         try {
             Intent intent = new Intent(getContext(), MainActivity.class);
+            // Esta acción disparará el flujo normal de onCreate/onNewIntent en MainActivity
             intent.setAction("ACTION_REBLOQUEAR_TAB");
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
             

@@ -12,5 +12,9 @@
         <watch-login />
         
         <disable-camera />
+
+        <reset-password />
+
+        <encrypt-storage />
     </uses-policies>
 </device-admin>

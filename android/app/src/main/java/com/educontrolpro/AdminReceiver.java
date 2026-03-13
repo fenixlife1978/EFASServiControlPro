@@ -7,73 +7,90 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.os.UserManager;
-import android.util.Log;
 import android.widget.Toast;
+
+import androidx.annotation.NonNull;
 
 public class AdminReceiver extends DeviceAdminReceiver {
 
-    private static final String TAG = "EDU_Admin";
-
     @Override
-    public void onEnabled(Context context, Intent intent) {
+    public void onEnabled(@NonNull Context context, @NonNull Intent intent) {
         super.onEnabled(context, intent);
-        Log.d(TAG, "Admin habilitado");
+        SimpleLogger.i("Admin habilitado. Aplicando políticas de blindaje...");
 
         DevicePolicyManager dpm = (DevicePolicyManager) context.getSystemService(Context.DEVICE_POLICY_SERVICE);
         ComponentName adminComponent = new ComponentName(context, AdminReceiver.class);
 
         try {
-            // --- IDENTIDAD INSTITUCIONAL (Resuelve el "ruido" de notificaciones) ---
+            // 1. IDENTIDAD INSTITUCIONAL
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                dpm.setOrganizationName(adminComponent, "EDUControlPro - Gestión Institucional");
+                dpm.setOrganizationName(adminComponent, "EduControlPro - Gestión Institucional");
             }
 
-            // --- RESTRICCIONES DE DEVICE OWNER (Blindaje V10.3) ---
-            
-            // 1. Bloqueo de Desinstalación
-            dpm.setUninstallBlocked(adminComponent, context.getPackageName(), true);
-            
-            // 2. Bloqueo de Restablecimiento y Usuarios
-            dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_FACTORY_RESET);
-            dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_ADD_USER);
-            
-            // 3. Bloqueo de Modos de Evasión (Modo Seguro y Debug USB)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_SAFE_BOOT);
-            }
-            dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_DEBUGGING_FEATURES);
-            
-            // 4. Control de Red y VPN (Mantiene el túnel siempre activo)
-            dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_CONFIG_VPN);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                dpm.setAlwaysOnVpnPackage(adminComponent, context.getPackageName(), true);
+            // 2. RESTRICCIONES DE DEVICE OWNER (Vía ADB)
+            if (dpm.isDeviceOwnerApp(context.getPackageName())) {
+                
+                // --- BLOQUEO DE CONFIGURACIÓN ---
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    // Suspendemos ajustes para que no puedan manipular la red o apps
+                    String[] packagesToSuspend = {"com.android.settings"};
+                    dpm.setPackagesSuspended(adminComponent, packagesToSuspend, true);
+                }
+
+                // Blindaje contra desinstalación y factory reset
+                dpm.setUninstallBlocked(adminComponent, context.getPackageName(), true);
+                dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_FACTORY_RESET);
+                dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_ADD_USER);
+                dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_MOUNT_PHYSICAL_MEDIA); // Evita OTG/SD con scripts
+                
+                // Evitar el Modo Seguro (Safe Boot) - Crucial para que no desactiven el MonitorService
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_SAFE_BOOT);
+                }
+                
+                // Bloqueo de depuración USB
+                dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_DEBUGGING_FEATURES);
+                
+                // CONTROL TOTAL DE VPN
+                dpm.addUserRestriction(adminComponent, UserManager.DISALLOW_CONFIG_VPN);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    // Forzamos que nuestra VPN esté siempre activa y no se pueda saltar
+                    try {
+                        dpm.setAlwaysOnVpnPackage(adminComponent, context.getPackageName(), true);
+                    } catch (Exception e) {
+                        SimpleLogger.e("Error en Always-On VPN: " + e.getMessage());
+                    }
+                }
+                
+                SimpleLogger.i("Políticas de Device Owner aplicadas.");
+            } else {
+                SimpleLogger.w("La app no es Device Owner. Aplicando políticas básicas.");
+                // Políticas básicas si solo es Device Admin
+                dpm.setPasswordQuality(adminComponent, DevicePolicyManager.PASSWORD_QUALITY_SOMETHING);
             }
 
-            Log.d(TAG, "Políticas de Device Owner aplicadas correctamente.");
-        } catch (SecurityException e) {
-            Log.e(TAG, "Error: Permisos insuficientes. La app debe ser Device Owner.");
         } catch (Exception e) {
-            Log.e(TAG, "Error en configuración: " + e.getMessage());
+            SimpleLogger.e("Error en AdminReceiver: " + e.getMessage());
         }
 
-        Toast.makeText(context, "EDUControlPro: Protección de Dispositivo Activada", Toast.LENGTH_SHORT).show();
+        Toast.makeText(context, "Protección Institucional Activa", Toast.LENGTH_SHORT).show();
     }
 
     @Override
-    public CharSequence onDisableRequested(Context context, Intent intent) {
-        // Interrupción proactiva: Si intentan entrar a desactivarlo, disparamos el bloqueo
+    public CharSequence onDisableRequested(@NonNull Context context, @NonNull Intent intent) {
+        // Interceptamos el intento de desactivar el Admin
+        // Esto lanzará nuestra LockActivity inmediatamente
         Intent lockIntent = new Intent(context, LockActivity.class);
-        lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        lockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        lockIntent.putExtra("tipo_bloqueo", "ADMIN_DISABLE_ATTEMPT");
         context.startActivity(lockIntent);
 
-        return "ADVERTENCIA: Si desactiva la protección, el dispositivo perderá acceso a la red institucional y será reportado.";
+        return "ALERTA: Esta acción desactiva la protección escolar. El intento será reportado al panel administrativo.";
     }
 
     @Override
-    public void onDisabled(Context context, Intent intent) {
+    public void onDisabled(@NonNull Context context, @NonNull Intent intent) {
         super.onDisabled(context, intent);
-        Log.w(TAG, "Admin deshabilitado");
-        Toast.makeText(context, "EDUControlPro: La protección ha sido desactivada", Toast.LENGTH_SHORT).show();
- 
+        SimpleLogger.w("Protección desactivada.");
     }
 }
