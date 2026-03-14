@@ -63,7 +63,7 @@ public class MonitorService extends AccessibilityService {
         "com.miui.securitycenter"
     );
 
-    // Palabras prohibidas para búsquedas (Sincronizar con Dashboard)
+    // Palabras prohibidas para búsquedas
     private static final List<String> PALABRAS_PROHIBIDAS = Arrays.asList(
         "xxx", "porno", "sexo", "juegos", "hack", "casino", "gore", "descargar"
     );
@@ -155,12 +155,10 @@ public class MonitorService extends AccessibilityService {
                 }
             });
 
-        // 2. CONFIGURACIÓN DEL DISPOSITIVO (Fallback / General)
+        // 2. CONFIGURACIÓN DEL DISPOSITIVO
         deviceListener = db.collection("dispositivos").document(docId)
             .addSnapshotListener((snapshot, e) -> {
                 if (snapshot != null && snapshot.exists()) {
-                    Boolean shield = snapshot.getBoolean("shieldMode");
-                    // Sincronizar apps prohibidas específicas del dispositivo
                     this.blacklistApps = (List<String>) snapshot.get("blacklistApps");
                     if (this.blacklistApps == null) this.blacklistApps = new ArrayList<>();
                 }
@@ -207,7 +205,12 @@ public class MonitorService extends AccessibilityService {
 
         // B. MONITOREO DE NAVEGADORES (Búsquedas prohibidas)
         if (esNavegador(packageName)) {
-            analizarContenidoNavegador(event);
+            // REGLA DE ORO: No expulsamos mientras escriben (TYPE_VIEW_TEXT_CHANGED se ignora).
+            // Solo actuamos si hay una acción de ejecución (Clic o cambio de página).
+            if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED || 
+                eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+                analizarContenidoNavegador();
+            }
         }
     }
 
@@ -216,12 +219,13 @@ public class MonitorService extends AccessibilityService {
         return p.contains("chrome") || p.contains("browser") || p.contains("firefox") || p.contains("edge") || p.contains("opera");
     }
 
-    private void analizarContenidoNavegador(AccessibilityEvent event) {
-        AccessibilityNodeInfo node = event.getSource();
+    private void analizarContenidoNavegador() {
+        AccessibilityNodeInfo node = getRootInActiveWindow();
         if (node == null) return;
 
-        // Buscamos campos de texto (Omnibox, Search Inputs)
+        // Buscamos campos de texto (Omnibox, Search Inputs) y validamos
         buscarYValidarNodos(node);
+        node.recycle();
     }
 
     private void buscarYValidarNodos(AccessibilityNodeInfo node) {
@@ -234,9 +238,8 @@ public class MonitorService extends AccessibilityService {
                 String input = text.toString().toLowerCase();
                 for (String word : PALABRAS_PROHIBIDAS) {
                     if (input.contains(word)) {
-                        // DETECCIÓN DE CONFIRMACIÓN: Si detectamos que el usuario está "buscando"
-                        // En la mayoría de navegadores, el cambio de ventana o el click en el botón Go
-                        // activará esta lógica.
+                        // DETECCIÓN DE CONFIRMACIÓN: Al ser invocada desde un evento de CLICK o CONTENT_CHANGED,
+                        // sabemos que el alumno ha intentado ejecutar la búsqueda.
                         reportarYExpulsar("BUSQUEDA_PROHIBIDA", "Término restringido detectado: " + word, input);
                         return;
                     }
@@ -244,9 +247,13 @@ public class MonitorService extends AccessibilityService {
             }
         }
 
-        // Recorrer hijos de forma recursiva
+        // Recorrer hijos de forma recursiva con gestión de memoria (recycle)
         for (int i = 0; i < node.getChildCount(); i++) {
-            buscarYValidarNodos(node.getChild(i));
+            AccessibilityNodeInfo child = node.getChild(i);
+            if (child != null) {
+                buscarYValidarNodos(child);
+                child.recycle();
+            }
         }
     }
 
