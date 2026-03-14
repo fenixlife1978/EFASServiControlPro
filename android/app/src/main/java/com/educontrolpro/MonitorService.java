@@ -33,25 +33,19 @@ public class MonitorService extends AccessibilityService {
     // VARIABLES DE IDENTIDAD
     private String deviceDocId;
     private String InstitutoId;
-    private String aulaId;
-    private String seccion;
-    private String nombreInstituto;
     private String alumnoAsignado = "";
     
-    private static final String PREFS_NAME = "AdminPrefs";
     private static final String CAPACITOR_PREFS = "CapacitorStorage"; 
     private static final String KEY_DEVICE_ID = "deviceId";
     private static final String CHANNEL_ID = "EDU_Service_Channel";
 
     // VARIABLES DE ESTADO Y COMANDOS
     private boolean allowAccess = false; // Control remoto para técnicos
-    private boolean shieldMode = false;
     private boolean useBlacklist = false;
-    private boolean useWhitelist = false;
     private List<String> listaNegra = new ArrayList<>();
-    private List<String> whitelist = new ArrayList<>();
+    private List<String> blacklistApps = new ArrayList<>();
     
-    // Apps del sistema que siempre deben permitirse para no romper el OS
+    // Apps del sistema que siempre deben permitirse
     private List<String> listaBlancaSistema = Arrays.asList(
         "com.android.packageinstaller",
         "com.google.android.packageinstaller",
@@ -69,9 +63,9 @@ public class MonitorService extends AccessibilityService {
         "com.miui.securitycenter"
     );
 
-    // Palabras prohibidas para búsquedas
+    // Palabras prohibidas para búsquedas (Sincronizar con Dashboard)
     private static final List<String> PALABRAS_PROHIBIDAS = Arrays.asList(
-        "xxx", "porno", "sexo", "juegos", "hack", "casino", "gore"
+        "xxx", "porno", "sexo", "juegos", "hack", "casino", "gore", "descargar"
     );
 
     // Listeners
@@ -109,7 +103,7 @@ public class MonitorService extends AccessibilityService {
    
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel serviceChannel = new NotificationChannel(CHANNEL_ID, "Monitoreo EDU", NotificationManager.IMPORTANCE_LOW);
+            NotificationChannel serviceChannel = new NotificationChannel(CHANNEL_ID, "Centinela EDU", NotificationManager.IMPORTANCE_LOW);
             NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager != null) manager.createNotificationChannel(serviceChannel);
         }
@@ -117,8 +111,8 @@ public class MonitorService extends AccessibilityService {
    
     private Notification getNotification() {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("EDUControlPro Activo")
-                .setContentText("Protección de sistema activa")
+                .setContentTitle("EDU Centinela Activo")
+                .setContentText("Protección de sistema en tiempo real")
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true)
@@ -151,26 +145,24 @@ public class MonitorService extends AccessibilityService {
     }
     
     private void iniciarListeners(String docId) {
-        // 1. CONTROL DE TÉCNICO (allowAccess)
+        // 1. CONTROL DE TÉCNICO (Real-time override)
         techListener = db.collection("devices").document(docId).collection("settings").document("remote")
             .addSnapshotListener((snapshot, e) -> {
                 if (snapshot != null && snapshot.exists()) {
                     Boolean allow = snapshot.getBoolean("allowAccess");
                     this.allowAccess = (allow != null && allow);
-                    Log.d("EDU_Monitor", "Modo Técnico: " + this.allowAccess);
+                    Log.d("EDU_Monitor", "Modo Técnico Actualizado: " + this.allowAccess);
                 }
             });
 
-        // 2. CONFIGURACIÓN DEL DISPOSITIVO
+        // 2. CONFIGURACIÓN DEL DISPOSITIVO (Fallback / General)
         deviceListener = db.collection("dispositivos").document(docId)
             .addSnapshotListener((snapshot, e) -> {
                 if (snapshot != null && snapshot.exists()) {
                     Boolean shield = snapshot.getBoolean("shieldMode");
-                    this.shieldMode = (shield != null && shield);
-                    
-                    // Si allowAccess no está en la ruta anterior, lo buscamos aquí también como fallback
-                    Boolean allow = snapshot.getBoolean("allowAccess");
-                    if (allow != null) this.allowAccess = allow;
+                    // Sincronizar apps prohibidas específicas del dispositivo
+                    this.blacklistApps = (List<String>) snapshot.get("blacklistApps");
+                    if (this.blacklistApps == null) this.blacklistApps = new ArrayList<>();
                 }
             });
 
@@ -189,21 +181,25 @@ public class MonitorService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (allowAccess) return; // Si el técnico tiene acceso, no bloqueamos nada
+        // REGLA MAESTRA: Si el técnico tiene acceso, el Centinela se apaga
+        if (allowAccess) return;
 
         String packageName = event.getPackageName() != null ? event.getPackageName().toString() : "";
         int eventType = event.getEventType();
 
-        // A. BLOQUEO DE APPS Y AJUSTES (Al abrir la ventana)
+        // A. BLOQUEO DE APPS Y AJUSTES
         if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            // Bloqueo de Ajustes
+            // Evitar que el OS se rompa
+            if (listaBlancaSistema.contains(packageName)) return;
+
+            // 1. Bloqueo de Ajustes (Expulsión inmediata)
             if (packagesSettings.contains(packageName)) {
-                reportarYExpulsar("INTENTO_AJUSTES", "Acceso denegado a configuraciones", packageName);
+                reportarYExpulsar("INTENTO_AJUSTES", "Intento de acceso a configuración", packageName);
                 return;
             }
 
-            // Bloqueo de Apps Prohibidas (Blacklist de paquetes)
-            if (useBlacklist && listaNegra.contains(packageName)) {
+            // 2. Bloqueo de Apps Prohibidas (Blacklist)
+            if (blacklistApps.contains(packageName)) {
                 reportarYExpulsar("APP_PROHIBIDA", "Intento de abrir aplicación restringida", packageName);
                 return;
             }
@@ -217,46 +213,50 @@ public class MonitorService extends AccessibilityService {
 
     private boolean esNavegador(String pkg) {
         String p = pkg.toLowerCase();
-        return p.contains("chrome") || p.contains("browser") || p.contains("firefox") || p.contains("edge");
+        return p.contains("chrome") || p.contains("browser") || p.contains("firefox") || p.contains("edge") || p.contains("opera");
     }
 
     private void analizarContenidoNavegador(AccessibilityEvent event) {
         AccessibilityNodeInfo node = event.getSource();
         if (node == null) return;
 
-        // Buscamos campos de texto (Omnibox o buscadores)
+        // Buscamos campos de texto (Omnibox, Search Inputs)
         buscarYValidarNodos(node);
     }
 
     private void buscarYValidarNodos(AccessibilityNodeInfo node) {
         if (node == null) return;
 
+        // Revisar si el nodo es un campo de entrada de texto
         if (node.getClassName() != null && node.getClassName().toString().contains("EditText")) {
             CharSequence text = node.getText();
             if (text != null) {
                 String input = text.toString().toLowerCase();
                 for (String word : PALABRAS_PROHIBIDAS) {
                     if (input.contains(word)) {
-                        // Si detectamos la palabra, verificamos si es una acción de confirmar/enviar
-                        reportarYExpulsar("BUSQUEDA_PROHIBIDA", "Término restringido: " + word, input);
+                        // DETECCIÓN DE CONFIRMACIÓN: Si detectamos que el usuario está "buscando"
+                        // En la mayoría de navegadores, el cambio de ventana o el click en el botón Go
+                        // activará esta lógica.
+                        reportarYExpulsar("BUSQUEDA_PROHIBIDA", "Término restringido detectado: " + word, input);
                         return;
                     }
                 }
             }
         }
 
+        // Recorrer hijos de forma recursiva
         for (int i = 0; i < node.getChildCount(); i++) {
             buscarYValidarNodos(node.getChild(i));
         }
     }
 
     private void reportarYExpulsar(String tipo, String desc, String detalle) {
-        Log.w("EDU_Monitor", "🔒 BLOQUEO: " + desc);
+        Log.w("EDU_Centinela", "🔒 ACCIÓN BLOQUEADA: " + desc + " (" + detalle + ")");
         
-        // 1. Expulsar al escritorio (Home)
+        // 1. Expulsar al escritorio (Home) inmediatamente
         performGlobalAction(GLOBAL_ACTION_HOME);
 
-        // 2. Reportar a Firebase
+        // 2. Reportar a Firebase (Dashboard)
         if (deviceDocId != null) {
             Map<String, Object> alerta = new HashMap<>();
             alerta.put("tipo", tipo);
