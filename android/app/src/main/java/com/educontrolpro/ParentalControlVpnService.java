@@ -12,13 +12,14 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Servicio de VPN en modo puente para EduControlPro.
- * Excluye la propia aplicación para permitir reportes a Firestore sin bucles.
+ * Servicio de VPN con bloqueo de URLs desde Firebase
  */
-public class ParentalControlVpnService extends VpnService {
+public class ParentalControlVpnService extends VpnService implements FirebaseBlockerManager.OnBlockedSitesUpdatedListener {
     private static final String VPN_ADDRESS = "10.0.0.2";
     private static final int VPN_MTU = 1280;
     
@@ -29,13 +30,22 @@ public class ParentalControlVpnService extends VpnService {
     private ParcelFileDescriptor vpnInterface;
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
     private Thread vpnThread;
+    
+    // Firebase Blocker
+    private FirebaseBlockerManager blockerManager;
+    private Set<String> sitiosBloqueados = new HashSet<>();
 
     @Override
     public void onCreate() {
         super.onCreate();
-        // Creamos el canal de notificación (obligatorio para Android 8+)
+        // Notificación
         NotificationUtils.createNotificationChannel(this);
-        SimpleLogger.i("VPN Service - Inicializado");
+        
+        // Inicializar Firebase Blocker
+        blockerManager = FirebaseBlockerManager.getInstance();
+        blockerManager.startListening(this);
+        
+        SimpleLogger.i("VPN Service - Inicializado con Firebase Blocker");
     }
 
     @Override
@@ -52,7 +62,6 @@ public class ParentalControlVpnService extends VpnService {
             vpnThread = new Thread(this::runVpn, "VpnThread");
             vpnThread.start();
             
-            // Iniciamos como servicio de primer plano
             startForeground(101, createNotification());
         }
 
@@ -66,10 +75,10 @@ public class ParentalControlVpnService extends VpnService {
             Builder builder = new Builder();
             builder.setSession("EduControlPro VPN");
             builder.addAddress(VPN_ADDRESS, 32);
-            builder.addRoute("0.0.0.0", 0); // Captura todo el tráfico saliente
+            builder.addRoute("0.0.0.0", 0);
             builder.setMtu(VPN_MTU);
 
-            // --- EXCLUSIÓN DE LA APP (CRÍTICO) ---
+            // Excluir nuestra app
             try {
                 builder.addDisallowedApplication(getPackageName());
                 SimpleLogger.i("VPN Service - Exclusión exitosa: " + getPackageName());
@@ -77,29 +86,36 @@ public class ParentalControlVpnService extends VpnService {
                 SimpleLogger.e("VPN Service - Error al excluir paquete: " + e.getMessage());
             }
 
-            // Establecer la interfaz
             vpnInterface = builder.establish();
             if (vpnInterface == null) {
-                SimpleLogger.e("VPN Service - No se pudo establecer la interfaz (posible conflicto)");
+                SimpleLogger.e("VPN Service - No se pudo establecer la interfaz");
                 return;
             }
 
-            // Flujo de datos (Puente Simple)
+            ByteBuffer packet = ByteBuffer.allocate(VPN_MTU);
+            byte[] packetArray = packet.array();
+            
             try (FileInputStream in = new FileInputStream(vpnInterface.getFileDescriptor());
                  FileOutputStream out = new FileOutputStream(vpnInterface.getFileDescriptor())) {
                 
-                ByteBuffer packet = ByteBuffer.allocate(VPN_MTU);
                 int packetCount = 0;
+                int blockedCount = 0;
 
                 while (isRunning.get() && !Thread.interrupted()) {
-                    int length = in.read(packet.array());
+                    int length = in.read(packetArray);
                     if (length > 0) {
-                        // Reenvío de datos sin inspección (Modo Puente)
-                        out.write(packet.array(), 0, length);
-                        packetCount++;
-                        
-                        if (packetCount % 5000 == 0) {
-                            SimpleLogger.d("VPN Service - Tráfico activo: " + packetCount + " paquetes procesados");
+                        if (debeBloquearPaquete(packetArray, length)) {
+                            blockedCount++;
+                            if (blockedCount % 100 == 0) {
+                                SimpleLogger.d("VPN Service - Paquetes bloqueados: " + blockedCount);
+                            }
+                        } else {
+                            out.write(packetArray, 0, length);
+                            packetCount++;
+                            
+                            if (packetCount % 5000 == 0) {
+                                SimpleLogger.d("VPN Service - Tráfico permitido: " + packetCount + " paquetes");
+                            }
                         }
                     }
                     packet.clear();
@@ -112,11 +128,47 @@ public class ParentalControlVpnService extends VpnService {
         }
     }
 
+    private boolean debeBloquearPaquete(byte[] packet, int length) {
+        if (sitiosBloqueados.isEmpty() || length < 10) {
+            return false;
+        }
+        
+        try {
+            int analyzeLength = Math.min(length, 500);
+            String packetContent = new String(packet, 0, analyzeLength).toLowerCase();
+            
+            if (packetContent.contains("http://") || packetContent.contains("https://") || 
+                packetContent.contains("host:")) {
+                
+                for (String sitio : sitiosBloqueados) {
+                    if (packetContent.contains(sitio)) {
+                        SimpleLogger.d("🚫 BLOQUEADO: " + sitio);
+                        return true;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // Ignorar errores
+        }
+        
+        return false;
+    }
+
+    @Override
+    public void onBlockedSitesUpdated(Set<String> sitios) {
+        this.sitiosBloqueados = sitios;
+        SimpleLogger.i("📋 Lista actualizada: " + sitios.size() + " sitios");
+    }
+
     private void stopVpn() {
         if (!isRunning.get() && vpnInterface == null) return;
 
         isRunning.set(false);
-        SimpleLogger.i("VPN Service - Cerrando túnel y deteniendo servicio");
+        SimpleLogger.i("VPN Service - Cerrando túnel");
+
+        if (blockerManager != null) {
+            blockerManager.stopListening();
+        }
 
         if (vpnThread != null) {
             vpnThread.interrupt();
@@ -127,7 +179,7 @@ public class ParentalControlVpnService extends VpnService {
             try {
                 vpnInterface.close();
             } catch (IOException e) {
-                SimpleLogger.e("VPN Service - Error al cerrar ParcelFileDescriptor: " + e.getMessage());
+                SimpleLogger.e("VPN Service - Error al cerrar: " + e.getMessage());
             }
             vpnInterface = null;
         }
@@ -137,7 +189,6 @@ public class ParentalControlVpnService extends VpnService {
     }
 
     private Notification createNotification() {
-        // El intent ahora apunta a MainActivity para que al tocar la notificación abra la app
         Intent intent = new Intent(this, MainActivity.class);
         int flags = PendingIntent.FLAG_IMMUTABLE;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -148,7 +199,7 @@ public class ParentalControlVpnService extends VpnService {
 
         return new NotificationCompat.Builder(this, NotificationUtils.CHANNEL_ID)
                 .setContentTitle("EduControlPro Activo")
-                .setContentText("Filtrado de contenido en ejecución")
+                .setContentText("Filtrado activo - " + sitiosBloqueados.size() + " sitios bloqueados")
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
@@ -159,7 +210,7 @@ public class ParentalControlVpnService extends VpnService {
 
     @Override
     public void onRevoke() {
-        SimpleLogger.w("VPN Service - El usuario o el sistema revocó el permiso de VPN");
+        SimpleLogger.w("VPN Service - Permiso revocado");
         stopVpn();
         super.onRevoke();
     }

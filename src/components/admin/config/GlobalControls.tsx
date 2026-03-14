@@ -2,27 +2,49 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/firebase';
-import { collection, doc, onSnapshot, updateDoc, setDoc, query, where, getDocs } from 'firebase/firestore';
-import { Power, ShieldAlert, GlobeLock, Zap, Loader2, Lock, Eye, EyeOff, RotateCcw, List } from 'lucide-react';
+import { collection, doc, onSnapshot, updateDoc, setDoc, query, where, getDocs, DocumentData } from 'firebase/firestore';
+import { Power, ShieldAlert, GlobeLock, Zap, Loader2, Lock, EyeOff, RotateCcw, List, Wifi } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 
+// Definir tipos para los datos
+interface Dispositivo {
+  id: string;
+  alumno_asignado?: string;
+  vpn_activa?: boolean;
+  [key: string]: any;
+}
+
+interface InstitucionConfig {
+  blockAllBrowsing: boolean;
+  useBlacklist: boolean;
+  useWhitelist: boolean;
+  shieldMode: boolean;
+  cortarNavegacion: boolean;
+  pinBloqueo: string;
+  maintenanceMode: boolean;
+  vpn_enabled: boolean;
+  vpn_status: string;
+}
+
 export function GlobalControls({ institutionId }: { institutionId: string }) {
-  const [config, setConfig] = useState({
+  const [config, setConfig] = useState<InstitucionConfig>({
     blockAllBrowsing: false,
     useBlacklist: false,
-    useWhitelist: false, // NUEVO: modo solo lista blanca
+    useWhitelist: false,
     shieldMode: false,
     cortarNavegacion: false,
     pinBloqueo: '',
     maintenanceMode: false,
-    vpn_enabled: false
+    vpn_enabled: false,
+    vpn_status: 'off'
   });
   const [loading, setLoading] = useState(true);
   const [showPinInput, setShowPinInput] = useState(false);
   const [pinValue, setPinValue] = useState('');
-  const [dispositivos, setDispositivos] = useState<any[]>([]);
+  const [dispositivos, setDispositivos] = useState<Dispositivo[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string>('todos');
+  const [vpnDevicesStatus, setVpnDevicesStatus] = useState<Record<string, boolean>>({});
   const { toast } = useToast();
 
   // Cargar configuración de la institución
@@ -34,12 +56,13 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
         setConfig({
           blockAllBrowsing: data.blockAllBrowsing || false,
           useBlacklist: data.useBlacklist || false,
-          useWhitelist: data.useWhitelist || false, // NUEVO
+          useWhitelist: data.useWhitelist || false,
           shieldMode: data.shieldMode || false,
           cortarNavegacion: data.cortarNavegacion || false,
           pinBloqueo: data.pinBloqueo || '',
           maintenanceMode: data.maintenanceMode || false,
-          vpn_enabled: data.vpn_enabled || false
+          vpn_enabled: data.vpn_enabled || false,
+          vpn_status: data.vpn_status || 'off'
         });
       }
       setLoading(false);
@@ -47,28 +70,168 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
     return () => unsubscribe();
   }, [institutionId]);
 
-  // Cargar dispositivos
+  // Cargar dispositivos y su estado de VPN
   useEffect(() => {
     const q = query(collection(db, 'dispositivos'), where('InstitutoId', '==', institutionId));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setDispositivos(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+      const dispositivosData = snapshot.docs.map(d => ({ 
+        id: d.id, 
+        ...d.data() 
+      } as Dispositivo));
+      setDispositivos(dispositivosData);
+      
+      // Mapear estado de VPN por dispositivo
+      const statusMap: Record<string, boolean> = {};
+      dispositivosData.forEach(d => {
+        statusMap[d.id] = d.vpn_activa || false;
+      });
+      setVpnDevicesStatus(statusMap);
     });
     return () => unsubscribe();
   }, [institutionId]);
+
+  // Función para controlar VPN en dispositivos
+  const toggleVpnGlobal = async (enable: boolean) => {
+    try {
+      const instRef = doc(db, 'institutions', institutionId);
+      await updateDoc(instRef, { 
+        vpn_enabled: enable,
+        vpn_status: enable ? 'activating' : 'off'
+      });
+
+      // Comando para dispositivos
+      if (selectedDevice === 'todos') {
+        const q = query(collection(db, 'dispositivos'), where('InstitutoId', '==', institutionId));
+        const snapshot = await getDocs(q);
+        
+        await Promise.all(snapshot.docs.map(docSnapshot => 
+          updateDoc(docSnapshot.ref, { 
+            vpn_activa: enable,
+            vpn_command: enable ? 'start' : 'stop',
+            vpn_command_timestamp: new Date().toISOString()
+          })
+        ));
+        
+        toast({
+          title: enable ? "VPN ACTIVADA" : "VPN DESACTIVADA",
+          description: `Comando enviado a ${snapshot.size} dispositivos`,
+        });
+      } else {
+        await updateDoc(doc(db, 'dispositivos', selectedDevice), { 
+          vpn_activa: enable,
+          vpn_command: enable ? 'start' : 'stop',
+          vpn_command_timestamp: new Date().toISOString()
+        });
+        
+        toast({
+          title: enable ? "VPN ACTIVADA" : "VPN DESACTIVADA",
+          description: `Comando enviado al dispositivo seleccionado`,
+        });
+      }
+
+      // Actualizar estado después de 2 segundos
+      setTimeout(async () => {
+        await updateDoc(instRef, { 
+          vpn_status: enable ? 'on' : 'off' 
+        });
+      }, 2000);
+
+    } catch (error) {
+      console.error(error);
+      toast({ variant: "destructive", title: "Error al controlar VPN" });
+    }
+  };
+
+  // Función para enviar lista de sitios bloqueados actualizada
+  const actualizarListaNegra = async () => {
+    try {
+      toast({ title: "Actualizando listas", description: "Enviando configuración a dispositivos..." });
+      
+      // Obtener sitios bloqueados de la subcolección
+      const sitiosQuery = query(collection(db, 'institutions', institutionId, 'sitiosBloqueados'));
+      const sitiosSnapshot = await getDocs(sitiosQuery);
+      const sitiosBloqueados = sitiosSnapshot.docs.map(d => d.data().url).filter(Boolean);
+      
+      // Enviar a dispositivos
+      if (selectedDevice === 'todos') {
+        const q = query(collection(db, 'dispositivos'), where('InstitutoId', '==', institutionId));
+        const dispositivosSnapshot = await getDocs(q);
+        
+        await Promise.all(dispositivosSnapshot.docs.map(async (docSnapshot) => {
+          await updateDoc(docSnapshot.ref, { 
+            lista_negra_actualizada: new Date().toISOString(),
+            sitios_bloqueados: sitiosBloqueados
+          });
+          
+          // También actualizar en la subcolección del dispositivo
+          const sitioRef = collection(db, 'dispositivos', docSnapshot.id, 'sitiosBloqueados');
+          
+          // Primero limpiar documentos existentes (opcional)
+          const existingSitios = await getDocs(sitioRef);
+          await Promise.all(existingSitios.docs.map(s => updateDoc(s.ref, { activo: false })));
+          
+          // Agregar nuevos
+          for (const sitio of sitiosBloqueados) {
+            const sitioId = sitio.replace(/[^a-zA-Z0-9]/g, '_');
+            await setDoc(doc(sitioRef, sitioId), {
+              url: sitio,
+              activo: true,
+              actualizado: new Date().toISOString()
+            });
+          }
+        }));
+        
+        toast({ title: "Listas actualizadas", description: `Sincronizado con ${dispositivosSnapshot.size} dispositivos` });
+      } else {
+        await updateDoc(doc(db, 'dispositivos', selectedDevice), { 
+          lista_negra_actualizada: new Date().toISOString(),
+          sitios_bloqueados: sitiosBloqueados
+        });
+        
+        const sitioRef = collection(db, 'dispositivos', selectedDevice, 'sitiosBloqueados');
+        
+        // Limpiar existentes
+        const existingSitios = await getDocs(sitioRef);
+        await Promise.all(existingSitios.docs.map(s => updateDoc(s.ref, { activo: false })));
+        
+        // Agregar nuevos
+        for (const sitio of sitiosBloqueados) {
+          const sitioId = sitio.replace(/[^a-zA-Z0-9]/g, '_');
+          await setDoc(doc(sitioRef, sitioId), {
+            url: sitio,
+            activo: true,
+            actualizado: new Date().toISOString()
+          });
+        }
+        
+        toast({ title: "Listas actualizadas", description: "Sincronizado con el dispositivo seleccionado" });
+      }
+      
+    } catch (error) {
+      console.error(error);
+      toast({ variant: "destructive", title: "Error al actualizar listas" });
+    }
+  };
 
   const toggleSetting = async (key: string, value: boolean) => {
     try {
       const instRef = doc(db, 'institutions', institutionId);
       await updateDoc(instRef, { [key]: value });
 
+      // Si es vpn_enabled, usar la función especial
+      if (key === 'vpn_enabled') {
+        await toggleVpnGlobal(value);
+        return;
+      }
+
       // Propagar a dispositivos si es necesario
-      if (key === 'shieldMode' || key === 'cortarNavegacion' || key === 'useWhitelist') {
+      if (key === 'shieldMode' || key === 'cortarNavegacion' || key === 'useWhitelist' || key === 'useBlacklist') {
         const dispositivosRef = collection(db, 'dispositivos');
         const q = query(dispositivosRef, where('InstitutoId', '==', institutionId));
         const snapshot = await getDocs(q);
         
-        const updates = snapshot.docs.map(doc => 
-          updateDoc(doc.ref, { [key]: value })
+        const updates = snapshot.docs.map(docSnapshot => 
+          updateDoc(docSnapshot.ref, { [key]: value })
         );
         await Promise.all(updates);
         
@@ -162,6 +325,10 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
     }
   };
 
+  // Calcular estadísticas de VPN
+  const vpnActiveCount = Object.values(vpnDevicesStatus).filter(v => v).length;
+  const totalDevices = dispositivos.length;
+
   if (loading) return <Loader2 className="w-6 h-6 animate-spin text-orange-500 mx-auto" />;
 
   return (
@@ -170,6 +337,25 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
         <Zap className="text-orange-500 w-6 h-6" />
         <h2 className="text-xl font-black italic uppercase text-white">Controles Maestros</h2>
       </div>
+
+      {/* Estado de VPN en tiempo real */}
+      {totalDevices > 0 && (
+        <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Wifi className="w-4 h-4 text-blue-400" />
+              <span className="text-xs font-black uppercase text-blue-400">VPN EN DISPOSITIVOS</span>
+            </div>
+            <span className="text-xs font-black text-white">{vpnActiveCount}/{totalDevices} activas</span>
+          </div>
+          <div className="w-full bg-slate-800 rounded-full h-2">
+            <div 
+              className="bg-blue-500 h-2 rounded-full transition-all"
+              style={{ width: `${(vpnActiveCount / totalDevices) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="space-y-2">
         <label className="text-[10px] font-black uppercase text-orange-500 ml-2 italic">Aplicar a:</label>
@@ -181,7 +367,7 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
           <option value="todos">⚡ TODOS LOS DISPOSITIVOS</option>
           {dispositivos.map(d => (
             <option key={d.id} value={d.id}>
-              {d.alumno_asignado || 'SIN ASIGNAR'} - {d.id}
+              {d.alumno_asignado || 'SIN ASIGNAR'} - {d.id} {vpnDevicesStatus[d.id] ? '🔵' : ''}
             </option>
           ))}
         </select>
@@ -205,7 +391,7 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
           />
         </div>
 
-        {/* NUEVO: MODO SOLO LISTA BLANCA */}
+        {/* MODO SOLO LISTA BLANCA */}
         <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
           <div className="flex gap-4 items-center">
             <div className={`p-3 rounded-xl ${config.useWhitelist ? 'bg-green-500/20 text-green-500' : 'bg-slate-800 text-slate-500'}`}>
@@ -267,14 +453,30 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
             </div>
             <div>
               <p className="text-sm font-black text-white uppercase italic">VPN Siempre Activa</p>
-              <p className="text-[10px] text-slate-500 font-bold uppercase">Filtra todo el tráfico por DNS</p>
+              <p className="text-[10px] text-slate-500 font-bold uppercase">
+                {config.vpn_status === 'activating' ? '🔄 ACTIVANDO...' : 
+                 config.vpn_status === 'on' ? '✅ ACTIVA' : '⭕ INACTIVA'}
+              </p>
             </div>
           </div>
           <Switch 
             checked={config.vpn_enabled} 
             onCheckedChange={(val) => toggleSetting('vpn_enabled', val)} 
+            disabled={config.vpn_status === 'activating'}
           />
         </div>
+      </div>
+
+      {/* Botón para actualizar lista negra */}
+      <div className="border-t border-slate-800 pt-6 space-y-3">
+        <h3 className="text-sm font-black text-white uppercase italic mb-4">Sincronización VPN</h3>
+        
+        <button
+          onClick={actualizarListaNegra}
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-xl text-[10px] uppercase flex items-center justify-center gap-2"
+        >
+          <RotateCcw size={14} /> SINCRONIZAR LISTA NEGRA
+        </button>
       </div>
 
       {/* SECCIÓN DE PIN */}
