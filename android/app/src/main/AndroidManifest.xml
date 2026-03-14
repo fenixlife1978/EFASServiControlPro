@@ -1,14 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    package="com.educontrolpro"> <uses-permission android:name="android.permission.INTERNET" />
+    package="com.educontrolpro">
+
+    <!-- PERMISOS DE RED -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     
+    <!-- PERMISO PARA CÁMARA (QR) - NUEVO -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="true" />
+    
+    <!-- PERMISO PARA VPN - NUEVO -->
+    <uses-permission android:name="android.permission.BIND_VPN_SERVICE" />
+    
+    <!-- PERMISO PARA ADMINISTRADOR DE DISPOSITIVO - NUEVO -->
+    <uses-permission android:name="android.permission.MANAGE_DEVICE_ADMINS" />
+    
+    <!-- PERMISOS DE NOTIFICACIONES Y SERVICIOS -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
+    
+    <!-- PERMISO PARA ACCESIBILIDAD -->
+    <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE" />
 
     <application
         android:allowBackup="false"
@@ -21,6 +39,20 @@
         android:directBootAware="true"
         tools:targetApi="34">
 
+        <!-- RECEPTOR DE ADMINISTRADOR DE DISPOSITIVO - NUEVO -->
+        <receiver
+            android:name=".AdminReceiver"
+            android:permission="android.permission.BIND_DEVICE_ADMIN"
+            android:exported="true">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin_receiver" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- SERVICIO VPN -->
         <service android:name=".ParentalControlVpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"
             android:foregroundServiceType="systemExempted"
@@ -31,6 +63,7 @@
             </intent-filter>
         </service>
 
+        <!-- SERVICIO DE MONITOREO (ACCESIBILIDAD) -->
         <service android:name=".MonitorService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:label="Servicio de Monitoreo EDUControlPro"
@@ -43,6 +76,7 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <!-- ACTIVIDAD PRINCIPAL -->
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
@@ -56,5 +90,5 @@
             </intent-filter>
         </activity>
 
-        </application>
+    </application>
 </manifest>

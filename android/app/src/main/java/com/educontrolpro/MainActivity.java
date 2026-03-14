@@ -1,10 +1,12 @@
 package com.educontrolpro;
 
+import android.Manifest;
 import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
@@ -15,9 +17,11 @@ import com.getcapacitor.BridgeActivity;
 import com.capacitorjs.plugins.device.DevicePlugin;
 import com.google.firebase.firestore.FirebaseFirestore;
 
-// IMPORTACIONES NUEVAS PARA VPN
+// IMPORTACIONES PARA PERMISOS Y VPN
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 
 public class MainActivity extends BridgeActivity {
     private static final int DEVICE_ADMIN_REQUEST = 101;
@@ -57,7 +61,7 @@ public class MainActivity extends BridgeActivity {
             Log.e("EDU_Status", "Error al registrar LiberarPlugin: " + e.getMessage());
         }
 
-        // 2. Registrar plugin de VPN (NUEVO)
+        // 2. Registrar plugin de VPN
         try {
             registerPlugin(VpnPlugin.class);
         } catch (Exception e) {
@@ -67,18 +71,70 @@ public class MainActivity extends BridgeActivity {
         // 3. Inicializar controlador de VPN
         vpnController = new VpnController(this);
 
-        // 4. Lógica de seguridad (Device Owner / Admin)
+        // 4. Solicitar permisos necesarios (CÁMARA, etc.)
+        solicitarPermisosNecesarios();
+
+        // 5. Lógica de seguridad (Device Owner / Admin)
         checkSecurityPrivileges();
 
-        // 5. Verificar vinculación e iniciar MonitorService y VPN
+        // 6. Verificar vinculación e iniciar MonitorService y VPN
         checkVinculacionYEstado();
 
-        // 6. Monitor de actualizaciones
+        // 7. Monitor de actualizaciones
         try {
             UpdateManager updateManager = new UpdateManager(this);
             updateManager.listenForUpdates();
         } catch (Exception e) {
             Log.e("EDU_Status", "UpdateManager no inicializado: " + e.getMessage());
+        }
+    }
+
+    // --- NUEVO: SOLICITAR PERMISOS (CÁMARA, ETC.) ---
+    private void solicitarPermisosNecesarios() {
+        // Lista de permisos necesarios
+        String[] permisos;
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permisos = new String[]{
+                Manifest.permission.CAMERA,
+                Manifest.permission.POST_NOTIFICATIONS
+            };
+        } else {
+            permisos = new String[]{
+                Manifest.permission.CAMERA
+            };
+        }
+        
+        // Verificar qué permisos faltan
+        boolean necesitaSolicitud = false;
+        for (String permiso : permisos) {
+            if (ContextCompat.checkSelfPermission(this, permiso) != PackageManager.PERMISSION_GRANTED) {
+                necesitaSolicitud = true;
+                break;
+            }
+        }
+        
+        // Solicitar permisos faltantes
+        if (necesitaSolicitud) {
+            ActivityCompat.requestPermissions(this, permisos, 1001);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        
+        if (requestCode == 1001) {
+            for (int i = 0; i < permissions.length; i++) {
+                if (grantResults[i] == PackageManager.PERMISSION_GRANTED) {
+                    Log.d("EDU_Status", "Permiso concedido: " + permissions[i]);
+                } else {
+                    Log.d("EDU_Status", "Permiso denegado: " + permissions[i]);
+                    if (permissions[i].equals(Manifest.permission.CAMERA)) {
+                        Toast.makeText(this, "Se necesita permiso de cámara para escanear QR", Toast.LENGTH_LONG).show();
+                    }
+                }
+            }
         }
     }
 
@@ -111,7 +167,7 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
-    // NUEVO: Método para obtener el estado de la VPN (lo necesita VpnPlugin)
+    // Método para obtener el estado de la VPN (lo necesita VpnPlugin)
     public boolean isVpnActiva() {
         return vpnActiva;
     }
@@ -240,4 +296,4 @@ public class MainActivity extends BridgeActivity {
         // No detenemos la VPN aquí porque queremos que siga funcionando
         // incluso si la app se cierra
     }
-}
+ }

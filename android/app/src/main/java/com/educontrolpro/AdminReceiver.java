@@ -7,6 +7,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.util.Log;
 import android.widget.Toast;
+
 public class AdminReceiver extends DeviceAdminReceiver {
     
     @Override
@@ -19,6 +20,7 @@ public class AdminReceiver extends DeviceAdminReceiver {
         
         Toast.makeText(context, "EDUControlPro: Protección de Dispositivo Activada", Toast.LENGTH_SHORT).show();
     }
+
     @Override
     public void onDisabled(Context context, Intent intent) {
         super.onDisabled(context, intent);
