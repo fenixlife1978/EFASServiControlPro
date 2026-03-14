@@ -19,11 +19,16 @@ public class VpnPlugin extends Plugin {
     @PluginMethod
     public void activarVpn(PluginCall call) {
         getActivity().runOnUiThread(() -> {
-            if (getActivity() instanceof MainActivity) {
-                ((MainActivity) getActivity()).solicitarPermisoVpn();
-                call.resolve();
-            } else {
-                call.reject("Actividad no es MainActivity");
+            try {
+                if (getActivity() instanceof MainActivity) {
+                    ((MainActivity) getActivity()).solicitarPermisoVpn();
+                    call.resolve();
+                } else {
+                    vpnController.startVpn();
+                    call.resolve();
+                }
+            } catch (Exception e) {
+                call.reject("Error al activar VPN: " + e.getMessage());
             }
         });
     }
@@ -31,24 +36,27 @@ public class VpnPlugin extends Plugin {
     @PluginMethod
     public void desactivarVpn(PluginCall call) {
         getActivity().runOnUiThread(() -> {
-            if (getActivity() instanceof MainActivity) {
-                ((MainActivity) getActivity()).detenerVpn();
+            try {
+                vpnController.stopVpn();
                 call.resolve();
-            } else {
-                call.reject("Actividad no es MainActivity");
+            } catch (Exception e) {
+                call.reject("Error al desactivar VPN: " + e.getMessage());
             }
         });
     }
 
     @PluginMethod
     public void estaActiva(PluginCall call) {
-        if (getActivity() instanceof MainActivity) {
-            boolean activa = ((MainActivity) getActivity()).isVpnActiva();
+        try {
+            boolean activa = false;
+            if (getActivity() instanceof MainActivity) {
+                activa = ((MainActivity) getActivity()).isVpnActiva();
+            }
             JSObject ret = new JSObject();
             ret.put("activa", activa);
             call.resolve(ret);
-        } else {
-            call.reject("Actividad no es MainActivity");
+        } catch (Exception e) {
+            call.reject("Error al verificar VPN: " + e.getMessage());
         }
     }
 }

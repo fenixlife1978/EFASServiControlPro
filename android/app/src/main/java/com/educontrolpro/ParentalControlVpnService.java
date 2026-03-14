@@ -21,13 +21,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public class ParentalControlVpnService extends VpnService implements FirebaseBlockerManager.OnBlockedSitesUpdatedListener {
     private static final String VPN_ADDRESS = "10.0.0.2";
-    private static final int VPN_MTU = 1500; // Cambiado de 1280 a 1500
+    private static final int VPN_MTU = 1500;
     
-    // DNS servers para que funcione internet
+    // DNS servers
     private static final String DNS1 = "8.8.8.8";
     private static final String DNS2 = "1.1.1.1";
     
-    // Acciones para el Intent
+    // Acciones
     public static final String ACTION_START_VPN = "START_VPN";
     public static final String ACTION_STOP_VPN = "STOP_VPN";
 
@@ -38,10 +38,17 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
     // Firebase Blocker
     private FirebaseBlockerManager blockerManager;
     private Set<String> sitiosBloqueados = new HashSet<>();
+    
+    // Nombre del paquete de la app (para excluirla)
+    private String packageName;
 
     @Override
     public void onCreate() {
         super.onCreate();
+        
+        // Guardar nombre del paquete
+        packageName = getPackageName();
+        
         // Notificación
         NotificationUtils.createNotificationChannel(this);
         
@@ -49,7 +56,7 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
         blockerManager = FirebaseBlockerManager.getInstance();
         blockerManager.startListening(this);
         
-        SimpleLogger.i("VPN Service - Inicializado con Firebase Blocker");
+        SimpleLogger.i("VPN Service - Inicializado con Firebase Blocker. Paquete: " + packageName);
     }
 
     @Override
@@ -79,19 +86,35 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
             Builder builder = new Builder();
             builder.setSession("EduControlPro VPN");
             builder.addAddress(VPN_ADDRESS, 32);
-            builder.addRoute("0.0.0.0", 0); // Rutear todo el tráfico
+            builder.addRoute("0.0.0.0", 0);
             builder.setMtu(VPN_MTU);
             
-            // Añadir DNS para que funcione internet
+            // Añadir DNS
             builder.addDnsServer(DNS1);
             builder.addDnsServer(DNS2);
 
-            // Excluir nuestra app
+            // EXCLUIR NUESTRA APP - PARTE CRÍTICA CORREGIDA
             try {
-                builder.addDisallowedApplication(getPackageName());
-                SimpleLogger.i("VPN Service - Exclusión exitosa: " + getPackageName());
+                // Usar el package name guardado
+                builder.addDisallowedApplication(packageName);
+                SimpleLogger.i("VPN Service - ✅ App EXCLUIDA: " + packageName);
+                
+                // También excluir servicios de Google Play para evitar problemas
+                try {
+                    builder.addDisallowedApplication("com.google.android.gms");
+                } catch (Exception e) {
+                    // Ignorar, no es crítico
+                }
+                
             } catch (PackageManager.NameNotFoundException e) {
-                SimpleLogger.e("VPN Service - Error al excluir paquete: " + e.getMessage());
+                SimpleLogger.e("VPN Service - ❌ Error al excluir paquete: " + e.getMessage());
+                // Intentar con el nombre hardcodeado como fallback
+                try {
+                    builder.addDisallowedApplication("com.educontrolpro");
+                    SimpleLogger.i("VPN Service - Exclusión con hardcode: com.educontrolpro");
+                } catch (Exception e2) {
+                    SimpleLogger.e("VPN Service - Error también con hardcode");
+                }
             }
 
             vpnInterface = builder.establish();
@@ -100,7 +123,9 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
                 return;
             }
 
-            ByteBuffer packet = ByteBuffer.allocate(32767); // Buffer más grande
+            SimpleLogger.i("VPN Service - ✅ Interfaz VPN establecida correctamente");
+
+            ByteBuffer packet = ByteBuffer.allocate(32767);
             byte[] packetArray = packet.array();
             
             try (FileInputStream in = new FileInputStream(vpnInterface.getFileDescriptor());
@@ -123,9 +148,9 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
                                 SimpleLogger.d("VPN Service - Paquetes bloqueados: " + blockedCount);
                             }
                         } else {
-                            // REENVIAR EL PAQUETE (esto es lo que da internet)
+                            // REENVIAR EL PAQUETE
                             out.write(packetArray, 0, length);
-                            out.flush(); // Forzar envío
+                            out.flush();
                             packetCount++;
                             
                             if (packetCount % 500 == 0) {
@@ -147,13 +172,17 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
     }
 
     private boolean debeBloquearPaquete(byte[] packet, int length) {
-        // Si no hay sitios bloqueados, permitir todo
-        if (sitiosBloqueados == null || sitiosBloqueados.isEmpty() || length < 10) {
+        // SI NO HAY SITIOS BLOQUEADOS, PERMITIR TODO
+        if (sitiosBloqueados == null || sitiosBloqueados.isEmpty()) {
+            return false; // ← IMPORTANTE: permitir todo si no hay lista
+        }
+        
+        if (length < 10) {
             return false;
         }
         
         try {
-            // Analizar solo los primeros bytes (cabeceras)
+            // Analizar solo los primeros bytes
             int analyzeLength = Math.min(length, 512);
             String packetContent = new String(packet, 0, analyzeLength).toLowerCase();
             
@@ -172,10 +201,10 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
                 }
             }
         } catch (Exception e) {
-            // Ignorar errores de parsing
+            // Ignorar errores
         }
         
-        return false; // Permitir por defecto
+        return false;
     }
 
     @Override
