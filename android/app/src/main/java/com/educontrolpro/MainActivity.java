@@ -5,142 +5,158 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.util.Log;
 import android.widget.Toast;
-
 import com.getcapacitor.BridgeActivity;
 import com.capacitorjs.plugins.device.DevicePlugin;
+import com.google.firebase.firestore.FieldValue;
+import com.google.firebase.firestore.FirebaseFirestore;
+import java.util.HashMap;
+import java.util.Map;
 
-public class MainActivity extends BridgeActivity {
+public class MainActivity extends BridgeActivity 
+{
     private static final int DEVICE_ADMIN_REQUEST = 101;
-    private static final int VPN_PREPARE_REQUEST = 102;
-
     private static final String CAPACITOR_PREFS = "CapacitorStorage";
+    private static final String ADMIN_PREFS = "AdminPrefs";
+    private static final String KEY_UNLOCKED = "is_unlocked";
     private static final String KEY_DEVICE_ID = "deviceId";
-
-    private DevicePolicyManager dpm;
-    private ComponentName adminComponent;
-
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
-        // Registro de Plugins
+        // 1. Registro de Plugins
         registerPlugin(DevicePlugin.class);
-        try { registerPlugin(LiberarPlugin.class); } catch (Exception e) {}
-
-        dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
-        adminComponent = new ComponentName(this, AdminReceiver.class);
-
-        // Inicialización de Logger con DeviceID de Capacitor
-        SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
-        String deviceId = capPrefs.getString(KEY_DEVICE_ID, "DEV-0001");
-        SimpleLogger.init(deviceId);
-
-        // Flujo de activación automática
-        new Handler().postDelayed(this::checkDeviceAdmin, 1500);
-        
-        handleIntent(getIntent());
-    }
-
-    private void checkDeviceAdmin() {
-        if (!dpm.isAdminActive(adminComponent)) {
-            Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
-            intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent);
-            intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Protección activa de EduControlPro para la seguridad del estudiante.");
-            startActivityForResult(intent, DEVICE_ADMIN_REQUEST);
-        } else {
-            solicitarVPNInmediatamente();
-        }
-    }
-
-    private void solicitarVPNInmediatamente() {
-        Intent prepareIntent = VpnService.prepare(this);
-        if (prepareIntent != null) {
-            startActivityForResult(prepareIntent, VPN_PREPARE_REQUEST);
-        } else {
-            iniciarServicioVPN();
-        }
-    }
-
-    private void iniciarServicioVPN() {
-        Intent vpnIntent = new Intent(this, ParentalControlVpnService.class);
-        vpnIntent.setAction("START_VPN"); 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(vpnIntent);
-        } else {
-            startService(vpnIntent);
-        }
-        
-        // --- ESTRATEGIA INVISIBLE ---
-        // Una vez que todo está iniciado, movemos la app al fondo para que no parezca un Kiosko
-        new Handler().postDelayed(() -> {
-            moveTaskToBack(true);
-        }, 2000);
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == DEVICE_ADMIN_REQUEST && resultCode == RESULT_OK) {
-            solicitarVPNInmediatamente();
-        }
-        if (requestCode == VPN_PREPARE_REQUEST && resultCode == RESULT_OK) {
-            iniciarServicioVPN();
-        }
-    }
-
-    public void liberarDispositivoTotal() {
         try {
-            SimpleLogger.i("Liberación total solicitada...");
-
-            // 1. Detener VPN
-            Intent stopVpn = new Intent(this, ParentalControlVpnService.class);
-            stopVpn.setAction("STOP_VPN");
-            startService(stopVpn);
-
-            if (dpm.isAdminActive(adminComponent)) {
-                // 2. Limpiar rastros de Owner si existieran
-                if (dpm.isDeviceOwnerApp(getPackageName())) {
-                    dpm.setUninstallBlocked(adminComponent, getPackageName(), false);
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                        dpm.setAlwaysOnVpnPackage(adminComponent, null, false);
-                    }
-                    dpm.clearDeviceOwnerApp(getPackageName());
-                }
-                // 3. Quitar privilegios de Administrador
-                dpm.removeActiveAdmin(adminComponent);
-            }
-
-            SimpleLogger.i("Dispositivo liberado.");
-            Toast.makeText(this, "EDUCONTROLPRO: Dispositivo liberado correctamente.", Toast.LENGTH_LONG).show();
-            
-            // Cerrar la app después de liberar
-            finish();
-
+            registerPlugin(LiberarPlugin.class); 
         } catch (Exception e) {
-            SimpleLogger.e("Error en liberación: " + e.getMessage());
+            Log.e("EDU_Status", "Error al registrar LiberarPlugin: " + e.getMessage());
+        }
+        // 2. Lógica de seguridad (Device Owner / Admin)
+        checkSecurityPrivileges();
+        // 3. Verificar vinculación e iniciar MonitorService
+        checkVinculacionYEstado();
+        // 4. Monitor de actualizaciones
+        try {
+            UpdateManager updateManager = new UpdateManager(this);
+            updateManager.listenForUpdates();
+        } catch (Exception e) {
+            Log.e("EDU_Status", "UpdateManager no inicializado: " + e.getMessage());
         }
     }
-
+    // --- RE-ACTIVAR BLOQUEO DE ALUMNO ---
+    public void reactivarSeguridad() {
+        SharedPreferences prefs = getSharedPreferences(ADMIN_PREFS, MODE_PRIVATE);
+        prefs.edit().putBoolean(KEY_UNLOCKED, false).apply();
+        
+        // Obtener deviceId desde CapacitorStorage
+        SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
+        String deviceId = capPrefs.getString(KEY_DEVICE_ID, null);
+        
+        if (deviceId != null) {
+            try {
+                FirebaseFirestore.getInstance().collection("dispositivos")
+                    .document(deviceId)
+                    .update("admin_mode_enable", false);
+            } catch (Exception e) {
+                Log.e("EDU_Status", "No se pudo actualizar Firebase, pero el bloqueo local es efectivo.");
+            }
+        }
+        Toast.makeText(this, "Seguridad activada: Ajustes bloqueados", Toast.LENGTH_LONG).show();
+        
+        // Reiniciar MonitorService para aplicar cambios
+        reiniciarMonitorService();
+    }
+    // --- FUNCIÓN PARA LIBERAR DISPOSITIVO TOTALMENTE ---
+    public void liberarDispositivoTotal() {
+        DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
+        ComponentName adminComponent = new ComponentName(this, AdminReceiver.class);
+        try {
+            if (dpm.isDeviceOwnerApp(getPackageName())) {
+                dpm.setUninstallBlocked(adminComponent, getPackageName(), false);
+                dpm.clearUserRestriction(adminComponent, android.os.UserManager.DISALLOW_FACTORY_RESET);
+                dpm.clearDeviceOwnerApp(getPackageName());
+                
+                stopService(new Intent(this, MonitorService.class));
+                Log.d("EDU_Status", "¡DISPOSITIVO LIBERADO!");
+                Toast.makeText(this, "Dispositivo Liberado. Reiniciando...", Toast.LENGTH_LONG).show();
+                
+                SharedPreferences.Editor editor = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE).edit();
+                editor.clear();
+                editor.apply();
+                finishAffinity();
+            } else {
+                dpm.removeActiveAdmin(adminComponent);
+                Toast.makeText(this, "Admin eliminado.", Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            Log.e("EDU_Status", "Error al liberar: " + e.getMessage());
+        }
+    }
+    private void reiniciarMonitorService() {
+        stopService(new Intent(this, MonitorService.class));
+        Intent serviceIntent = new Intent(this, MonitorService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent);
+        } else {
+            startService(serviceIntent);
+        }
+    }
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        handleIntent(intent);
-    }
-
-    private void handleIntent(Intent intent) {
-        if (intent != null && "ACTION_LIBERAR_TAB".equals(intent.getAction())) {
-            liberarDispositivoTotal();
+        if (intent != null) {
+            if ("ACTION_LIBERAR_TAB".equals(intent.getAction())) {
+                liberarDispositivoTotal();
+            } else if ("ACTION_REBLOQUEAR_TAB".equals(intent.getAction())) {
+                reactivarSeguridad();
+            }
         }
     }
-
-    // Evitamos que el usuario cierre la app accidentalmente y forzamos el modo invisible
+    private void checkSecurityPrivileges() {
+        DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
+        ComponentName adminComponent = new ComponentName(this, AdminReceiver.class);
+        if (dpm.isDeviceOwnerApp(getPackageName())) {
+            try {
+                dpm.setUninstallBlocked(adminComponent, getPackageName(), true);
+                Log.d("EDU_Status", "Modo DEVICE OWNER activo.");
+            } catch (Exception e) {
+                Log.e("EDU_Status", "Error en Device Owner: " + e.getMessage());
+            }
+        } else if (!dpm.isAdminActive(adminComponent)) {
+            Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
+            intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent);
+            intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Protección obligatoria para EDUControlPro.");
+            startActivityForResult(intent, DEVICE_ADMIN_REQUEST);
+        }
+    }
+    private void checkVinculacionYEstado() {
+        SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
+        String deviceId = capPrefs.getString(KEY_DEVICE_ID, null);
+        String institutoId = capPrefs.getString("InstitutoId", null);
+        if (deviceId == null || institutoId == null) {
+            Log.d("EDU_Status", "Dispositivo NO vinculado.");
+        } else {
+            Log.d("EDU_Status", "Vinculado a: " + institutoId + " con ID: " + deviceId);
+            
+            try {
+                Intent serviceIntent = new Intent(this, MonitorService.class);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent);
+                } else {
+                    startService(serviceIntent);
+                }
+            } catch (Exception e) {
+                Log.e("EDU_Status", "Error al iniciar MonitorService: " + e.getMessage());
+            }
+        }
+    }
     @Override
-    public void onBackPressed() {
-        moveTaskToBack(true);
+    public void onDestroy() {
+        super.onDestroy();
+        // No detenemos nada aquí porque MonitorService se maneja solo
     }
 }

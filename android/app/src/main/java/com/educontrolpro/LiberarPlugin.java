@@ -1,5 +1,7 @@
 package com.educontrolpro;
 
+import com.educontrolpro.MainActivity;
+import com.educontrolpro.SimpleLogger;
 import android.content.Intent;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -10,11 +12,6 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 @CapacitorPlugin(name = "LiberarPlugin")
 public class LiberarPlugin extends Plugin {
 
-    /**
-     * Llama al proceso de liberación total. 
-     * Se usa 'runOnUiThread' para asegurar que el cambio de permisos de sistema
-     * y el cierre de la VPN no bloqueen la app.
-     */
     @PluginMethod
     public void liberar(PluginCall call) {
         try {
@@ -38,14 +35,10 @@ public class LiberarPlugin extends Plugin {
         }
     }
 
-    /**
-     * Reinicia el flujo de seguridad (Admin + VPN)
-     */
     @PluginMethod
     public void rebloquear(PluginCall call) {
         try {
             Intent intent = new Intent(getContext(), MainActivity.class);
-            // Esta acción disparará el flujo normal de onCreate/onNewIntent en MainActivity
             intent.setAction("ACTION_REBLOQUEAR_TAB");
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
             

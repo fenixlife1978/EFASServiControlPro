@@ -2,27 +2,15 @@ package com.educontrolpro;
 
 import android.util.Log;
 import com.google.firebase.firestore.FirebaseFirestore;
-import com.google.firebase.firestore.SetOptions;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Date;
 
 public class SimpleLogger {
-    private static final String TAG = "SimpleLogger";
-    private static FirebaseFirestore db = FirebaseFirestore.getInstance();
-    private static String deviceId = "unknown";
-    private static boolean isInitialized = false;
+    private static final String TAG = "EduControlPro";
+    private static final String COLLECTION_LOGS = "device_logs";
 
-    public static void init(String id) {
-        deviceId = id != null ? id : "unknown";
-        isInitialized = true;
-        // Log de prueba al iniciar
-        i("SimpleLogger inicializado para dispositivo: " + deviceId);
-    }
-
-    public static void d(String message) {
-        log("DEBUG", message);
-    }
-
+    // Niveles de Log
     public static void i(String message) {
         log("INFO", message);
     }
@@ -31,45 +19,43 @@ public class SimpleLogger {
         log("ERROR", message);
     }
 
+    public static void d(String message) {
+        log("DEBUG", message);
+    }
+
     public static void w(String message) {
         log("WARN", message);
     }
 
     private static void log(String level, String message) {
-        // Siempre imprimir en logcat para depuración local
-        if (level.equals("ERROR")) {
-            Log.e(TAG, message);
-        } else if (level.equals("WARN")) {
-            Log.w(TAG, message);
-        } else {
-            Log.d(TAG, "[" + level + "] " + message);
+        // 1. Imprimir en consola local (Logcat)
+        switch (level) {
+            case "INFO": Log.i(TAG, message); break;
+            case "ERROR": Log.e(TAG, message); break;
+            case "DEBUG": Log.d(TAG, message); break;
+            case "WARN": Log.w(TAG, message); break;
         }
 
-        // Solo intentar guardar en Firestore si está inicializado
-        if (!isInitialized) {
-            Log.d(TAG, "Logger no inicializado, mensaje no guardado: " + message);
-            return;
+        // 2. Enviar a Firestore (Solo errores e información crítica para no saturar)
+        if (level.equals("ERROR") || level.equals("INFO")) {
+            sendToFirestore(level, message);
         }
+    }
 
+    private static void sendToFirestore(String level, String message) {
         try {
+            FirebaseFirestore db = FirebaseFirestore.getInstance();
             Map<String, Object> logEntry = new HashMap<>();
-            logEntry.put("deviceId", deviceId);
             logEntry.put("level", level);
             logEntry.put("message", message);
-            logEntry.put("timestamp", System.currentTimeMillis());
-            logEntry.put("app", "EDUControlPro");
+            logEntry.put("timestamp", new Date());
+            logEntry.put("device_model", android.os.Build.MODEL);
 
-            // Guardar en Firestore sin esperar respuesta (fire and forget)
-            db.collection("app_logs")
-                    .add(logEntry)
-                    .addOnSuccessListener(documentReference -> {
-                        Log.d(TAG, "Log guardado en Firestore: " + documentReference.getId());
-                    })
-                    .addOnFailureListener(e -> {
-                        Log.e(TAG, "Error guardando log en Firestore: " + e.getMessage());
-                    });
+            db.collection(COLLECTION_LOGS)
+                .add(logEntry)
+                .addOnFailureListener(e -> Log.e(TAG, "Fallo al subir log a Firestore: " + e.getMessage()));
         } catch (Exception e) {
-            Log.e(TAG, "Excepción al guardar log: " + e.getMessage());
+            Log.e(TAG, "Error inicializando Firestore en Logger: " + e.getMessage());
         }
     }
 }

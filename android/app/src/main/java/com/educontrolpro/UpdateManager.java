@@ -1,3 +1,4 @@
+
 package com.educontrolpro;
 
 import android.app.NotificationChannel;
@@ -35,9 +36,9 @@ public class UpdateManager {
     private static final String KEY_UNLOCKED = "is_unlocked";
     private static final String KEY_DEVICE_ID = "deviceId";
     private static final String KEY_BLOQUEO_PIN = "bloqueo_pin";
-
+   
     private String deviceId = null;
-
+   
     public UpdateManager(Context context) {
         this.context = context;
         
@@ -49,7 +50,7 @@ public class UpdateManager {
             Log.w(TAG, "No hay deviceId disponible aún (dispositivo no vinculado)");
         }
     }
-
+   
     public void listenForUpdates() {
         // 1. Escuchar actualizaciones de versión
         db.collection("config").document("app_status")
@@ -59,21 +60,21 @@ public class UpdateManager {
                     checkVersion(snapshot);
                 }
             });
-
+      
         // 2. Escuchar cambios en el PIN de BLOQUEO (específico del dispositivo)
         listenForPinChanges();
-
+     
         // 3. Escuchar comandos de Bloqueo/Re-bloqueo por dispositivo
         listenForDeviceCommands();
     }
-
+   
     private void listenForDeviceCommands() {
         if (deviceId == null) return;
         
         db.collection("dispositivos").document(deviceId)
             .addSnapshotListener((snapshot, e) -> {
                 if (e != null || snapshot == null || !snapshot.exists()) return;
-
+             
                 // Si en el Dashboard ponen "admin_mode_enable" en false, re-bloqueamos
                 Boolean adminEnabled = snapshot.getBoolean("admin_mode_enable");
                 Boolean bloquearComando = snapshot.getBoolean("bloquear");
@@ -96,7 +97,7 @@ public class UpdateManager {
                 }
             });
     }
-
+  
     private void listenForPinChanges() {
         if (deviceId == null) return;
         
@@ -110,11 +111,11 @@ public class UpdateManager {
                 }
             });
     }
-
+  
     private void ejecutarRebloqueoLocal(String razon) {
         SharedPreferences adminPrefs = context.getSharedPreferences(ADMIN_PREFS, Context.MODE_PRIVATE);
         boolean actualmenteDesbloqueado = adminPrefs.getBoolean(KEY_UNLOCKED, false);
-
+    
         if (actualmenteDesbloqueado) {
             adminPrefs.edit().putBoolean(KEY_UNLOCKED, false).apply();
             Log.d(TAG, "🔒 Re-bloqueo ejecutado: " + razon);
@@ -128,7 +129,7 @@ public class UpdateManager {
             context.startActivity(lockIntent);
         }
     }
-
+  
     public void registrarActividad(String tipo, String descripcion) {
         if (deviceId == null) return;
         
@@ -137,18 +138,18 @@ public class UpdateManager {
         log.put("descripcion", descripcion);
         log.put("timestamp", FieldValue.serverTimestamp());
         log.put("deviceId", deviceId);
-
+    
         db.collection("activity_logs").add(log)
             .addOnSuccessListener(documentReference -> Log.d(TAG, "Log registrado"))
             .addOnFailureListener(e -> Log.e(TAG, "Error al crear log: " + e.getMessage()));
     }
-
+  
     private void updateLocalPin(String newPin) {
         SharedPreferences prefs = context.getSharedPreferences(ADMIN_PREFS, Context.MODE_PRIVATE);
         prefs.edit().putString(KEY_BLOQUEO_PIN, newPin).apply();
         Log.d(TAG, "PIN de bloqueo sincronizado: " + newPin);
     }
-
+ 
     private void checkVersion(DocumentSnapshot data) {
         try {
             Long cloudVersionLong = data.getLong("versionCode");
@@ -161,7 +162,7 @@ public class UpdateManager {
             }
         } catch (Exception e) { Log.e(TAG, "Error version", e); }
     }
-
+  
     private void startDownload(String urlString) {
         new Thread(() -> {
             try {
@@ -179,7 +180,7 @@ public class UpdateManager {
             } catch (Exception e) { Log.e(TAG, "Error download", e); }
         }).start();
     }
-
+  
     private void showUpdateNotification(File file) {
         Uri apkUri = FileProvider.getUriForFile(context, context.getPackageName() + ".provider", file);
         Intent intent = new Intent(Intent.ACTION_VIEW);

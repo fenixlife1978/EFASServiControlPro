@@ -3,53 +3,42 @@ package com.educontrolpro;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.os.Build;
-import android.os.Handler;
-import android.os.Looper;
+import android.content.SharedPreferences;
+import android.util.Log;
 
-public class BootReceiver extends BroadcastReceiver {
-    private static final String TAG = "EDU_Boot";
-
+public class BootReceiver extends BroadcastReceiver
+ {
+    private static final String CAPACITOR_PREFS = "CapacitorStorage";
+    private static final String KEY_DEVICE_ID = "deviceId";
     @Override
     public void onReceive(Context context, Intent intent) {
-        String action = intent.getAction();
-        
-        // Cubrimos todos los flancos de encendido (Normal, QuickBoot y Reinicio por Software)
-        if (Intent.ACTION_BOOT_COMPLETED.equals(action) || 
-            "android.intent.action.QUICKBOOT_POWERON".equals(action) ||
-            "com.htc.intent.action.QUICKBOOT_POWERON".equals(action)) {
+        if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction()) || 
+            "android.intent.action.QUICKBOOT_POWERON".equals(intent.getAction())) {
             
-            SimpleLogger.i("Boot: Sistema iniciado. Re-activando agentes invisibles...");
-
-            // Usamos un pequeño delay de 1.5s para asegurar que el canal de notificaciones 
-            // y los servicios de red del sistema estén listos para recibir los Foreground Services.
-            new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                levantarEscudos(context);
-            }, 1500);
-        }
-    }
-
-    private void levantarEscudos(Context context) {
-        try {
-            // 1. Iniciar VPN Service (Filtro DNS)
-            Intent vpnIntent = new Intent(context, ParentalControlVpnService.class);
-            vpnIntent.setAction(ParentalControlVpnService.ACTION_START_VPN);
-            
-            // 2. Iniciar MonitorService (Accesibilidad y Bloqueo de Apps)
-            Intent monitorIntent = new Intent(context, MonitorService.class);
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(vpnIntent);
-                context.startForegroundService(monitorIntent);
+            SharedPreferences prefs = context.getSharedPreferences(CAPACITOR_PREFS, Context.MODE_PRIVATE);
+            String deviceId = prefs.getString(KEY_DEVICE_ID, null);
+            if (deviceId != null) {
+                Log.d("EDU_Boot", "Dispositivo vinculado, iniciando servicios...");
+                
+                // 1. Iniciar MonitorService (el servicio correcto)
+                Intent serviceIntent = new Intent(context, MonitorService.class);
+                try {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        context.startForegroundService(serviceIntent);
+                    } else {
+                        context.startService(serviceIntent);
+                    }
+                    Log.d("EDU_Boot", "MonitorService iniciado correctamente");
+                } catch (Exception e) {
+                    Log.e("EDU_Boot", "Error al iniciar MonitorService: " + e.getMessage());
+                }
+                // 2. Opcional: abrir la app (comentado para no interrumpir al usuario)
+                // Intent launchIntent = new Intent(context, MainActivity.class);
+                // launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                // context.startActivity(launchIntent);
             } else {
-                context.startService(vpnIntent);
-                context.startService(monitorIntent);
+                Log.d("EDU_Boot", "Dispositivo no vinculado, no se inicia servicio");
             }
-            
-            SimpleLogger.i("Boot: Servicios re-activados exitosamente.");
-            
-        } catch (Exception e) {
-            SimpleLogger.e("Boot: Error crítico al levantar escudos: " + e.getMessage());
         }
     }
 }
