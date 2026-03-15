@@ -3,14 +3,17 @@ package com.educontrolpro;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.ListenerRegistration;
 import com.google.firebase.firestore.MetadataChanges;
+import com.google.firebase.firestore.FieldValue;
 
-import android.content.Context;
-import android.content.SharedPreferences;
-import androidx.core.content.ContextCompat;
-
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+
+import android.content.SharedPreferences;
+import android.content.Context;
+import androidx.core.content.ContextCompat;
 
 public class FirebaseBlockerManager {
     private static FirebaseBlockerManager instance;
@@ -44,36 +47,61 @@ public class FirebaseBlockerManager {
 
     private void obtenerIdsLocales() {
         try {
-            // Usamos el contexto de la aplicación directamente (necesitamos una referencia al contexto)
-            // Esto se puede mejorar pasando el contexto desde el servicio, pero para SharedPreferences podemos usar el contexto por defecto.
-            // Como no tenemos contexto aquí, lo mejor es recibirlo como parámetro en startListening.
-            // Por ahora, lo dejamos así y lo arreglamos en el próximo paso.
-            // Para no complicar, modificamos el método para recibir el contexto.
-            // Pero como es un singleton, necesitamos que el servicio pase el contexto.
-            // Lo cambiaremos en startListening.
-            SimpleLogger.w("🔥 obtenerIdsLocales sin contexto, se obtendrán en startListening");
+            Context appContext = ContextCompat.getApplicationContext();
+            if (appContext == null) {
+                SimpleLogger.e("🔥 Error: No se pudo obtener el contexto de la aplicación");
+                return;
+            }
+            
+            SharedPreferences prefs = appContext.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
+            currentDeviceId = prefs.getString("deviceId", null);
+            currentInstitutionId = prefs.getString("InstitutoId", null);
+            
+            // Log a Firebase
+            logToFirebase("IDS_OBTENIDOS", "deviceId: " + currentDeviceId + ", institutionId: " + currentInstitutionId);
+            
+            SimpleLogger.i("🔥 IDs locales - deviceId: " + currentDeviceId + 
+                          ", institutionId: " + currentInstitutionId);
         } catch (Exception e) {
+            logToFirebase("ERROR_IDS", e.getMessage());
             SimpleLogger.e("🔥 Error obteniendo IDs: " + e.getMessage());
         }
     }
 
-    public void startListening(Context context, OnBlockedSitesUpdatedListener listener) {
+    // NUEVO: Método para enviar logs a Firestore
+    private void logToFirebase(String tipo, String mensaje) {
+        try {
+            if (currentDeviceId == null) return;
+            
+            Map<String, Object> logEntry = new HashMap<>();
+            logEntry.put("tipo", tipo);
+            logEntry.put("mensaje", mensaje);
+            logEntry.put("timestamp", FieldValue.serverTimestamp());
+            logEntry.put("origen", "FirebaseBlockerManager");
+            logEntry.put("sitiosCount", sitiosBloqueados != null ? sitiosBloqueados.size() : 0);
+            
+            db.collection("dispositivos")
+                .document(currentDeviceId)
+                .collection("vpn_logs")
+                .add(logEntry);
+        } catch (Exception e) {
+            // Ignorar errores de log
+        }
+    }
+
+    public void startListening(OnBlockedSitesUpdatedListener listener) {
         this.listener = listener;
         
-        // Obtener IDs desde SharedPreferences usando el contexto proporcionado
-        if (context != null) {
-            SharedPreferences prefs = context.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
-            currentDeviceId = prefs.getString("deviceId", null);
-            currentInstitutionId = prefs.getString("InstitutoId", null);
-            SimpleLogger.i("🔥 IDs locales - deviceId: " + currentDeviceId + ", institutionId: " + currentInstitutionId);
-        }
+        obtenerIdsLocales(); // Re-obtener por si acaso
         
         if (currentInstitutionId == null) {
             SimpleLogger.e("🔥 ERROR: No hay institutionId, el dispositivo no está vinculado");
+            logToFirebase("ERROR_SIN_INSTITUCION", "No hay institutionId");
             return;
         }
         
         SimpleLogger.i("🔥 Escuchando cambios para institución: " + currentInstitutionId);
+        logToFirebase("START_LISTENING", "Escuchando institución: " + currentInstitutionId);
         
         // Escuchar cambios en el documento de la institución
         registration = db.collection("institutions")
@@ -81,74 +109,74 @@ public class FirebaseBlockerManager {
             .addSnapshotListener(MetadataChanges.INCLUDE, (documentSnapshot, error) -> {
                 if (error != null) {
                     SimpleLogger.e("🔥 Error de Firestore: " + error.getMessage());
+                    logToFirebase("FIRESTORE_ERROR", error.getMessage());
                     return;
                 }
 
                 if (documentSnapshot != null && documentSnapshot.exists()) {
                     sitiosBloqueados.clear();
+                    logToFirebase("DOCUMENTO_RECIBIDO", "Documento de institución existe");
                     
-                    // Leer el campo blacklist (array)
+                    // 1. Leer el campo blacklist de la institución (array)
                     Object blacklistObj = documentSnapshot.get("blacklist");
                     if (blacklistObj instanceof List) {
                         List<?> blacklist = (List<?>) blacklistObj;
-                        SimpleLogger.i("🔥 blacklist encontrada con " + blacklist.size() + " elementos");
+                        SimpleLogger.i("🔥 blacklist de institución encontrada con " + blacklist.size() + " elementos");
+                        logToFirebase("BLACKLIST_RECIBIDA", "Elementos: " + blacklist.size());
                         
                         for (Object item : blacklist) {
                             if (item instanceof String) {
                                 String sitio = ((String) item).toLowerCase().trim();
-                                // Limpiar URLs (quitar http://, https://, www.)
+                                // Limpiar URLs
                                 sitio = sitio.replace("http://", "")
                                              .replace("https://", "")
                                              .replace("www.", "")
                                              .trim();
                                 if (!sitio.isEmpty()) {
                                     sitiosBloqueados.add(sitio);
-                                    SimpleLogger.d("🔥 Sitio bloqueado: " + sitio);
+                                    SimpleLogger.d("🔥 Sitio bloqueado (institución): " + sitio);
                                 }
                             }
                         }
                     } else {
-                        SimpleLogger.w("🔥 No hay campo blacklist o no es un array");
+                        SimpleLogger.w("🔥 No hay campo blacklist en la institución");
+                        logToFirebase("BLACKLIST_NO_ENCONTRADA", "No hay campo blacklist");
                     }
                     
-                    // Verificar modo cortar navegación
+                    // 2. Verificar modo cortar navegación
                     Boolean cortarNavegacion = documentSnapshot.getBoolean("cortarNavegacion");
                     modoCortarNavegacion = (cortarNavegacion != null && cortarNavegacion);
                     
                     if (modoCortarNavegacion) {
                         SimpleLogger.w("🔥 ⚠️ MODO CORTAR NAVEGACIÓN ACTIVADO - TODO BLOQUEADO");
+                        logToFirebase("MODO_CORTAR", "Cortar navegación activado");
                         sitiosBloqueados.add("*");
                     }
                     
-                    // Verificar useBlacklist
+                    // 3. Leer useBlacklist (aunque esté en false, mostramos el valor)
                     Boolean useBlacklist = documentSnapshot.getBoolean("useBlacklist");
-                    if (useBlacklist == null || !useBlacklist) {
-                        SimpleLogger.i("🔥 useBlacklist=false, no se aplicará bloqueo");
-                        sitiosBloqueados.clear();
-                    }
+                    logToFirebase("USE_BLACKLIST", "Valor: " + useBlacklist);
                     
                     SimpleLogger.i("🔥 Total sitios bloqueados a aplicar: " + sitiosBloqueados.size());
+                    logToFirebase("SITIOS_TOTAL", "Total: " + sitiosBloqueados.size());
                     
                     // Notificar al listener
                     if (this.listener != null) {
                         this.listener.onBlockedSitesUpdated(new HashSet<>(sitiosBloqueados));
+                        logToFirebase("LISTENER_NOTIFICADO", "Listener notificado con " + sitiosBloqueados.size() + " sitios");
                     }
                 } else {
                     SimpleLogger.w("🔥 Documento de institución no existe");
+                    logToFirebase("DOCUMENTO_NO_EXISTE", "La institución " + currentInstitutionId + " no existe");
                 }
             });
-    }
-
-    // Versión anterior para compatibilidad (sin contexto) - la dejamos pero la marcamos deprecated
-    @Deprecated
-    public void startListening(OnBlockedSitesUpdatedListener listener) {
-        startListening(null, listener);
     }
 
     public void stopListening() {
         if (registration != null) {
             registration.remove();
             registration = null;
+            logToFirebase("STOP_LISTENING", "Escucha detenida");
             SimpleLogger.i("🔥 FirebaseBlockerManager - Escucha detenida");
         }
     }
