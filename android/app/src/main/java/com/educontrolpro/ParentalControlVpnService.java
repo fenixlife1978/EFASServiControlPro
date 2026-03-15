@@ -70,7 +70,7 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
         
         // Inicializar Firebase Blocker
         blockerManager = FirebaseBlockerManager.getInstance();
-        blockerManager.startListening(this);
+        blockerManager.startListening(this, this);
         
         // Log inicial
         logToFirebase("VPN_SERVICE_START", "Servicio VPN iniciado. Paquete: " + packageName);
