@@ -13,7 +13,6 @@ import java.util.Set;
 
 import android.content.SharedPreferences;
 import android.content.Context;
-import androidx.core.content.ContextCompat;
 
 public class FirebaseBlockerManager {
     private static FirebaseBlockerManager instance;
@@ -24,6 +23,7 @@ public class FirebaseBlockerManager {
     private String currentInstitutionId = null;
     private String currentDeviceId = null;
     private boolean modoCortarNavegacion = false;
+    private Context appContext; // NUEVO: Guardar contexto
 
     public interface OnBlockedSitesUpdatedListener {
         void onBlockedSitesUpdated(Set<String> sitios);
@@ -33,9 +33,6 @@ public class FirebaseBlockerManager {
         db = FirebaseFirestore.getInstance();
         sitiosBloqueados = new HashSet<>();
         SimpleLogger.i("🔥 FirebaseBlockerManager - Inicializado");
-        
-        // Obtener IDs al iniciar
-        obtenerIdsLocales();
     }
 
     public static synchronized FirebaseBlockerManager getInstance() {
@@ -45,11 +42,16 @@ public class FirebaseBlockerManager {
         return instance;
     }
 
+    // NUEVO: Método init que llama ParentalControlVpnService
+    public void init(Context context) {
+        this.appContext = context.getApplicationContext();
+        obtenerIdsLocales();
+    }
+
     private void obtenerIdsLocales() {
         try {
-            Context appContext = ContextCompat.getApplicationContext();
             if (appContext == null) {
-                SimpleLogger.e("🔥 Error: No se pudo obtener el contexto de la aplicación");
+                SimpleLogger.e("🔥 Error: appContext es null. Llama a init() primero");
                 return;
             }
             
@@ -68,7 +70,7 @@ public class FirebaseBlockerManager {
         }
     }
 
-    // NUEVO: Método para enviar logs a Firestore
+    // Método para enviar logs a Firestore
     private void logToFirebase(String tipo, String mensaje) {
         try {
             if (currentDeviceId == null) return;
@@ -153,7 +155,7 @@ public class FirebaseBlockerManager {
                         sitiosBloqueados.add("*");
                     }
                     
-                    // 3. Leer useBlacklist (aunque esté en false, mostramos el valor)
+                    // 3. Leer useBlacklist
                     Boolean useBlacklist = documentSnapshot.getBoolean("useBlacklist");
                     logToFirebase("USE_BLACKLIST", "Valor: " + useBlacklist);
                     
