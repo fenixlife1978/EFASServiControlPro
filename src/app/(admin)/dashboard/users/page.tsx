@@ -12,18 +12,29 @@ export default function UsersPage() {
             Panel de <span className="text-orange-500">Personal</span>
           </h1>
           <p className="text-slate-500 font-bold uppercase text-[10px] tracking-[0.3em] mt-2">
-            Configuración de Directores y Profesores por Instituto
+            Configuración de Directores y Profesores • EDUControlPro
           </p>
         </div>
-        <div className="bg-white px-6 py-3 rounded-2xl border shadow-sm flex items-center gap-3">
+        <div className="bg-white px-6 py-3 rounded-2xl border-2 border-slate-100 shadow-sm flex items-center gap-3">
           <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-          <span className="text-[10px] font-black uppercase italic text-slate-600">Super Admin Mode</span>
+          <span className="text-[10px] font-black uppercase italic text-slate-600 tracking-widest">
+            Super Admin Mode
+          </span>
         </div>
       </header>
 
-      <main>
+      <main className="animate-in fade-in slide-in-from-bottom-4 duration-700">
+        {/* IMPORTANTE: La lógica de migración de Firestore a RTDB para la creación 
+            y listado de usuarios debe realizarse dentro de <UserManagement />
+        */}
         <UserManagement />
       </main>
+
+      <footer className="pt-10 border-t border-slate-100">
+        <p className="text-[9px] text-slate-300 font-black uppercase tracking-[0.3em] text-center">
+          Gestión de Credenciales Seguras • EDUControlPro Sistema de Control Parental
+        </p>
+      </footer>
     </div>
   );
 }

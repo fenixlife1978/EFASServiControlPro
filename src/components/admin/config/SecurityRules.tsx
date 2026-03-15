@@ -1,7 +1,8 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { db } from '@/firebase/config';
+import { db, rtdb } from '@/firebase/config'; // Importación de rtdb añadida
 import { doc, onSnapshot, updateDoc, arrayUnion, arrayRemove, serverTimestamp, collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { ref, update } from 'firebase/database'; // Métodos de RTDB añadidos
 import { 
   ShieldCheck, Globe, Lock, Unlock, Database, Download, 
   AlertTriangle, CheckCircle2, Plus, Trash2, FileText, ShieldAlert, RefreshCw 
@@ -63,7 +64,6 @@ export const SecurityRules = ({ institutionId }: SecurityRulesProps) => {
     const instText = `Institución: ${data?.nombre || institutionId}`;
     doc.text(instText, 15, 50);
     
-    // Sello de Sede Protegida Verde
     doc.setTextColor(34, 197, 94);
     doc.setFontSize(8);
     doc.text(' [ SEDE PROTEGIDA - VALIDADO POR EDU ]', 15 + doc.getTextWidth(instText), 50);
@@ -93,25 +93,62 @@ export const SecurityRules = ({ institutionId }: SecurityRulesProps) => {
   const importPack = async (packUrls: string[], packName: string) => {
     setLoading(true);
     try {
+      // 1. Update Firestore
       await updateDoc(doc(db, "institutions", institutionId), {
         blacklist: arrayUnion(...packUrls),
         lastSecurityUpdate: serverTimestamp()
       });
+
+      // 2. Sync to RTDB for immediate device interdiction
+      // Obtenemos la lista actual combinada para no pisar datos en RTDB
+      const currentBlacklist = data?.blacklist || [];
+      const updatedBlacklist = Array.from(new Set([...currentBlacklist, ...packUrls]));
+      
+      await update(ref(rtdb, `config/instituciones/${institutionId}/rules`), {
+        blacklist: updatedBlacklist,
+        lastUpdate: new Date().toISOString()
+      });
+
     } catch (e) { console.error(e); }
     setLoading(false);
   };
 
   const handleAddUrl = async () => {
     if (!newUrl) return;
-    await updateDoc(doc(db, "institutions", institutionId), {
-      [filterType]: arrayUnion(newUrl.toLowerCase().trim()),
-      lastSecurityUpdate: serverTimestamp()
-    });
-    setNewUrl('');
+    const cleanUrl = newUrl.toLowerCase().trim();
+    
+    try {
+      // Update Firestore
+      await updateDoc(doc(db, "institutions", institutionId), {
+        [filterType]: arrayUnion(cleanUrl),
+        lastSecurityUpdate: serverTimestamp()
+      });
+
+      // Sync specific filter to RTDB
+      const currentList = data?.[filterType] || [];
+      await update(ref(rtdb, `config/instituciones/${institutionId}/rules`), {
+        [filterType]: [...currentList, cleanUrl],
+        lastUpdate: new Date().toISOString()
+      });
+
+      setNewUrl('');
+    } catch (e) { console.error(e); }
   };
 
   const handleRemoveUrl = async (url: string, type: 'blacklist' | 'whitelist') => {
-    await updateDoc(doc(db, "institutions", institutionId), { [type]: arrayRemove(url) });
+    try {
+      // Update Firestore
+      await updateDoc(doc(db, "institutions", institutionId), { [type]: arrayRemove(url) });
+
+      // Update RTDB removing the item
+      const currentList = data?.[type] || [];
+      const updatedList = currentList.filter((item: string) => item !== url);
+      
+      await update(ref(rtdb, `config/instituciones/${institutionId}/rules`), {
+        [type]: updatedList,
+        lastUpdate: new Date().toISOString()
+      });
+    } catch (e) { console.error(e); }
   };
 
   return (
@@ -142,20 +179,19 @@ export const SecurityRules = ({ institutionId }: SecurityRulesProps) => {
                   <p className="text-[9px] font-black text-white uppercase italic">{pack.name}</p>
                   <p className="text-[7px] font-bold text-slate-600 uppercase mt-1">{pack.desc}</p>
                 </div>
-                <Plus size={16} />
+                {loading ? <RefreshCw size={16} className="animate-spin text-orange-500" /> : <Plus size={16} />}
               </button>
             ))}
           </div>
         </div>
 
-        {/* PANEL DERECHO: ESTADO Y CONTADOR SUPERIOR */}
+        {/* PANEL DERECHO: ESTADO */}
         <div className="bg-[#0f1117] p-8 rounded-[2.5rem] border border-slate-800">
           <div className="flex items-center gap-2 text-blue-500 mb-4">
             <ShieldCheck size={16} />
             <span className="text-[10px] font-black uppercase tracking-widest">Estado de Reglas</span>
           </div>
           
-          {/* CONTADOR SUPERIOR (IMPACTO CIPA) */}
           <div className="mb-6 p-6 bg-orange-500/5 border border-orange-500/10 rounded-[2rem] flex items-center justify-between group">
              <div>
                 <p className="text-[7px] font-black text-orange-500 uppercase tracking-[0.3em] mb-1">Impacto de Protección CIPA</p>
@@ -195,7 +231,7 @@ export const SecurityRules = ({ institutionId }: SecurityRulesProps) => {
                 <option value="whitelist">Whitelist</option>
               </select>
               <input className="flex-1 bg-black border border-slate-800 p-4 rounded-xl text-[10px] font-bold text-white uppercase outline-none focus:border-orange-500" placeholder="Añadir url o palabra clave..." value={newUrl} onChange={e => setNewUrl(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAddUrl()} />
-              <button onClick={handleAddUrl} className="bg-orange-500 px-6 rounded-xl text-white font-black"><Plus size={18}/></button>
+              <button onClick={handleAddUrl} className="bg-orange-500 px-6 rounded-xl text-white font-black hover:bg-orange-600 transition-colors"><Plus size={18}/></button>
             </div>
 
             <div className="grid grid-cols-2 gap-6 h-64">
@@ -225,7 +261,7 @@ export const SecurityRules = ({ institutionId }: SecurityRulesProps) => {
                 <h3 className="text-xs font-black text-white uppercase italic flex items-center gap-2"><ShieldAlert className="text-orange-500" size={16}/> Logs de Incidencias</h3>
                 <div className="flex gap-2">
                   <button onClick={fetchIncidencias} className={`p-2 rounded-lg bg-slate-900 border border-slate-800 text-orange-500 transition-all ${refreshing ? 'animate-spin' : ''}`}><RefreshCw size={14} /></button>
-                  <button onClick={() => generatePDF('incidencias')} className="text-[8px] font-black text-slate-500 hover:text-white uppercase border border-slate-800 px-3 rounded-lg">Exportar Logs</button>
+                  <button onClick={() => generatePDF('incidencias')} className="text-[8px] font-black text-slate-500 hover:text-white uppercase border border-slate-800 px-3 rounded-lg transition-colors">Exportar Logs</button>
                 </div>
              </div>
              <div className="space-y-2">
@@ -251,7 +287,6 @@ export const SecurityRules = ({ institutionId }: SecurityRulesProps) => {
               <h4 className="text-[11px] font-black text-white uppercase italic">Reporte de Protección</h4>
             </div>
 
-            {/* CONTADOR INFERIOR (PROTECCIÓN ACTIVA) */}
             <div className="p-6 bg-green-500/5 border border-green-500/10 rounded-2xl">
                 <p className="text-[7px] font-black text-green-500 uppercase tracking-[0.2em] mb-1">Estado de Seguridad</p>
                 <p className="text-xl font-black text-white italic">{data?.blacklist?.length || 0} <span className="text-green-500 text-[10px]">URLs Protegidas</span></p>

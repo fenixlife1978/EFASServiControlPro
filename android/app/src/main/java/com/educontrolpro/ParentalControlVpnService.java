@@ -7,6 +7,8 @@ import android.content.pm.PackageManager;
 import android.net.VpnService;
 import android.os.ParcelFileDescriptor;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import androidx.core.app.NotificationCompat;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -22,15 +24,17 @@ import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.FieldValue;
 
 /**
- * Servicio de VPN con bloqueo de URLs desde Firebase
+ * Servicio de VPN con bloqueo de URLs desde Firebase - VERSIÓN OPTIMIZADA
  */
 public class ParentalControlVpnService extends VpnService implements FirebaseBlockerManager.OnBlockedSitesUpdatedListener {
     private static final String VPN_ADDRESS = "10.0.0.2";
-    private static final int VPN_MTU = 1500;
+    private static final int VPN_MTU = 1400;
     
     // DNS servers
     private static final String DNS1 = "8.8.8.8";
-    private static final String DNS2 = "1.1.1.1";
+    private static final String DNS2 = "8.8.4.4";
+    private static final String DNS3 = "1.1.1.1";
+    private static final String DNS4 = "208.67.222.222";
     
     // Acciones
     public static final String ACTION_START_VPN = "START_VPN";
@@ -44,39 +48,48 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
     private FirebaseBlockerManager blockerManager;
     private Set<String> sitiosBloqueados = new HashSet<>();
     
-    // Firebase Logging
+    // Firebase Logging - OPTIMIZADO
     private FirebaseFirestore db;
     private String deviceId;
     private String institutionId;
+    private boolean cuotaExcedida = false;
+    
+    // OPTIMIZACIÓN: Control de logs
+    private long ultimoLogFirebase = 0;
+    private static final long LOG_INTERVAL = 300000; // 5 minutos entre logs
+    
+    // OPTIMIZACIÓN: Contadores acumulados
+    private int totalPaquetesPermitidos = 0;
+    private int totalPaquetesBloqueados = 0;
+    private int ultimosPaquetesReportados = 0;
+    private int ultimosBloqueosReportados = 0;
+    
+    // OPTIMIZACIÓN: Cache de última URL bloqueada
+    private String ultimaUrlBloqueada = "";
+    private long ultimoBloqueoTime = 0;
+    private static final long BLOQUEO_COOLDOWN = 10000; // 10 seg entre logs del mismo sitio
     
     // Nombre del paquete de la app
     private String packageName;
+    
+    // Handler para delays
+    private Handler handler = new Handler(Looper.getMainLooper());
 
     @Override
     public void onCreate() {
         super.onCreate();
         
-        // Guardar nombre del paquete
         packageName = getPackageName();
-        
-        // Inicializar Firebase
         db = FirebaseFirestore.getInstance();
         
-        // Obtener IDs
         obtenerIdsLocales();
-        
-        // Notificación
         NotificationUtils.createNotificationChannel(this);
         
-        // Inicializar Firebase Blocker (CORREGIDO)
         blockerManager = FirebaseBlockerManager.getInstance();
-        blockerManager.init(this); // Pasar contexto primero
-        blockerManager.startListening(this); // Solo un argumento
+        blockerManager.init(this);
+        blockerManager.startListening(this);
         
-        // Log inicial
-        logToFirebase("VPN_SERVICE_START", "Servicio VPN iniciado. Paquete: " + packageName);
-        
-        SimpleLogger.i("VPN Service - Inicializado con Firebase Blocker. Paquete: " + packageName);
+        SimpleLogger.i("VPN Service - Inicializado. Paquete: " + packageName);
     }
 
     private void obtenerIdsLocales() {
@@ -91,180 +104,200 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
         }
     }
 
+    // OPTIMIZACIÓN: Log a Firebase con límite de frecuencia
     private void logToFirebase(String tipo, String mensaje) {
-        try {
-            if (deviceId == null) return;
-            
-            Map<String, Object> logEntry = new HashMap<>();
-            logEntry.put("tipo", tipo);
-            logEntry.put("mensaje", mensaje);
-            logEntry.put("timestamp", FieldValue.serverTimestamp());
-            logEntry.put("sitiosBloqueados", sitiosBloqueados != null ? sitiosBloqueados.size() : 0);
-            
-            db.collection("dispositivos")
-                .document(deviceId)
-                .collection("vpn_logs")
-                .add(logEntry);
-        } catch (Exception e) {
-            // Ignorar errores de log
+        if (cuotaExcedida || deviceId == null) return;
+        
+        long ahora = System.currentTimeMillis();
+        if (ahora - ultimoLogFirebase < LOG_INTERVAL) {
+            return; // No escribir tan seguido
         }
+        
+        Map<String, Object> logEntry = new HashMap<>();
+        logEntry.put("tipo", tipo);
+        logEntry.put("mensaje", mensaje);
+        logEntry.put("timestamp", FieldValue.serverTimestamp());
+        logEntry.put("sitiosBloqueados", sitiosBloqueados != null ? sitiosBloqueados.size() : 0);
+        logEntry.put("paquetesPermitidos", totalPaquetesPermitidos);
+        logEntry.put("paquetesBloqueados", totalPaquetesBloqueados);
+        
+        db.collection("dispositivos")
+            .document(deviceId)
+            .collection("vpn_logs")
+            .add(logEntry)
+            .addOnFailureListener(e -> {
+                String error = e.getMessage();
+                if (error != null && (error.contains("PERMISSION_DENIED") || error.contains("429"))) {
+                    SimpleLogger.e("VPN Service - Cuota excedida, desactivando logs");
+                    cuotaExcedida = true;
+                }
+            });
+        
+        ultimoLogFirebase = ahora;
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP_VPN.equals(intent.getAction())) {
             SimpleLogger.w("VPN Service - Recibida orden de detención");
-            logToFirebase("VPN_STOP", "Recibida orden de detención");
             stopVpn();
             return START_NOT_STICKY;
         }
 
         if (!isRunning.get()) {
-            SimpleLogger.i("VPN Service - Iniciando hilo de túnel");
-            logToFirebase("VPN_START", "Iniciando VPN con " + (sitiosBloqueados != null ? sitiosBloqueados.size() : 0) + " sitios bloqueados");
-            isRunning.set(true);
-            vpnThread = new Thread(this::runVpn, "VpnThread");
-            vpnThread.start();
-            
-            startForeground(101, createNotification());
+            if (sitiosBloqueados == null || sitiosBloqueados.isEmpty()) {
+                SimpleLogger.i("VPN Service - Esperando lista de sitios...");
+                
+                handler.postDelayed(() -> {
+                    if (!isRunning.get()) {
+                        int tamañoLista = sitiosBloqueados != null ? sitiosBloqueados.size() : 0;
+                        SimpleLogger.i("VPN Service - Iniciando con " + tamañoLista + " sitios");
+                        
+                        isRunning.set(true);
+                        vpnThread = new Thread(this::runVpn, "VpnThread");
+                        vpnThread.start();
+                        startForeground(101, createNotification());
+                        
+                        logToFirebase("VPN_START", "Iniciada con " + tamañoLista + " sitios");
+                    }
+                }, 3000);
+            } else {
+                SimpleLogger.i("VPN Service - Iniciando con " + sitiosBloqueados.size() + " sitios");
+                isRunning.set(true);
+                vpnThread = new Thread(this::runVpn, "VpnThread");
+                vpnThread.start();
+                startForeground(101, createNotification());
+                
+                logToFirebase("VPN_START", "Iniciada con " + sitiosBloqueados.size() + " sitios");
+            }
         }
 
         return START_STICKY;
     }
 
     private void runVpn() {
-        SimpleLogger.i("VPN Service - Configurando interfaz de red");
-        logToFirebase("VPN_CONFIG", "Configurando interfaz de red");
+        SimpleLogger.i("VPN Service - Configurando interfaz");
         
         try {
             Builder builder = new Builder();
             builder.setSession("EduControlPro VPN");
+            builder.setMtu(VPN_MTU);
             builder.addAddress(VPN_ADDRESS, 32);
             builder.addRoute("0.0.0.0", 0);
-            builder.setMtu(VPN_MTU);
             
-            // Añadir DNS
             builder.addDnsServer(DNS1);
             builder.addDnsServer(DNS2);
+            builder.addDnsServer(DNS3);
+            builder.addDnsServer(DNS4);
 
             // EXCLUIR NUESTRA APP
             try {
                 builder.addDisallowedApplication(packageName);
-                SimpleLogger.i("VPN Service - ✅ App EXCLUIDA: " + packageName);
-                logToFirebase("VPN_EXCLUSION", "App excluida: " + packageName);
-                
-                // También excluir servicios de Google Play
-                try {
-                    builder.addDisallowedApplication("com.google.android.gms");
-                } catch (Exception e) {
-                    // Ignorar
-                }
-                
+                SimpleLogger.i("VPN Service - App EXCLUIDA: " + packageName);
             } catch (PackageManager.NameNotFoundException e) {
-                SimpleLogger.e("VPN Service - ❌ Error al excluir paquete: " + e.getMessage());
-                logToFirebase("VPN_ERROR", "Error exclusión: " + e.getMessage());
+                SimpleLogger.e("VPN Service - Error al excluir: " + e.getMessage());
             }
 
             vpnInterface = builder.establish();
             if (vpnInterface == null) {
-                SimpleLogger.e("VPN Service - No se pudo establecer la interfaz");
-                logToFirebase("VPN_ERROR", "No se pudo establecer interfaz");
+                SimpleLogger.e("VPN Service - No se pudo establecer interfaz");
                 return;
             }
 
-            SimpleLogger.i("VPN Service - ✅ Interfaz VPN establecida correctamente");
-            logToFirebase("VPN_SUCCESS", "Interfaz establecida. DNS: " + DNS1 + ", " + DNS2);
+            SimpleLogger.i("VPN Service - Interfaz establecida");
 
-            ByteBuffer packet = ByteBuffer.allocate(32767);
+            ByteBuffer packet = ByteBuffer.allocate(65535);
             byte[] packetArray = packet.array();
             
             try (FileInputStream in = new FileInputStream(vpnInterface.getFileDescriptor());
                  FileOutputStream out = new FileOutputStream(vpnInterface.getFileDescriptor())) {
                 
-                int packetCount = 0;
-                int blockedCount = 0;
-                long startTime = System.currentTimeMillis();
-                
-                SimpleLogger.i("VPN Service - Túnel iniciado, reenviando tráfico...");
-                logToFirebase("VPN_RUNNING", "Túnel iniciado. MTU: " + VPN_MTU);
+                long lastStatTime = System.currentTimeMillis();
+                long lastFirebaseLog = lastStatTime;
 
                 while (isRunning.get() && !Thread.interrupted()) {
                     int length = in.read(packetArray);
                     if (length > 0) {
                         packet.limit(length);
                         
-                        // Verificar si debe bloquearse
                         if (debeBloquearPaquete(packetArray, length)) {
-                            blockedCount++;
-                            if (blockedCount % 50 == 0) {
-                                SimpleLogger.d("VPN Service - Paquetes bloqueados: " + blockedCount);
-                            }
+                            totalPaquetesBloqueados++;
                         } else {
-                            // REENVIAR EL PAQUETE
                             out.write(packetArray, 0, length);
                             out.flush();
-                            packetCount++;
-                            
-                            if (packetCount % 500 == 0) {
-                                SimpleLogger.d("VPN Service - Tráfico permitido: " + packetCount + " paquetes");
-                            }
+                            totalPaquetesPermitidos++;
                         }
                     }
                     packet.clear();
                     
-                    // Log cada 30 segundos
-                    if (System.currentTimeMillis() - startTime > 30000) {
-                        logToFirebase("VPN_STATS", "Paquetes: permitidos=" + packetCount + ", bloqueados=" + blockedCount);
-                        startTime = System.currentTimeMillis();
+                    long now = System.currentTimeMillis();
+                    
+                    // Log a console cada 30 segundos (gratis)
+                    if (now - lastStatTime > 30000) {
+                        SimpleLogger.d("Stats - P: " + totalPaquetesPermitidos + 
+                                      ", B: " + totalPaquetesBloqueados);
+                        lastStatTime = now;
+                    }
+                    
+                    // Log a Firebase solo cuando hay cambios significativos
+                    if (now - lastFirebaseLog > LOG_INTERVAL) {
+                        if (totalPaquetesPermitidos > ultimosPaquetesReportados || 
+                            totalPaquetesBloqueados > ultimosBloqueosReportados) {
+                            
+                            logToFirebase("VPN_STATS", 
+                                "P: " + totalPaquetesPermitidos + 
+                                ", B: " + totalPaquetesBloqueados);
+                            
+                            ultimosPaquetesReportados = totalPaquetesPermitidos;
+                            ultimosBloqueosReportados = totalPaquetesBloqueados;
+                            lastFirebaseLog = now;
+                        }
                     }
                 }
             } catch (IOException e) {
-                SimpleLogger.e("VPN Service - Error de E/S: " + e.getMessage());
-                logToFirebase("VPN_IO_ERROR", e.getMessage());
+                SimpleLogger.e("VPN Service - Error: " + e.getMessage());
             }
         } catch (Exception e) {
-            SimpleLogger.e("VPN Service - Error en el bucle de red: " + e.getMessage());
-            logToFirebase("VPN_FATAL_ERROR", e.getMessage());
-            e.printStackTrace();
+            SimpleLogger.e("VPN Service - Error: " + e.getMessage());
         } finally {
             stopVpn();
         }
     }
 
     private boolean debeBloquearPaquete(byte[] packet, int length) {
-        // SI NO HAY SITIOS BLOQUEADOS, PERMITIR TODO
         if (sitiosBloqueados == null || sitiosBloqueados.isEmpty()) {
-            // LOG IMPORTANTE PARA DIAGNÓSTICO
-            SimpleLogger.d("🔥 MODO PERMISIVO: No hay sitios bloqueados, permitiendo TODO el tráfico");
-            logToFirebase("MODO_PERMISIVO", "0 sitios bloqueados - Todo permitido");
             return false;
         }
         
-        if (length < 10) {
-            return false;
-        }
+        if (length < 10) return false;
         
         try {
             int analyzeLength = Math.min(length, 512);
             String packetContent = new String(packet, 0, analyzeLength).toLowerCase();
             
-            // Buscar peticiones HTTP/HTTPS
             if (packetContent.contains("host:") || 
                 packetContent.contains("get ") || 
-                packetContent.contains("post ") ||
-                packetContent.contains("http://") || 
-                packetContent.contains("https://")) {
+                packetContent.contains("post ")) {
                 
                 for (String sitio : sitiosBloqueados) {
                     if (sitio != null && !sitio.isEmpty() && packetContent.contains(sitio.toLowerCase())) {
-                        SimpleLogger.d("🚫 BLOQUEADO: " + sitio);
-                        logToFirebase("BLOQUEO", "Sitio bloqueado: " + sitio);
+                        
+                        // OPTIMIZACIÓN: No loguear el mismo sitio repetidamente
+                        long ahora = System.currentTimeMillis();
+                        if (!sitio.equals(ultimaUrlBloqueada) || 
+                            ahora - ultimoBloqueoTime > BLOQUEO_COOLDOWN) {
+                            
+                            SimpleLogger.d("🚫 BLOQUEADO: " + sitio);
+                            ultimaUrlBloqueada = sitio;
+                            ultimoBloqueoTime = ahora;
+                        }
+                        
                         return true;
                     }
                 }
             }
         } catch (Exception e) {
-            // Ignorar errores
+            // Ignorar
         }
         
         return false;
@@ -274,16 +307,10 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
     public void onBlockedSitesUpdated(Set<String> sitios) {
         this.sitiosBloqueados = sitios;
         int count = sitios != null ? sitios.size() : 0;
-        SimpleLogger.i("📋 Lista actualizada: " + count + " sitios");
-        logToFirebase("SITIOS_ACTUALIZADOS", "Nueva lista: " + count + " sitios");
+        SimpleLogger.i("Lista actualizada: " + count + " sitios");
         
-        if (count == 0) {
-            SimpleLogger.w("⚠️ ATENCIÓN: 0 sitios bloqueados - VPN permitirá todo");
-            logToFirebase("SIN_BLOQUEOS", "0 sitios bloqueados - Modo permisivo");
-        } else {
-            for (String sitio : sitios) {
-                SimpleLogger.d("📌 Sitio: " + sitio);
-            }
+        if (count > 0 && !cuotaExcedida) {
+            logToFirebase("SITIOS_ACTUALIZADOS", count + " sitios");
         }
     }
 
@@ -292,7 +319,6 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
 
         isRunning.set(false);
         SimpleLogger.i("VPN Service - Cerrando túnel");
-        logToFirebase("VPN_STOPPED", "Cerrando túnel VPN");
 
         if (blockerManager != null) {
             blockerManager.stopListening();
@@ -319,6 +345,11 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
 
         stopForeground(true);
         stopSelf();
+        
+        if (!cuotaExcedida) {
+            logToFirebase("VPN_STOP", "Detenida - P: " + totalPaquetesPermitidos + 
+                         ", B: " + totalPaquetesBloqueados);
+        }
     }
 
     private Notification createNotification() {
@@ -348,14 +379,13 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
     @Override
     public void onRevoke() {
         SimpleLogger.w("VPN Service - Permiso revocado");
-        logToFirebase("VPN_REVOKED", "Permiso de VPN revocado por el usuario");
         stopVpn();
         super.onRevoke();
     }
 
     @Override
     public void onDestroy() {
-        logToFirebase("VPN_DESTROY", "Servicio destruido");
+     
         stopVpn();
         super.onDestroy();
     }

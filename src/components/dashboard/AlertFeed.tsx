@@ -1,13 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { db } from '@/firebase/config';
 import { 
   collection, query, where, orderBy, onSnapshot, 
   Timestamp, updateDoc, doc, deleteDoc 
 } from 'firebase/firestore';
 import { 
-  ShieldAlert, Clock, X, Search, Calendar, Download, Trash2, CheckCircle 
+  ShieldAlert, Clock, X, Search, Calendar, Download, Trash2, CheckCircle, Filter
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -21,14 +21,14 @@ interface Alerta {
   descripcion?: string;
   url?: string;
   urlIntentada?: string;
-  timestamp?: Timestamp | Date | string;
+  timestamp?: any;
   tipo?: string;
   status?: string; // 'nuevo', 'visto'
   deviceId?: string;
 }
 
 interface AlertFeedProps {
-  aulaId: string;
+  aulaId?: string;
   institutoId: string;
 }
 
@@ -37,12 +37,11 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
   const [filteredAlertas, setFilteredAlertas] = useState<Alerta[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Estados para los inputs de filtro
+  // Filtros
   const [tempSearchTerm, setTempSearchTerm] = useState('');
   const [tempFechaInicio, setTempFechaInicio] = useState<string>('');
   const [tempFechaFin, setTempFechaFin] = useState<string>('');
   
-  // Estados aplicados (los que realmente se usan en el filtro)
   const [appliedSearchTerm, setAppliedSearchTerm] = useState('');
   const [appliedFechaInicio, setAppliedFechaInicio] = useState<string>('');
   const [appliedFechaFin, setAppliedFechaFin] = useState<string>('');
@@ -60,31 +59,30 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        timestamp: doc.data().timestamp?.toDate?.() || doc.data().timestamp
-      })) as Alerta[];
+      const data = snapshot.docs.map(doc => {
+        const d = doc.data();
+        // Normalización de fecha robusta
+        let ts = d.timestamp;
+        if (ts instanceof Timestamp) ts = ts.toDate();
+        else if (typeof ts === 'string') ts = new Date(ts);
+        
+        return { id: doc.id, ...d, timestamp: ts };
+      }) as Alerta[];
+      
       setAlertas(data);
-      setLoading(false);
-    }, (error) => {
-      console.error("Error cargando alertas:", error);
       setLoading(false);
     });
 
     return () => unsubscribe();
   }, [institutoId]);
 
-  // Aplicar filtros cuando cambien los valores aplicados
   useEffect(() => {
-    let filtradas = alertas;
+    let filtradas = [...alertas];
 
-    // Filtrar por aula (si se proporciona)
     if (aulaId) {
-      filtradas = filtradas.filter(a => !a.aulaId || a.aulaId === aulaId);
+      filtradas = filtradas.filter(a => a.aulaId === aulaId);
     }
 
-    // Filtrar por término de búsqueda (nombre del alumno)
     if (appliedSearchTerm) {
       const term = appliedSearchTerm.toLowerCase();
       filtradas = filtradas.filter(a => 
@@ -93,28 +91,20 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
       );
     }
 
-    // Filtrar por rango de fechas
     if (appliedFechaInicio) {
       const inicio = new Date(appliedFechaInicio);
       inicio.setHours(0, 0, 0, 0);
-      filtradas = filtradas.filter(a => {
-        const fecha = a.timestamp instanceof Date ? a.timestamp : new Date(a.timestamp as any);
-        return fecha >= inicio;
-      });
+      filtradas = filtradas.filter(a => a.timestamp >= inicio);
     }
     if (appliedFechaFin) {
       const fin = new Date(appliedFechaFin);
       fin.setHours(23, 59, 59, 999);
-      filtradas = filtradas.filter(a => {
-        const fecha = a.timestamp instanceof Date ? a.timestamp : new Date(a.timestamp as any);
-        return fecha <= fin;
-      });
+      filtradas = filtradas.filter(a => a.timestamp <= fin);
     }
 
     setFilteredAlertas(filtradas);
   }, [alertas, appliedSearchTerm, appliedFechaInicio, appliedFechaFin, aulaId]);
 
-  // Función para aplicar los filtros
   const handleBuscar = () => {
     setAppliedSearchTerm(tempSearchTerm);
     setAppliedFechaInicio(tempFechaInicio);
@@ -122,15 +112,15 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
   };
 
   const handleMarcarVistas = async () => {
-    // Marcar todas las alertas filtradas como vistas
-    const promises = filteredAlertas
-      .filter(a => a.status !== 'visto')
-      .map(a => updateDoc(doc(db, 'alertas', a.id), { status: 'visto' }));
+    const targets = filteredAlertas.filter(a => a.status !== 'visto');
+    if (targets.length === 0) return;
+    
+    const promises = targets.map(a => updateDoc(doc(db, 'alertas', a.id), { status: 'visto' }));
     await Promise.all(promises);
   };
 
   const handleEliminarTodas = async () => {
-    if (!confirm('¿Eliminar permanentemente todas las alertas filtradas?')) return;
+    if (!confirm('¿CONFIRMAR ELIMINACIÓN PERMANENTE DE ESTAS ALERTAS?')) return;
     const promises = filteredAlertas.map(a => deleteDoc(doc(db, 'alertas', a.id)));
     await Promise.all(promises);
   };
@@ -139,167 +129,179 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
     setExportando(true);
     try {
       const doc = new jsPDF();
-      doc.setFontSize(18);
-      doc.text('Reporte de Alertas', 14, 22);
-      doc.setFontSize(11);
-      doc.text(`Institución: ${institutoId}`, 14, 32);
-      if (aulaId) doc.text(`Aula: ${aulaId}`, 14, 38);
-      if (appliedFechaInicio || appliedFechaFin) {
-        let fechaTexto = 'Fechas: ';
-        if (appliedFechaInicio) fechaTexto += `desde ${new Date(appliedFechaInicio).toLocaleDateString()}`;
-        if (appliedFechaFin) fechaTexto += ` hasta ${new Date(appliedFechaFin).toLocaleDateString()}`;
-        doc.text(fechaTexto, 14, 44);
-      }
+      
+      // Header Estilo EDUControlPro
+      doc.setFillColor(15, 17, 23);
+      doc.rect(0, 0, 210, 40, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(20);
+      doc.text('EDUCONTROLPRO - SECURITY LOGS', 15, 20);
+      
+      doc.setFontSize(8);
+      doc.setTextColor(249, 115, 22);
+      doc.text(`REPORTE DE INCIDENCIAS GENERADO EL: ${new Date().toLocaleString()}`, 15, 28);
 
-      const tableColumn = ['Alumno', 'Fecha/Hora', 'Descripción', 'Tipo'];
+      const tableColumn = ['ESTUDIANTE', 'FECHA / HORA', 'INCIDENCIA / URL', 'TIPO'];
       const tableRows = filteredAlertas.map(a => [
-        a.estudianteNombre || a.alumno_asignado || 'Desconocido',
-        a.timestamp instanceof Date ? a.timestamp.toLocaleString() : new Date(a.timestamp as any).toLocaleString(),
-        a.descripcion || a.urlIntentada || a.url || '',
-        a.tipo || ''
+        (a.estudianteNombre || a.alumno_asignado || 'N/A').toUpperCase(),
+        a.timestamp?.toLocaleString() || '---',
+        a.descripcion || a.urlIntentada || a.url || 'Bloqueo Genérico',
+        (a.tipo || 'SECURITY').toUpperCase()
       ]);
 
       autoTable(doc, {
         head: [tableColumn],
         body: tableRows,
-        startY: appliedFechaInicio || appliedFechaFin ? 50 : 40,
-        styles: { fontSize: 8 },
-        headStyles: { fillColor: [249, 115, 22] }
+        startY: 45,
+        styles: { fontSize: 7, font: 'helvetica' },
+        headStyles: { fillColor: [249, 115, 22], textColor: [255, 255, 255] },
+        alternateRowStyles: { fillColor: [245, 245, 245] }
       });
 
-      doc.save(`alertas_${institutoId}_${new Date().toISOString().slice(0,10)}.pdf`);
+      doc.save(`Alertas_EDU_${institutoId}.pdf`);
     } catch (error) {
-      console.error('Error exportando PDF:', error);
+      console.error(error);
     } finally {
       setExportando(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="bg-[#0f1117] border border-slate-800 rounded-2xl p-8 text-center">
-        <div className="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-        <p className="text-slate-500 text-[10px] uppercase">Cargando alertas...</p>
-      </div>
-    );
-  }
+  if (loading) return (
+    <div className="bg-[#0f1117] border border-slate-800 rounded-[2rem] p-12 text-center animate-pulse">
+      <ShieldAlert className="mx-auto text-slate-700 mb-4" size={32} />
+      <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest italic">Sincronizando Feed de Seguridad...</p>
+    </div>
+  );
 
   return (
-    <div className="bg-[#0f1117] border border-slate-800 rounded-2xl p-4 shadow-xl">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
-        <h3 className="text-white font-black uppercase italic text-sm flex items-center gap-2">
-          <ShieldAlert className="text-orange-500" size={18} />
-          Alertas de Seguridad ({filteredAlertas.length})
-        </h3>
-        <button
-          onClick={() => setShowFilters(!showFilters)}
-          className="text-slate-400 hover:text-white text-[10px] font-black uppercase flex items-center gap-1"
-        >
-          <Calendar size={14} /> Filtros
-        </button>
+    <div className="bg-[#0f1117] border border-slate-800 rounded-[2.5rem] p-6 shadow-2xl relative overflow-hidden">
+      {/* Luces de estado en el fondo */}
+      <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/5 blur-[80px] -z-10" />
+
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+        <div>
+          <h3 className="text-white font-black uppercase italic text-lg flex items-center gap-3 tracking-tighter">
+            <ShieldAlert className="text-orange-500" size={24} />
+            Alertas de <span className="text-orange-500">Seguridad</span>
+          </h3>
+          <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mt-1">Registros de actividad bloqueada en tiempo real</p>
+        </div>
+        
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase flex items-center gap-2 transition-all border ${
+              showFilters ? 'bg-orange-500 text-white border-orange-500' : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
+            }`}
+          >
+            <Filter size={14} /> {showFilters ? 'Cerrar Filtros' : 'Filtrar'}
+          </button>
+        </div>
       </div>
 
       {showFilters && (
-        <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 mb-4 grid grid-cols-1 md:grid-cols-4 gap-3">
-          <div className="relative col-span-1 md:col-span-1">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
-            <input
-              type="text"
-              placeholder="Buscar alumno..."
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg py-2 pl-8 pr-3 text-white text-xs outline-none focus:border-orange-500"
-              value={tempSearchTerm}
-              onChange={(e) => setTempSearchTerm(e.target.value)}
-            />
+        <div className="bg-black/40 p-5 rounded-3xl border border-slate-800 mb-6 animate-in slide-in-from-top-4 duration-300">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div className="space-y-1">
+              <label className="text-[8px] font-black text-slate-500 uppercase ml-2">Buscar Alumno</label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" size={14} />
+                <input
+                  type="text"
+                  placeholder="NOMBRE DEL ESTUDIANTE..."
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-white text-[10px] font-bold uppercase outline-none focus:border-orange-500"
+                  value={tempSearchTerm}
+                  onChange={(e) => setTempSearchTerm(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[8px] font-black text-slate-500 uppercase ml-2">Fecha Desde</label>
+              <input
+                type="date"
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-white text-[10px] font-bold outline-none focus:border-orange-500"
+                value={tempFechaInicio}
+                onChange={(e) => setTempFechaInicio(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[8px] font-black text-slate-500 uppercase ml-2">Fecha Hasta</label>
+              <input
+                type="date"
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-white text-[10px] font-bold outline-none focus:border-orange-500"
+                value={tempFechaFin}
+                onChange={(e) => setTempFechaFin(e.target.value)}
+              />
+            </div>
           </div>
-          <div>
-            <input
-              type="date"
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg py-2 px-3 text-white text-xs"
-              value={tempFechaInicio}
-              onChange={(e) => setTempFechaInicio(e.target.value)}
-              placeholder="Fecha inicio"
-            />
-          </div>
-          <div>
-            <input
-              type="date"
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg py-2 px-3 text-white text-xs"
-              value={tempFechaFin}
-              onChange={(e) => setTempFechaFin(e.target.value)}
-              placeholder="Fecha fin"
-            />
-          </div>
-          <div className="flex gap-2 justify-end">
-            <button
-              onClick={handleBuscar}
-              className="bg-orange-600/10 text-orange-500 hover:bg-orange-600 hover:text-white border border-orange-600/20 px-4 py-2 rounded-lg text-[10px] font-black uppercase flex items-center gap-1 transition-all"
-            >
-              <Search size={12} /> Buscar
-            </button>
-          </div>
-          <div className="flex gap-2 col-span-full justify-end mt-2">
-            <button
-              onClick={handleMarcarVistas}
-              className="bg-blue-600/10 text-blue-500 hover:bg-blue-600 hover:text-white border border-blue-600/20 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase flex items-center gap-1 transition-all"
-            >
-              <CheckCircle size={12} /> Marcar vistas
-            </button>
-            <button
-              onClick={handleEliminarTodas}
-              className="bg-red-600/10 text-red-500 hover:bg-red-600 hover:text-white border border-red-600/20 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase flex items-center gap-1 transition-all"
-            >
-              <Trash2 size={12} /> Limpiar
-            </button>
-            <button
-              onClick={exportarPDF}
-              disabled={exportando}
-              className="bg-orange-600/10 text-orange-500 hover:bg-orange-600 hover:text-white border border-orange-600/20 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase flex items-center gap-1 transition-all disabled:opacity-50"
-            >
-              <Download size={12} /> {exportando ? 'Exportando...' : 'Exportar PDF'}
-            </button>
+          
+          <div className="flex flex-wrap gap-2 justify-between items-center border-t border-slate-800 pt-4">
+            <div className="flex gap-2">
+              <button onClick={handleMarcarVistas} className="bg-blue-500/10 text-blue-500 hover:bg-blue-500 hover:text-white border border-blue-500/20 px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all">
+                Visto
+              </button>
+              <button onClick={handleEliminarTodas} className="bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white border border-red-500/20 px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all">
+                Limpiar Feed
+              </button>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={exportarPDF} disabled={exportando} className="bg-white text-black hover:bg-orange-500 hover:text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all flex items-center gap-2">
+                <Download size={14} /> {exportando ? '...' : 'PDF'}
+              </button>
+              <button onClick={handleBuscar} className="bg-orange-500 text-white px-6 py-2 rounded-xl text-[9px] font-black uppercase transition-all">
+                Aplicar Filtros
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      <div className="max-h-96 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+      <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
         {filteredAlertas.length === 0 ? (
-          <div className="py-8 text-center text-slate-500 text-[10px] uppercase">
-            No hay alertas con los filtros seleccionados.
+          <div className="py-20 text-center border-2 border-dashed border-slate-800 rounded-[2rem]">
+            <CheckCircle className="mx-auto text-slate-800 mb-2" size={32} />
+            <p className="text-slate-600 text-[9px] font-black uppercase italic tracking-[0.2em]">Cero incidencias detectadas</p>
           </div>
         ) : (
           filteredAlertas.map((alerta) => (
             <div
               key={alerta.id}
-              className={`p-3 rounded-xl border flex items-start gap-3 transition-colors ${
+              className={`group p-4 rounded-2xl border flex items-start gap-4 transition-all duration-300 ${
                 alerta.status === 'visto'
-                  ? 'bg-slate-900/30 border-slate-800/50 opacity-60'
-                  : 'bg-orange-500/5 border-orange-500/20 hover:bg-orange-500/10'
+                  ? 'bg-black/20 border-slate-800/40 opacity-50 grayscale'
+                  : 'bg-slate-900/50 border-slate-800 hover:border-orange-500/50 hover:bg-orange-500/[0.02]'
               }`}
             >
-              <div className={`p-2 rounded-lg ${
-                alerta.status === 'visto' ? 'bg-slate-800' : 'bg-orange-500/20'
+              <div className={`p-3 rounded-xl shrink-0 ${
+                alerta.status === 'visto' ? 'bg-slate-800 text-slate-600' : 'bg-orange-500/10 text-orange-500'
               }`}>
-                <ShieldAlert size={16} className={alerta.status === 'visto' ? 'text-slate-500' : 'text-orange-500'} />
+                <ShieldAlert size={20} className={alerta.status !== 'visto' ? 'animate-pulse' : ''} />
               </div>
+              
               <div className="flex-1 min-w-0">
-                <div className="flex flex-wrap justify-between items-center gap-2">
-                  <p className="text-white font-black text-xs uppercase truncate">
-                    {alerta.estudianteNombre || alerta.alumno_asignado || 'Desconocido'}
-                  </p>
-                  <span className="text-[8px] text-slate-500 font-mono">
-                    {alerta.timestamp instanceof Date
-                      ? alerta.timestamp.toLocaleString()
-                      : new Date(alerta.timestamp as any).toLocaleString()}
+                <div className="flex justify-between items-start mb-1">
+                  <h4 className="text-white font-black text-[11px] uppercase italic tracking-tight truncate">
+                    {alerta.estudianteNombre || alerta.alumno_asignado || 'DISPOSITIVO SIN ASIGNAR'}
+                  </h4>
+                  <span className="text-[8px] font-mono text-slate-500 whitespace-nowrap bg-black/50 px-2 py-1 rounded-md">
+                    {alerta.timestamp?.toLocaleString()}
                   </span>
                 </div>
-                <p className="text-slate-400 text-[9px] leading-tight mt-1 break-all">
-                  {alerta.descripcion || alerta.urlIntentada || alerta.url || 'Intento bloqueado'}
+                
+                <p className="text-slate-400 text-[10px] font-medium leading-relaxed break-all line-clamp-2 mb-2">
+                  {alerta.descripcion || alerta.urlIntentada || alerta.url || 'INTENTO DE ACCESO NO AUTORIZADO'}
                 </p>
-                {alerta.tipo && (
-                  <span className="inline-block mt-1 px-2 py-0.5 bg-slate-800 rounded-full text-[8px] font-bold text-slate-400 uppercase">
-                    {alerta.tipo}
+                
+                <div className="flex gap-2 items-center">
+                  <span className="px-2 py-0.5 bg-red-500/10 text-red-500 rounded-md text-[7px] font-black uppercase tracking-widest">
+                    {alerta.tipo || 'CIPA_VIOLATION'}
                   </span>
-                )}
+                  {alerta.aulaId && (
+                    <span className="px-2 py-0.5 bg-blue-500/10 text-blue-500 rounded-md text-[7px] font-black uppercase tracking-widest">
+                      AULA: {alerta.aulaId}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           ))

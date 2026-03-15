@@ -2,74 +2,52 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  font-family: 'Inter', sans-serif;
-}
-
 @layer base {
   :root {
-    --background: 210 40% 98%;
-    --foreground: 222 84% 5%;
+    /* Mantenemos el light mode limpio pero con acentos EDUControl */
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
-    --card-foreground: 222 84% 5%;
+    --card-foreground: 240 10% 3.9%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222 84% 5%;
-    --primary: 217 91% 60%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 210 40% 96%;
-    --accent-foreground: 222 47% 11%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 24.6 95% 53.1%; /* Orange EDU */
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 24.6 95% 53.1%;
+    --accent-foreground: 240 5.9% 10%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 217 91% 60%;
-    --chart-1: 217 91% 60%; /* blue */
-    --chart-2: 142 76% 36%; /* green */
-    --chart-3: 233 40% 50%;
-    --chart-4: 180 30% 55%;
-    --chart-5: 233 50% 70%;
-    --radius: 0.75rem;
-    --sidebar-background: 222 47% 8.2%;
-    --sidebar-foreground: 215 16% 47%;
-    --sidebar-primary: 217 91% 60%;
-    --sidebar-primary-foreground: 210 40% 98%;
-    --sidebar-accent: 0 0% 100% / 0.05;
-    --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 222 47% 15%;
-    --sidebar-ring: 217 91% 60%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 24.6 95% 53.1%;
+    --radius: 1rem;
   }
+
   .dark {
-    --background: 222 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222 47% 11%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222 47% 11%;
-    --secondary: 217 32% 17%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217 32% 17%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 217 32% 17%;
-    --accent-foreground: 210 40% 98%;
+    /* Dark Mode: Deep Black & Orange High Visibility */
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 24.6 95% 53.1%; /* Orange EDU */
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 12 6.5% 15.1%;
+    --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217 32% 17%;
-    --input: 217 32% 17%;
-    --ring: 210 40% 98%;
-    --sidebar-background: 222 84% 4.9%;
-    --sidebar-foreground: 210 40% 96%;
-    --sidebar-primary: 210 40% 98%;
-    --sidebar-primary-foreground: 222 47% 11%;
-    --sidebar-accent: 217 32% 17%;
-    --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 217 32% 17%;
-    --sidebar-ring: 210 40% 98%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 24.6 95% 53.1%;
   }
 }
 
@@ -78,26 +56,35 @@ body {
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
 
-/* --- MEJORAS PARA ESCÁNER EFAS SERVICONTROLPRO --- */
+/* --- OPTIMIZACIÓN ESCÁNER QR EDUCONTROLPRO --- */
 body.scanner-active {
-  --ion-background-color: transparent !important;
   --background: transparent !important;
-  background: transparent !important;
   background-color: transparent !important;
+  background-image: none !important;
 }
 
-body.scanner-active * {
+/* Ocultar elementos UI innecesarios durante el escaneo */
+body.scanner-active *:not(.scanner-visible) {
   visibility: hidden;
 }
 
-/* Mantiene visible el contenedor del escáner y controles necesarios */
-body.scanner-active .scanner-ui,
-body.scanner-active .scanner-ui *,
-body.scanner-active .flex, 
-body.scanner-active .flex * {
-  visibility: visible;
+/* Clase maestra para elementos que deben sobrevivir al escáner */
+.scanner-visible {
+  visibility: visible !important;
+}
+
+/* Custom Scrollbar para el estilo Dark */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-orange-500/20 rounded-full hover:bg-orange-500/40 transition-colors;
 }

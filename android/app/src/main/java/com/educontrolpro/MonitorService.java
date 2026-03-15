@@ -1,255 +1,261 @@
 package com.educontrolpro;
 
 import android.accessibilityservice.AccessibilityService;
-import android.app.Notification;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
-import android.content.Intent;
+import android.accessibilityservice.AccessibilityServiceInfo;
 import android.content.SharedPreferences;
-import android.os.Build;
-import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
-import androidx.core.app.NotificationCompat;
 
-import com.google.firebase.firestore.FirebaseFirestore;
-import com.google.firebase.firestore.ListenerRegistration;
-import com.google.firebase.firestore.FieldValue;
+// --- MIGRACIÓN A REALTIME DATABASE ---
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ServerValue;
+import com.google.firebase.database.ValueEventListener;
 
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.Timer;
+import java.util.TimerTask;
 
 public class MonitorService extends AccessibilityService {
-
-    private FirebaseFirestore db = FirebaseFirestore.getInstance();
-    private String deviceDocId;
-    private String InstitutoId;
-    private String alumnoAsignado = "";
-    
-    private static final String CAPACITOR_PREFS = "CapacitorStorage"; 
+    private static final String TAG = "MonitorService";
+    private static final String PREFS_NAME = "CapacitorStorage";
     private static final String KEY_DEVICE_ID = "deviceId";
-    private static final String CHANNEL_ID = "EDU_Service_Channel";
-
-    private boolean adminMode = false; // Control del Switch del Dashboard
-    private List<String> blacklistApps = new ArrayList<>();
     
-    private List<String> listaBlancaSistema = Arrays.asList(
-        "com.android.packageinstaller", "com.google.android.packageinstaller",
-        "com.educontrolpro", "com.android.systemui", "com.android.launcher3"
-    );
-
-    private List<String> packagesSettings = Arrays.asList(
-        "com.android.settings", "com.google.android.settings", "com.samsung.android.settings"
-    );
-
-    private static final List<String> PALABRAS_PROHIBIDAS = Arrays.asList(
-        "xxx", "porno", "sexo", "xvideos", "casino", "gore"
-    );
-
-    private ListenerRegistration deviceListener;
-    private Handler heartbeatHandler = new Handler(Looper.getMainLooper());
+    private DatabaseReference mDatabase;
+    private ValueEventListener techModeListener;
+    
+    private String deviceDocId;
+    private boolean isServiceActive = true;
+    private boolean adminMode = false; // Modo Técnico (Acceso Total)
+    
+    // --- OPTIMIZACIÓN DE TIEMPO REAL ---
+    private static final long HEARTBEAT_INTERVAL = 30000; // 30 SEGUNDOS (Ilimitado en RTDB)
+    private static final long WRITE_DELAY = 5000;        // 5 segundos entre reportes de URL
+    
+    private String ultimaUrlReportada = "";
+    private long lastWriteTime = 0;
+    private Timer heartbeatTimer;
+    private long ultimoHeartbeatExitoso = 0;
 
     @Override
     public void onCreate() {
         super.onCreate();
-        createNotificationChannel();
-        startForeground(1, getNotification());
-        cargarIdentidad();
-    }
-
-    private void cargarIdentidad() {
-        SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
-        deviceDocId = capPrefs.getString(KEY_DEVICE_ID, null);
-        InstitutoId = capPrefs.getString("InstitutoId", null);
+        
+        // Inicializar Realtime Database
+        mDatabase = FirebaseDatabase.getInstance().getReference();
+        
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        deviceDocId = prefs.getString(KEY_DEVICE_ID, null);
+        
+        Log.d(TAG, "MonitorService iniciado en RTDB. Device ID: " + deviceDocId);
         
         if (deviceDocId != null) {
-            db.collection("dispositivos").document(deviceDocId).get()
-                .addOnSuccessListener(doc -> {
-                    if (doc.exists()) {
-                        alumnoAsignado = doc.getString("alumno_asignado");
-                        if (alumnoAsignado == null) alumnoAsignado = "";
-                    }
-                });
+            iniciarListenerControl(); // Escuchar cambios en el switch del dashboard (RTDB)
+            startHeartbeat();         // Iniciar pulso cada 30 segundos
         }
     }
 
-    @Override
-    protected void onServiceConnected() {
-        super.onServiceConnected();
-        if (deviceDocId != null) {
-            iniciarListeners(deviceDocId);
-            iniciarHeartbeat();
-        }
-    }
+    // LISTENER EN TIEMPO REAL: Responde al switch "Acceso Técnico" casi al instante
+    private void iniciarListenerControl() {
+        DatabaseReference controlRef = mDatabase.child("dispositivos").child(deviceDocId).child("admin_mode_enable");
+        
+        techModeListener = new ValueEventListener() {
+            @Override
+            public void onDataChange(DataSnapshot snapshot) {
+                Boolean enabled = snapshot.getValue(Boolean.class);
+                adminMode = (enabled != null && enabled);
+                Log.d(TAG, "ESTADO TÉCNICO ACTUALIZADO: " + (adminMode ? "LIBERADO" : "PROTEGIDO"));
+            }
 
-    private void iniciarListeners(String docId) {
-        // ESCUCHA DEL DISPOSITIVO (Incluye el Switch de Modo Técnico y Blacklist)
-        deviceListener = db.collection("dispositivos").document(docId)
-            .addSnapshotListener((snapshot, e) -> {
-                if (snapshot != null && snapshot.exists()) {
-                    // Actualizar Modo Técnico
-                    Boolean mode = snapshot.getBoolean("admin_mode_enable");
-                    this.adminMode = (mode != null && mode);
-                    
-                    // Actualizar Blacklist
-                    this.blacklistApps = (List<String>) snapshot.get("blacklistApps");
-                    if (this.blacklistApps == null) this.blacklistApps = new ArrayList<>();
-                    
-                    Log.d("EDU_Monitor", "Estado actualizado - Modo Técnico: " + this.adminMode);
-                }
-            });
+            @Override
+            public void onCancelled(DatabaseError error) {
+                Log.e(TAG, "Error en listener RTDB: " + error.getMessage());
+            }
+        };
+        
+        controlRef.addValueEventListener(techModeListener);
     }
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        // REGLA DE ORO 1: Si el técnico activó el switch, el centinela no interviene
-        if (adminMode) return;
+        // Si el admin activó el Modo Técnico, el servicio ignora la navegación
+        if (!isServiceActive || deviceDocId == null || adminMode) return;
 
-        String packageName = event.getPackageName() != null ? event.getPackageName().toString() : "";
-        int eventType = event.getEventType();
-
-        // A. BLOQUEO DE AJUSTES Y APPS
-        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            if (listaBlancaSistema.contains(packageName)) return;
-
-            if (packagesSettings.contains(packageName)) {
-                reportarYExpulsar("INTENTO_AJUSTES", "Acceso a ajustes", packageName, null);
-                return;
-            }
-
-            if (blacklistApps.contains(packageName)) {
-                reportarYExpulsar("APP_PROHIBIDA", "App restringida", packageName, null);
-                return;
-            }
+        int type = event.getEventType();
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
+            type == AccessibilityEvent.TYPE_VIEW_CLICKED ||
+            type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            
+            procesarEvento(event);
         }
+    }
 
-        // B. MONITOREO DE NAVEGACIÓN (Regla de Oro: Solo al ejecutar/cambiar)
-        if (esNavegador(packageName)) {
-            // Ignoramos TYPE_VIEW_TEXT_CHANGED para no molestar mientras escriben
-            if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED || 
-                eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+    private void procesarEvento(AccessibilityEvent event) {
+        try {
+            CharSequence packageName = event.getPackageName();
+            if (packageName == null) return;
+            
+            String packageStr = packageName.toString();
+            String url = null;
+            
+            // Filtro de navegadores compatibles
+            if (packageStr.contains("chrome") || packageStr.contains("browser") ||
+                packageStr.contains("firefox") || packageStr.contains("opera") ||
+                packageStr.contains("edge") || packageStr.contains("samsung.android.app.sbrowser")) {
                 
-                AccessibilityNodeInfo rootNode = getRootInActiveWindow();
-                if (rootNode == null) return;
-                analizarYFiltrar(rootNode);
-                rootNode.recycle();
+                url = extraerUrl(event);
             }
+            
+            if (url != null && !url.isEmpty()) {
+                actualizarUrlActual(url);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error procesando navegación: " + e.getMessage());
         }
     }
 
-    private void analizarYFiltrar(AccessibilityNodeInfo node) {
-        if (node == null) return;
+    private String extraerUrl(AccessibilityEvent event) {
+        AccessibilityNodeInfo nodeInfo = event.getSource();
+        if (nodeInfo != null) {
+            String url = buscarUrlEnNodos(nodeInfo);
+            nodeInfo.recycle();
+            return url;
+        }
+        return null;
+    }
 
-        // Si es un campo de texto (Barra de búsqueda o URL)
-        if (node.getClassName() != null && node.getClassName().toString().contains("EditText")) {
-            CharSequence text = node.getText();
-            if (text != null) {
-                String input = text.toString().toLowerCase();
-                for (String word : PALABRAS_PROHIBIDAS) {
-                    if (input.contains(word)) {
-                        // REGLA DE ORO: Limpiar campo, reportar y expulsar
-                        limpiarCampo(node);
-                        reportarYExpulsar("BUSQUEDA_PROHIBIDA", "Palabra bloqueada: " + word, input, node);
-                        return;
-                    }
+    private String buscarUrlEnNodos(AccessibilityNodeInfo node) {
+        if (node == null) return null;
+        
+        if (node.getClassName() != null) {
+            String className = node.getClassName().toString();
+            if (className.contains("EditText") || className.contains("UrlBar") || 
+                className.contains("SearchBox") || className.contains("AutoCompleteTextView")) {
+                
+                CharSequence text = node.getText();
+                if (text != null && text.length() > 0 && esUrlValida(text.toString())) {
+                    return text.toString();
                 }
-                // Si no es prohibido, actualizamos la URL actual en el dashboard
-                actualizarUrlActual(input);
             }
         }
-
-        for (int i = 0; i < node.getChildCount(); i++) {
-            AccessibilityNodeInfo child = node.getChild(i);
-            if (child != null) {
-                analizarYFiltrar(child);
-                child.recycle();
-            }
+        
+        // Escaneo de nodos hijos (limitado a 5 niveles para optimizar CPU)
+        for (int i = 0; i < Math.min(node.getChildCount(), 5); i++) {
+            String result = buscarUrlEnNodos(node.getChild(i));
+            if (result != null) return result;
         }
+        return null;
     }
 
-    private void limpiarCampo(AccessibilityNodeInfo node) {
-        if (node != null && node.isEditable()) {
-            Bundle arguments = new Bundle();
-            arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "");
-            node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments);
-        }
+    private boolean esUrlValida(String texto) {
+        if (texto == null || texto.isEmpty()) return false;
+        String t = texto.toLowerCase();
+        return t.contains("http") || t.contains(".") || t.contains("www");
     }
 
     private void actualizarUrlActual(String url) {
-        if (deviceDocId != null && url.length() > 3) {
-            Map<String, Object> data = new HashMap<>();
-            data.put("url_actual", url);
-            data.put("ultimoAcceso", FieldValue.serverTimestamp());
-            db.collection("dispositivos").document(deviceDocId).update(data);
-        }
+        String urlLimpia = limpiarUrl(url);
+        if (urlLimpia.isEmpty() || urlLimpia.equals(ultimaUrlReportada)) return;
+        
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastWriteTime < WRITE_DELAY) return;
+        
+        ultimaUrlReportada = urlLimpia;
+        lastWriteTime = currentTime;
+        
+        // Reporte a RTDB
+        Map<String, Object> updates = new HashMap<>();
+        updates.put("url_actual", urlLimpia);
+        updates.put("ultimoAcceso", ServerValue.TIMESTAMP);
+        updates.put("online", true);
+
+        mDatabase.child("dispositivos").child(deviceDocId).updateChildren(updates);
     }
 
-    private void reportarYExpulsar(String tipo, String desc, String detalle, AccessibilityNodeInfo node) {
-        // 1. Expulsar al Home
-        performGlobalAction(GLOBAL_ACTION_HOME);
-
-        // 2. Reportar Alerta
-        Map<String, Object> alerta = new HashMap<>();
-        alerta.put("tipo", tipo);
-        alerta.put("descripcion", desc);
-        alerta.put("detalle", detalle);
-        alerta.put("timestamp", FieldValue.serverTimestamp());
-        alerta.put("deviceId", deviceDocId);
-        alerta.put("alumno", alumnoAsignado);
-        db.collection("alertas").add(alerta);
-
-        // 3. Guardar en historial web (Subcolección)
-        Map<String, Object> hist = new HashMap<>();
-        hist.put("url", detalle);
-        hist.put("bloqueado", true);
-        hist.put("timestamp", FieldValue.serverTimestamp());
-        db.collection("dispositivos").document(deviceDocId).collection("web_history").add(hist);
+    private String limpiarUrl(String url) {
+        if (url == null) return "";
+        url = url.toLowerCase().trim();
+        if (url.startsWith("http://")) url = url.substring(7);
+        if (url.startsWith("https://")) url = url.substring(8);
+        if (url.startsWith("www.")) url = url.substring(4);
+        
+        int queryIndex = url.indexOf('?');
+        if (queryIndex > 0) url = url.substring(0, queryIndex);
+        
+        if (url.length() > 100) url = url.substring(0, 100);
+        return url;
     }
 
-    private boolean esNavegador(String pkg) {
-        List<String> navs = Arrays.asList("chrome", "browser", "firefox", "edge", "opera");
-        for (String n : navs) if (pkg.toLowerCase().contains(n)) return true;
-        return false;
-    }
-
-    private void iniciarHeartbeat() {
-        heartbeatHandler.postDelayed(new Runnable() {
+    private void startHeartbeat() {
+        if (heartbeatTimer != null) heartbeatTimer.cancel();
+        
+        heartbeatTimer = new Timer();
+        heartbeatTimer.scheduleAtFixedRate(new TimerTask() {
             @Override
             public void run() {
-                if (deviceDocId != null) {
-                    db.collection("dispositivos").document(deviceDocId).update("online", true, "ultimoAcceso", FieldValue.serverTimestamp());
-                }
-                heartbeatHandler.postDelayed(this, 30000);
+                enviarHeartbeat();
             }
-        }, 30000);
+        }, 5000, HEARTBEAT_INTERVAL); // Inicia a los 5 seg, luego cada 30 seg
     }
 
-    private void createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "Centinela EDU", NotificationManager.IMPORTANCE_LOW);
-            getSystemService(NotificationManager.class).createNotificationChannel(channel);
-        }
+    private void enviarHeartbeat() {
+        if (deviceDocId == null || !isServiceActive) return;
+        
+        long ahora = System.currentTimeMillis();
+        
+        // Evita duplicados en menos de 20 segundos
+        if (ahora - ultimoHeartbeatExitoso < 20000) return; 
+        
+        Map<String, Object> heartbeat = new HashMap<>();
+        heartbeat.put("ultimoHeartbeat", ServerValue.TIMESTAMP);
+        heartbeat.put("online", true);
+        
+        mDatabase.child("dispositivos").child(deviceDocId)
+            .updateChildren(heartbeat)
+            .addOnSuccessListener(aVoid -> {
+                ultimoHeartbeatExitoso = ahora;
+                Log.d(TAG, "Pulse OK (30s)");
+            });
     }
 
-    private Notification getNotification() {
-        return new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("EDU Centinela Activo")
-                .setSmallIcon(android.R.drawable.ic_lock_lock)
-                .setOngoing(true).build();
+    @Override
+    public void onInterrupt() {
+        Log.d(TAG, "MonitorService interrumpido");
     }
 
-    @Override public void onInterrupt() {}
     @Override
     public void onDestroy() {
-     
-        if (deviceListener != null) deviceListener.remove();
-     
         super.onDestroy();
+        isServiceActive = false;
+        
+        // Limpieza de listeners para no dejar procesos abiertos
+        if (techModeListener != null && deviceDocId != null) {
+            mDatabase.child("dispositivos").child(deviceDocId).child("admin_mode_enable")
+                .removeEventListener(techModeListener);
+        }
+        
+        if (heartbeatTimer != null) {
+            heartbeatTimer.cancel();
+            heartbeatTimer = null;
+        }
+        Log.d(TAG, "MonitorService detenido");
+    }
+
+    @Override
+    public void onServiceConnected() {
+        super.onServiceConnected();
+        AccessibilityServiceInfo info = new AccessibilityServiceInfo();
+        info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED |
+                         AccessibilityEvent.TYPE_VIEW_CLICKED |
+                         AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED;
+        info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
+        info.flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
+        info.notificationTimeout = 100;
+        setServiceInfo(info);
+        Log.d(TAG, "Configuración de accesibilidad cargada.");
     }
 }

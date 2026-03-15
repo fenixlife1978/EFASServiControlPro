@@ -25,16 +25,12 @@ const AdminNavbar = () => {
     auth.signOut().then(() => {
       document.cookie = "__session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;";
       
-      // 🔥 CORREGIDO: No usar localStorage.clear() ni sessionStorage.clear()
-      // Solo eliminar las claves de sesión, mantener la configuración
+      // Mantenemos tu lógica de preservación de configuración:
       localStorage.removeItem('userRole');
       localStorage.removeItem('InstitutoId');
       localStorage.removeItem('deviceId');
-      // No borrar app_config ni setup_completed
       
-      // sessionStorage se puede limpiar sin problema porque no guarda configuración persistente
       sessionStorage.clear();
-      
       window.location.replace("/login");
     });
   };
@@ -54,6 +50,7 @@ const AdminNavbar = () => {
           </div>
         </Link>
 
+        {/* Navegación Principal - Respetando tus rutas */}
         <div className="hidden lg:flex items-center gap-8">
           <Link 
             href="/dashboard" 
@@ -79,7 +76,7 @@ const AdminNavbar = () => {
           {isInstallable && !isStandalone && (
             <button 
               onClick={installApp}
-              className="hidden md:flex items-center gap-2 bg-orange-500/10 hover:bg-orange-500 text-orange-500 hover:text-white border border-orange-500/20 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all"
+              className="hidden md:flex items-center gap-2 bg-orange-500/10 hover:bg-orange-500 text-orange-500 hover:text-white border border-orange-500/20 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all shadow-lg shadow-orange-500/5"
             >
               <Download className="w-3 h-3" /> Instalar App
             </button>
@@ -107,7 +104,7 @@ function AdminLayoutLoading() {
         <Skeleton className="h-8 w-48 bg-white/5" />
       </div>
       <div className="flex-1 p-8">
-        <Skeleton className="h-full w-full bg-white/5 rounded-3xl" />
+        <Skeleton className="h-full w-full bg-white/5 rounded-[2rem]" />
       </div>
     </div>
   );
@@ -139,11 +136,11 @@ function AdminLayoutComponent({ children }: { children: React.ReactNode }) {
     <InstitutionProvider>
       <div className="min-h-screen bg-[#0a0c10] flex flex-col font-sans text-slate-200">
         <AdminNavbar />
-        <main className="flex-1 w-full max-w-[1600px] mx-auto p-6 md:p-8 overflow-y-auto">
+        <main className="flex-1 w-full max-w-[1600px] mx-auto p-6 md:p-8 overflow-y-auto animate-in fade-in duration-700">
           {children}
         </main>
         <footer className="py-8 border-t border-white/5 text-center bg-[#0a0c10]">
-          <p className="text-[9px] text-slate-600 font-black uppercase tracking-[0.5em]">
+          <p className="text-[9px] text-slate-600 font-black uppercase tracking-[0.5em] italic">
             EDUControlPro Sistema de Control Parental Educativo © 2026 • Security Infrastructure
           </p>
         </footer>

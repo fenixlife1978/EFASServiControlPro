@@ -1,3 +1,5 @@
+'use client';
+
 import { ReportCharts } from "@/components/admin/report-charts";
 
 export default function ReportsPage() {
@@ -9,10 +11,14 @@ export default function ReportsPage() {
             Monitor de <span className="text-orange-500">Reportes</span>
           </h2>
           <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-1">
-            Visualiza el uso de dispositivos y las infracciones
+            Visualiza el uso de dispositivos y las infracciones en tiempo real vía RTDB
           </p>
         </div>
       </header>
+      
+      {/* Nota: La lógica de migración de Firestore a Realtime Database 
+          debe realizarse dentro del componente <ReportCharts /> 
+      */}
       <ReportCharts />
     </div>
   );

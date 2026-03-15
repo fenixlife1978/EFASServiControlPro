@@ -1,10 +1,10 @@
 'use client';
 import React, { useEffect, useState } from 'react';
-import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/firebase/config';
+import { rtdb } from '@/firebase/config';
+import { ref, onValue, set, serverTimestamp, off } from 'firebase/database';
 import { registerPlugin } from '@capacitor/core';
 import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
-import { ShieldAlert, QrCode, Loader2, BellRing, Camera, Tablet } from 'lucide-react';
+import { ShieldAlert, QrCode, Loader2, BellRing, Tablet, Smartphone } from 'lucide-react';
 
 const DeviceControl = registerPlugin<any>('DeviceControl');
 
@@ -33,21 +33,28 @@ export default function EstudiantePage() {
 
   const iniciarMonitoreo = (id: string) => {
     setIsEnrolled(true);
-    const unsub = onSnapshot(doc(db, "dispositivos", id), (docSnapshot) => {
-      if (docSnapshot.exists()) {
-        const data = docSnapshot.data();
+    const deviceRef = ref(rtdb, `dispositivos/${id}`);
+
+    // Suscripción en tiempo real vía RTDB (Latencia ultra baja)
+    onValue(deviceRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.val();
         setDeviceInfo(data);
         setIsLocked(data.comando_bloqueo === true);
+        
         if (data.mensaje_alerta && data.mensaje_alerta !== activeMessage) {
           setActiveMessage(data.mensaje_alerta);
         }
+        
+        // Ejecución de comando nativo de bloqueo
         if (data.comando_bloqueo === true) {
-          try { DeviceControl.lockDevice(); } catch(e) {}
+          try { DeviceControl.lockDevice(); } catch(e) { console.warn("Plugin nativo no disponible"); }
         }
       }
       setLoading(false);
     });
-    return unsub;
+
+    return () => off(deviceRef);
   };
 
   const handleEscaneoReal = async () => {
@@ -55,112 +62,138 @@ export default function EstudiantePage() {
       const isNative = typeof window !== 'undefined' && (window as any).Capacitor?.isNativePlatform();
       
       if (!isNative) {
-        const manualCode = prompt("Simulación: Pega el JSON del QR:");
+        const manualCode = prompt("Simulación: Pega el JSON del QR de EDUControlPro:");
         if (manualCode) procesarEscaneoQR(manualCode);
         return;
       }
 
       const granted = await BarcodeScanner.requestPermissions();
-      if (granted.camera !== 'granted') return alert("Permiso de cámara denegado");
+      if (granted.camera !== 'granted') return alert("Permiso de cámara necesario para vincular");
 
       const { barcodes } = await BarcodeScanner.scan();
       if (barcodes.length > 0) {
         procesarEscaneoQR(barcodes[0].displayValue);
       }
     } catch (e) {
-      console.error(e);
-      alert("Error al activar escáner");
+      alert("Error al activar cámara");
     }
   };
 
   const procesarEscaneoQR = async (jsonString: string) => {
     try {
       const data = JSON.parse(jsonString);
-      // Ajustado para coincidir con el Panel de Super Admin
       if (data.action === 'link_device' || data.action === 'enroll') {
         setLoading(true);
-        const newDeviceId = `DEV-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+        // Generación de ID de hardware único
+        const newDeviceId = `EDU-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
         
-        await setDoc(doc(db, "dispositivos", newDeviceId), {
+        // Registro en RTDB
+        await set(ref(rtdb, `dispositivos/${newDeviceId}`), {
           id: newDeviceId,
-          InstitutoId: data.inst || data.InstitutoId, // Soporta ambos formatos
-          aulaId: data.aula || data.aulaId,           // Soporta ambos formatos
-          status: 'pending_name',                     // ACTIVA EL MODAL EN SUPER ADMIN
-          alumno_asignado: "Esperando nombre...",
+          InstitutoId: data.inst || data.InstitutoId,
+          aulaId: data.aula || data.aulaId,
+          status: 'pending_name',
+          alumno_asignado: "VINCULANDO...",
           comando_bloqueo: false,
           mensaje_alerta: null,
           createdAt: serverTimestamp(),
-          lastConnection: serverTimestamp()
+          lastConnection: serverTimestamp(),
+          os: "Android/EDU-Shield"
         });
 
         localStorage.setItem('efas_device_id', newDeviceId);
         iniciarMonitoreo(newDeviceId);
       }
     } catch (e) {
-      alert("QR no válido para EDU");
+      alert("QR no compatible con EDUControlPro");
       setLoading(false);
     }
   };
 
-  if (loading) return <div className="min-h-screen bg-[#0a0c10] flex items-center justify-center text-white"><Loader2 className="animate-spin text-orange-500" /></div>;
+  if (loading) return (
+    <div className="min-h-screen bg-[#0a0c10] flex flex-col items-center justify-center text-white gap-4">
+      <Loader2 className="animate-spin text-orange-500 w-10 h-10" />
+      <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">Sincronizando Shield</p>
+    </div>
+  );
 
   if (!isEnrolled) return (
     <div className="min-h-screen bg-[#0a0c10] flex items-center justify-center p-6 text-white">
-      <div className="max-w-md w-full text-center space-y-8">
-        <div className="bg-orange-500/10 p-8 rounded-[2.5rem] w-32 h-32 mx-auto flex items-center justify-center border border-orange-500/20 shadow-2xl">
-            <Tablet className="w-16 h-16 text-orange-500" />
+      <div className="max-w-md w-full text-center space-y-10">
+        <div className="bg-orange-600/10 p-10 rounded-[3rem] w-36 h-36 mx-auto flex items-center justify-center border-2 border-orange-500/20 shadow-[0_0_50px_rgba(234,88,12,0.15)]">
+          <Smartphone className="w-16 h-16 text-orange-500" />
         </div>
         <div>
-          <h1 className="text-4xl font-black italic uppercase tracking-tighter">Efas <span className="text-orange-500">Guardian</span></h1>
-          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-2">Dispositivo no vinculado</p>
+          <h1 className="text-5xl font-black italic uppercase tracking-tighter">EDU <span className="text-orange-500">ControlPro</span></h1>
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.5em] mt-3">Device Enrollment System</p>
         </div>
         <button 
-            onClick={handleEscaneoReal}
-            className="w-full bg-orange-500 text-white py-6 rounded-[2rem] font-black uppercase italic flex items-center justify-center gap-3 shadow-lg shadow-orange-500/20 hover:scale-105 transition-all"
+          onClick={handleEscaneoReal}
+          className="w-full bg-orange-600 text-white py-7 rounded-[2.5rem] font-black uppercase italic flex items-center justify-center gap-4 shadow-xl shadow-orange-900/20 active:scale-95 transition-all"
         >
-            <QrCode /> Iniciar Vinculación
+          <QrCode className="w-6 h-6" /> Vincular Tablet
         </button>
       </div>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-[#0a0c10] text-white p-8 font-sans">
-      <header className="mb-12 flex justify-between items-center bg-[#11141d] p-6 rounded-[2.5rem] border border-white/5">
+    <div className="min-h-screen bg-[#0a0c10] text-white p-6 font-sans select-none">
+      <header className="mb-8 flex justify-between items-center bg-[#11141d]/80 backdrop-blur-md p-6 rounded-[2.5rem] border border-white/5">
         <div>
-          <h1 className="text-xl font-black italic uppercase text-orange-500 leading-none">EDU</h1>
-          <p className="text-[8px] font-bold text-slate-500 uppercase">ServControlPro</p>
+          <h1 className="text-2xl font-black italic uppercase text-orange-500 leading-none">EDU</h1>
+          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1">ControlPro Shield</p>
         </div>
-        <div className="text-right">
-          <p className="text-[10px] font-black uppercase italic text-white">{deviceInfo?.alumno_asignado}</p>
-          <p className="text-[8px] font-bold text-green-500 uppercase">Conectado</p>
+        <div className="text-right flex flex-col items-end">
+          <span className="text-[11px] font-black uppercase italic text-white bg-white/5 px-4 py-1 rounded-full mb-1">
+            {deviceInfo?.alumno_asignado}
+          </span>
+          <div className="flex items-center gap-2">
+            <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+            <p className="text-[8px] font-bold text-green-500 uppercase tracking-widest text-right">Sistema Protegido</p>
+          </div>
         </div>
       </header>
 
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-2 gap-4">
         {APPS_PERMITIDAS.map((app) => (
-          <button key={app.id} className="flex flex-col items-center p-12 bg-[#11141d] border border-white/5 rounded-[3rem] active:scale-95 transition-all">
-            <span className="text-6xl mb-4">{app.icon}</span>
-            <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">{app.nombre}</span>
+          <button key={app.id} className="flex flex-col items-center p-10 bg-[#11141d] border border-white/5 rounded-[3.5rem] active:bg-orange-600/20 transition-all border-b-4 border-b-white/5 active:border-b-orange-500">
+            <span className="text-5xl mb-4 grayscale-[0.5] group-active:grayscale-0">{app.icon}</span>
+            <span className="text-[11px] font-black uppercase text-slate-400 tracking-wider italic">{app.nombre}</span>
           </button>
         ))}
       </div>
 
+      {/* MODAL DE ALERTA DE PROFESOR */}
       {activeMessage && (
-        <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-50 flex items-center justify-center p-6">
-            <div className="bg-white p-10 rounded-[3rem] text-center max-w-sm border-b-8 border-orange-500">
-                <BellRing className="w-12 h-12 text-orange-500 mx-auto mb-4" />
-                <p className="text-xl font-bold text-slate-900 mb-6 uppercase italic">{activeMessage}</p>
-                <button onClick={() => setActiveMessage(null)} className="bg-slate-900 text-white px-8 py-3 rounded-full font-black uppercase text-xs">Entendido</button>
-            </div>
+        <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-xl z-50 flex items-center justify-center p-8">
+          <div className="bg-white p-12 rounded-[4rem] text-center max-w-sm shadow-2xl border-b-[12px] border-orange-500">
+            <BellRing className="w-16 h-16 text-orange-500 mx-auto mb-6 animate-bounce" />
+            <p className="text-2xl font-black text-slate-900 mb-8 uppercase italic leading-tight">
+              {activeMessage}
+            </p>
+            <button 
+              onClick={() => setActiveMessage(null)} 
+              className="w-full bg-slate-900 text-white py-5 rounded-[2rem] font-black uppercase text-xs tracking-widest"
+            >
+              Cerrar Notificación
+            </button>
+          </div>
         </div>
       )}
 
+      {/* PANTALLA DE BLOQUEO TOTAL */}
       {isLocked && (
-        <div className="fixed inset-0 bg-red-600 z-[100] flex flex-col items-center justify-center text-white p-10">
-          <ShieldAlert className="w-24 h-24 mb-4 animate-pulse" />
-          <h1 className="text-5xl font-black uppercase italic tracking-tighter">Acceso Restringido</h1>
-          <p className="text-sm font-bold uppercase mt-4 opacity-80 text-center">Este dispositivo ha sido bloqueado por el administrador</p>
+        <div className="fixed inset-0 bg-red-700 z-[100] flex flex-col items-center justify-center text-white p-12 animate-in fade-in duration-300">
+          <div className="bg-white/10 p-8 rounded-full mb-8">
+            <ShieldAlert className="w-28 h-28 animate-pulse" />
+          </div>
+          <h1 className="text-5xl font-black uppercase italic tracking-tighter text-center leading-none">
+            DISPOSITIVO <br /> <span className="text-red-200">BLOQUEADO</span>
+          </h1>
+          <p className="text-xs font-black uppercase mt-6 tracking-[0.3em] opacity-60 text-center max-w-xs leading-relaxed">
+            Restricción aplicada por seguridad institucional EDUControlPro
+          </p>
         </div>
       )}
     </div>
