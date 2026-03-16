@@ -37,8 +37,8 @@ export default function SuperAdminView() {
   
   const [selectedConfig, setSelectedConfig] = useState({ 
     instId: '', 
+    aulaId: '',
     seccion: '',
-    aulaId: '', 
     rol: 'alumno' 
   });
   
@@ -58,20 +58,17 @@ export default function SuperAdminView() {
   });
   const [editAulasList, setEditAulasList] = useState<any[]>([]);
 
-  // --- NUEVAS FUNCIONES DE GESTIÓN INDIVIDUAL ---
+  // --- FUNCIONES DE GESTIÓN INDIVIDUAL ---
 
   const handleDeleteDevice = async (deviceId: string) => {
     if (!confirm(`¿ESTÁS SEGURO DE ELIMINAR EL DISPOSITIVO ${deviceId}? Esta acción es irreversible.`)) return;
     try {
-      // 1. Buscamos si hay un usuario vinculado a este deviceId en Firestore
       const uQ = query(collection(db, "usuarios"), where("deviceId", "==", deviceId));
       const uSnap = await getDocs(uQ);
       
-      // 2. Eliminamos los registros de usuario encontrados
       const deletePromises = uSnap.docs.map(d => deleteDoc(doc(db, "usuarios", d.id)));
       await Promise.all(deletePromises);
 
-      // 3. Eliminamos de Realtime Database
       await remove(ref(rtdb, `dispositivos/${deviceId}`));
       
       alert("✅ DISPOSITIVO Y USUARIOS ASOCIADOS ELIMINADOS");
@@ -83,13 +80,11 @@ export default function SuperAdminView() {
     if (!newName || newName === currentName) return;
 
     try {
-      // 1. Actualizamos el nombre en RTDB
       await update(ref(rtdb, `dispositivos/${deviceId}`), {
         alumno_asignado: newName.trim(),
         lastUpdated: Date.now()
       });
 
-      // 2. Buscamos y actualizamos el nombre en el documento de usuario de Firestore
       const uQ = query(collection(db, "usuarios"), where("deviceId", "==", deviceId));
       const uSnap = await getDocs(uQ);
 
@@ -106,7 +101,7 @@ export default function SuperAdminView() {
 
   // --- LÓGICA DE DATOS ---
 
-  // Obtener ID secuencial desde RTDB (Más rápido)
+  // Obtener ID secuencial desde RTDB
   const getNextDeviceId = async () => {
     const devicesRef = queryRTDB(ref(rtdb, 'dispositivos'), orderByKey(), limitToLast(1));
     const snap = await get(devicesRef);
@@ -136,6 +131,35 @@ export default function SuperAdminView() {
     });
   }, []);
 
+  // ✅ NUEVO: Cargar aulas disponibles para la sede seleccionada (usando el campo "aulaId")
+  useEffect(() => {
+    if (!selectedConfig.instId) {
+      setAvailableAulas([]);
+      return;
+    }
+
+    console.log("Cargando aulas para sede:", selectedConfig.instId);
+    
+    const aulasRef = collection(db, "institutions", selectedConfig.instId, "Aulas");
+    const unsub = onSnapshot(aulasRef, (snapshot) => {
+      const aulasData = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          aulaId: data.aulaId || doc.id,     // Usa el campo "aulaId" o el ID del documento
+          seccion: data.seccion || '',
+          nombre: data.nombre || data.aulaId || doc.id,
+          ...data
+        };
+      });
+      
+      console.log("Aulas cargadas:", aulasData);
+      setAvailableAulas(aulasData);
+    });
+
+    return () => unsub();
+  }, [selectedConfig.instId]);
+
   useEffect(() => {
     const q = query(collection(db, "usuarios"), where("role", "in", ["director", "profesor"]));
     return onSnapshot(q, (s) => {
@@ -150,7 +174,6 @@ export default function SuperAdminView() {
       const data = snapshot.val();
       if (data) {
         const list = Object.keys(data).map(key => ({ id: key, ...data[key] }));
-        // Filtramos por aula si hay una seleccionada
         const filtered = targetAulaId 
           ? list.filter(d => d.aulaId === targetAulaId)
           : list;
@@ -197,7 +220,6 @@ export default function SuperAdminView() {
     const snap = await get(devicesRef);
     const data = snap.val();
 
-    // Buscar si hay uno pendiente para reciclar
     let existingId = null;
     if (data) {
       existingId = Object.keys(data).find(key => 
@@ -240,14 +262,12 @@ export default function SuperAdminView() {
     try {
       const selectedRole = selectedConfig.rol || 'alumno';
       
-      // 1. Actualizar RTDB
       await update(ref(rtdb, `dispositivos/${lastLinkedDevice.id}`), {
         alumno_asignado: studentName.trim(),
         status: 'active',
         lastUpdated: Date.now(),
       });
 
-      // 2. Crear Usuario Firestore
       const baseName = studentName.toLowerCase().trim().replace(/\s+/g, '_').normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       const suffix = lastLinkedDevice.id.slice(-4);
       const customId = `${baseName}_${suffix}`;
@@ -279,8 +299,6 @@ export default function SuperAdminView() {
   };
 
   const toggleExtremeSecurity = async (deviceId: string, currentStatus: boolean) => {
-    // Nota: Si migraste a RTDB, esta función debería usar 'update(ref(rtdb...))'
-    // Para mantener consistencia con tu Firestore actual:
     await updateDoc(doc(db, "dispositivos", deviceId), {
       "restrictions.extremeSecurity": !currentStatus,
       lastUpdated: serverTimestamp()
@@ -320,9 +338,6 @@ export default function SuperAdminView() {
       u.seccion?.toLowerCase().includes(search)
     );
   });
-
-  const uniqueSectionsForVincular = Array.from(new Set(availableAulas.map((a: any) => a.seccion))).filter(Boolean);
-  const uniqueSectionsForEdit = Array.from(new Set(editAulasList.map((a: any) => a.seccion))).filter(Boolean);
 
   const inputStyle = "w-full bg-[#1a1d26] border border-slate-800 p-4 rounded-xl focus:border-orange-500 outline-none font-bold text-slate-200 text-[10px] uppercase transition-all";
 
@@ -369,19 +384,32 @@ export default function SuperAdminView() {
                         <h2 className="text-xs font-black uppercase italic text-white flex items-center gap-2 mb-8"><QrCode className="text-orange-500" size={18}/> Estación de Vinculación</h2>
                         {!isJornadaActive ? (
                           <div className="space-y-4">
-                            <select className={inputStyle} onChange={e => setSelectedConfig({...selectedConfig, instId: e.target.value, seccion: '', aulaId: ''})}>
+                            {/* 1. SEDE */}
+                            <select className={inputStyle} onChange={e => setSelectedConfig({...selectedConfig, instId: e.target.value, aulaId: '', seccion: ''})}>
                               <option value="">1. SELECCIONAR SEDE</option>
                               {institutions.map(i => <option key={i.id} value={i.id}>{i.nombre}</option>)}
                             </select>
 
-                            <select className={inputStyle} disabled={!selectedConfig.instId} value={selectedConfig.seccion} onChange={e => setSelectedConfig({...selectedConfig, seccion: e.target.value, aulaId: ''})}>
-                              <option value="">2. SELECCIONAR SECCIÓN</option>
-                              {uniqueSectionsForVincular.map(sec => <option key={sec} value={sec}>{sec}</option>)}
+                            {/* 2. AULA - usando el campo "aulaId" */}
+                            <select className={inputStyle} disabled={!selectedConfig.instId} value={selectedConfig.aulaId} onChange={e => setSelectedConfig({...selectedConfig, aulaId: e.target.value, seccion: ''})}>
+                              <option value="">2. SELECCIONAR AULA</option>
+                              {availableAulas.map(aula => (
+                                <option key={aula.id} value={aula.aulaId}>
+                                  {aula.nombre || aula.aulaId}
+                                </option>
+                              ))}
                             </select>
 
-                            <select className={inputStyle} disabled={!selectedConfig.seccion} value={selectedConfig.aulaId} onChange={e => setSelectedConfig({...selectedConfig, aulaId: e.target.value})}>
-                              <option value="">3. SELECCIONAR AULA EXACTA</option>
-                              {availableAulas.filter(a => a.seccion === selectedConfig.seccion).map(a => <option key={a.id} value={a.id}>{a.aulaId}</option>)}
+                            {/* 3. SECCIÓN - basada en el aula seleccionada */}
+                            <select className={inputStyle} disabled={!selectedConfig.aulaId} value={selectedConfig.seccion} onChange={e => setSelectedConfig({...selectedConfig, seccion: e.target.value})}>
+                              <option value="">3. SELECCIONAR SECCIÓN</option>
+                              {availableAulas
+                                .filter(aula => aula.aulaId === selectedConfig.aulaId)
+                                .map(aula => (
+                                  <option key={aula.id} value={aula.seccion}>
+                                    Sección {aula.seccion}
+                                  </option>
+                                ))}
                             </select>
 
                             <div className="grid grid-cols-2 gap-4">
@@ -471,7 +499,7 @@ export default function SuperAdminView() {
                     <label className="text-[9px] font-black text-slate-500 uppercase mb-3 block italic">2. Filtrar Aula</label>
                     <select className={inputStyle} value={targetAulaId} onChange={e => setTargetAulaId(e.target.value)}>
                       <option value="">-- SELECCIONAR --</option>
-                      {availableAulas.map(a => <option key={a.id} value={a.id}>{a.nombre_completo || a.aulaId}</option>)}
+                      {availableAulas.map(a => <option key={a.id} value={a.aulaId}>{a.nombre || a.aulaId}</option>)}
                     </select>
                   </div>
                   <div className="col-span-6">
@@ -494,11 +522,9 @@ export default function SuperAdminView() {
                     <div className="flex justify-between items-start mb-4">
                       <Smartphone size={20} className={device.restrictions?.extremeSecurity ? 'text-red-500' : 'text-orange-500'} />
                       <div className="flex gap-2">
-                         {/* BOTÓN REASIGNAR/MODIFICAR */}
                         <button onClick={() => handleUpdateDeviceName(device.id, device.alumno_asignado)} className="p-2 bg-slate-900 rounded-lg text-slate-500 hover:text-blue-500 transition-colors">
                           <RefreshCcw size={14} />
                         </button>
-                        {/* BOTÓN ELIMINAR INDIVIDUAL */}
                         <button onClick={() => handleDeleteDevice(device.id)} className="p-2 bg-slate-900 rounded-lg text-slate-500 hover:text-red-500 transition-colors">
                           <Trash2 size={14} />
                         </button>
@@ -533,7 +559,6 @@ export default function SuperAdminView() {
           {activeTab === 'usuarios' && (
             <div className="space-y-12">
               <UserManagement />
-              {/* Lógica de edición de usuario existente... */}
             </div>
           )}
         </div>

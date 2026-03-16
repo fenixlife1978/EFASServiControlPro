@@ -10,10 +10,10 @@ export default function VincularUI() {
   const { institutionId } = useInstitution();
   const [sedes, setSedes] = useState<any[]>([]);
   const [selectedSede, setSelectedSede] = useState('');
-  const [secciones, setSecciones] = useState<any[]>([]);
-  const [selectedSeccion, setSelectedSeccion] = useState('');
   const [aulas, setAulas] = useState<any[]>([]);
   const [selectedAula, setSelectedAula] = useState('');
+  const [seccionesDisponibles, setSeccionesDisponibles] = useState<string[]>([]);
+  const [selectedSeccion, setSelectedSeccion] = useState('');
   const [selectedRol, setSelectedRol] = useState('ALUMNO');
   const [nextDeviceNumber, setNextDeviceNumber] = useState(1);
   const [qrValue, setQrValue] = useState('');
@@ -22,36 +22,64 @@ export default function VincularUI() {
 
   // Cargar sedes (instituciones)
   useEffect(() => {
-    if (!institutionId) return;
     const fetchSedes = async () => {
       const sedesRef = collection(db, "institutions");
       const snapshot = await getDocs(sedesRef);
       setSedes(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     };
     fetchSedes();
-  }, [institutionId]);
+  }, []);
 
-  // Cargar secciones de la sede seleccionada
+  // PASO 2: Cargar aulas de la sede seleccionada
   useEffect(() => {
     if (!selectedSede) return;
-    const fetchSecciones = async () => {
-      const seccionesRef = collection(db, "institutions", selectedSede, "Secciones");
-      const snapshot = await getDocs(seccionesRef);
-      setSecciones(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-    };
-    fetchSecciones();
-  }, [selectedSede]);
-
-  // Cargar aulas de la sección seleccionada
-  useEffect(() => {
-    if (!selectedSede || !selectedSeccion) return;
+    
     const fetchAulas = async () => {
-      const aulasRef = collection(db, "institutions", selectedSede, "Secciones", selectedSeccion, "Aulas");
+      const aulasRef = collection(db, "institutions", selectedSede, "Aulas");
       const snapshot = await getDocs(aulasRef);
-      setAulas(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+      console.log("Aulas encontradas:", snapshot.size);
+      
+      const aulasData = snapshot.docs.map(d => ({ 
+        id: d.id, 
+        ...d.data() 
+      }));
+      
+      setAulas(aulasData);
+      
+      // Limpiar selecciones
+      setSelectedAula('');
+      setSeccionesDisponibles([]);
+      setSelectedSeccion('');
     };
     fetchAulas();
-  }, [selectedSede, selectedSeccion]);
+  }, [selectedSede]);
+
+  // PASO 3: Cuando se selecciona un aula, obtener su sección
+  useEffect(() => {
+    if (!selectedAula) {
+      setSeccionesDisponibles([]);
+      setSelectedSeccion('');
+      return;
+    }
+
+    const fetchAulaDetails = async () => {
+      try {
+        const aula = aulas.find(a => a.id === selectedAula);
+        
+        if (aula && aula.section) {
+          setSeccionesDisponibles([aula.section]);
+          setSelectedSeccion(aula.section);
+        } else {
+          setSeccionesDisponibles(['A', 'B', 'C']);
+          setSelectedSeccion('');
+        }
+      } catch (error) {
+        console.error("Error obteniendo detalles del aula:", error);
+      }
+    };
+
+    fetchAulaDetails();
+  }, [selectedAula, aulas]);
 
   // Calcular siguiente número de dispositivo
   useEffect(() => {
@@ -75,7 +103,7 @@ export default function VincularUI() {
   }, [selectedSede]);
 
   const generarQR = async () => {
-    if (!selectedSede || !selectedSeccion || !selectedAula) return;
+    if (!selectedSede || !selectedAula || !selectedSeccion) return;
     
     setLoading(true);
     try {
@@ -84,8 +112,8 @@ export default function VincularUI() {
       const qrData = {
         deviceId,
         InstitutoId: selectedSede,
-        seccionId: selectedSeccion,
         aulaId: selectedAula,
+        seccion: selectedSeccion,
         rol: selectedRol.toLowerCase(),
         timestamp: Date.now()
       };
@@ -96,8 +124,8 @@ export default function VincularUI() {
       await addDoc(collection(db, "pendientes"), {
         deviceId,
         InstitutoId: selectedSede,
-        seccionId: selectedSeccion,
         aulaId: selectedAula,
+        seccion: selectedSeccion,
         rol: selectedRol.toLowerCase(),
         createdAt: serverTimestamp(),
         status: 'pending'
@@ -127,21 +155,25 @@ export default function VincularUI() {
         <div className="mb-8">
           <h2 className="text-2xl font-black italic uppercase text-slate-400 flex items-center gap-3">
             <Zap className="w-5 h-5 text-orange-500" />
-            PANEL DE VINCULACIÓN
+            ESTACIÓN DE VINCULACIÓN
           </h2>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Columna Izquierda - Selectores */}
           <div className="space-y-6">
-            {/* SEDE */}
+            {/* 1. SEDE */}
             <div className="bg-[#11141d] border border-white/5 rounded-3xl p-6">
               <label className="text-[10px] font-black uppercase text-orange-500 ml-2 italic flex items-center gap-2 mb-3">
                 <Building2 className="w-4 h-4" /> 1. SELECCIONAR SEDE
               </label>
               <select 
                 value={selectedSede}
-                onChange={(e) => setSelectedSede(e.target.value)}
+                onChange={(e) => {
+                  setSelectedSede(e.target.value);
+                  setSelectedAula('');
+                  setSelectedSeccion('');
+                }}
                 className="w-full bg-[#1a1d26] border border-slate-800 p-4 rounded-xl focus:border-orange-500 outline-none font-bold text-slate-200 text-[10px] uppercase"
               >
                 <option value="">Seleccionar Sede</option>
@@ -153,45 +185,50 @@ export default function VincularUI() {
               </select>
             </div>
 
-            {/* SECCIÓN */}
-            <div className="bg-[#11141d] border border-white/5 rounded-3xl p-6">
-              <label className="text-[10px] font-black uppercase text-orange-500 ml-2 italic flex items-center gap-2 mb-3">
-                <Layers className="w-4 h-4" /> 2. SELECCIONAR SECCIÓN
-              </label>
-              <select 
-                value={selectedSeccion}
-                onChange={(e) => setSelectedSeccion(e.target.value)}
-                disabled={!selectedSede}
-                className="w-full bg-[#1a1d26] border border-slate-800 p-4 rounded-xl focus:border-orange-500 outline-none font-bold text-slate-200 text-[10px] uppercase disabled:opacity-50"
-              >
-                <option value="">Seleccionar Sección</option>
-                {secciones.map(sec => (
-                  <option key={sec.id} value={sec.id}>
-                    {sec.nombre || sec.id}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* 2. AULA (AHORA PRIMERO DESPUÉS DE SEDE) */}
+            {selectedSede && (
+              <div className="bg-[#11141d] border border-white/5 rounded-3xl p-6">
+                <label className="text-[10px] font-black uppercase text-orange-500 ml-2 italic flex items-center gap-2 mb-3">
+                  <Building2 className="w-4 h-4" /> 2. SELECCIONAR AULA
+                </label>
+                <select 
+                  value={selectedAula}
+                  onChange={(e) => {
+                    setSelectedAula(e.target.value);
+                    setSelectedSeccion('');
+                  }}
+                  className="w-full bg-[#1a1d26] border border-slate-800 p-4 rounded-xl focus:border-orange-500 outline-none font-bold text-slate-200 text-[10px] uppercase"
+                >
+                  <option value="">Seleccionar Aula</option>
+                  {aulas.map(aula => (
+                    <option key={aula.id} value={aula.id}>
+                      {aula.nombre || aula.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
-            {/* AULA */}
-            <div className="bg-[#11141d] border border-white/5 rounded-3xl p-6">
-              <label className="text-[10px] font-black uppercase text-orange-500 ml-2 italic flex items-center gap-2 mb-3">
-                <Building2 className="w-4 h-4" /> 3. SELECCIONAR AULA EXACTA
-              </label>
-              <select 
-                value={selectedAula}
-                onChange={(e) => setSelectedAula(e.target.value)}
-                disabled={!selectedSeccion}
-                className="w-full bg-[#1a1d26] border border-slate-800 p-4 rounded-xl focus:border-orange-500 outline-none font-bold text-slate-200 text-[10px] uppercase disabled:opacity-50"
-              >
-                <option value="">Seleccionar Aula</option>
-                {aulas.map(aula => (
-                  <option key={aula.id} value={aula.id}>
-                    {aula.nombre || aula.id}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* 3. SECCIÓN (AHORA SEGUNDO, basada en el aula) */}
+            {selectedAula && seccionesDisponibles.length > 0 && (
+              <div className="bg-[#11141d] border border-white/5 rounded-3xl p-6">
+                <label className="text-[10px] font-black uppercase text-orange-500 ml-2 italic flex items-center gap-2 mb-3">
+                  <Layers className="w-4 h-4" /> 3. SELECCIONAR SECCIÓN
+                </label>
+                <select 
+                  value={selectedSeccion}
+                  onChange={(e) => setSelectedSeccion(e.target.value)}
+                  className="w-full bg-[#1a1d26] border border-slate-800 p-4 rounded-xl focus:border-orange-500 outline-none font-bold text-slate-200 text-[10px] uppercase"
+                >
+                  <option value="">Seleccionar Sección</option>
+                  {seccionesDisponibles.map(seccion => (
+                    <option key={seccion} value={seccion}>
+                      Sección {seccion}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {/* Columna Derecha - Roles y QR */}
@@ -221,7 +258,7 @@ export default function VincularUI() {
             {/* Botón Activar Estación */}
             <button
               onClick={generarQR}
-              disabled={!selectedAula || loading}
+              disabled={!selectedAula || !selectedSeccion || loading}
               className="w-full bg-orange-500 disabled:bg-slate-800 text-white py-6 rounded-2xl font-black uppercase text-sm hover:bg-orange-600 transition-all shadow-lg shadow-orange-500/20 flex items-center justify-center gap-3"
             >
               <Zap className="w-5 h-5" />
