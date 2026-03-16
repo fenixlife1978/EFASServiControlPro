@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { useFirestore } from '@/firebase'; 
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ShieldAlert, Save, Trash2, Globe, Lock, Power, ListChecks, ListX } from 'lucide-react';
+import { ShieldAlert, Save, Trash2, Globe, Lock, Power, ListChecks, ListX, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
 
 export default function FilterConfig({ activeId }: { activeId: string }) {
   const [blacklist, setBlacklist] = useState<string[]>([]);
@@ -20,7 +21,6 @@ export default function FilterConfig({ activeId }: { activeId: string }) {
   const firestore = useFirestore();
   const { toast } = useToast();
 
-  // Cargar configuración existente DESDE EL DOCUMENTO PRINCIPAL de la institución
   useEffect(() => {
     const fetchConfig = async () => {
       if (!firestore || !activeId) return;
@@ -33,48 +33,42 @@ export default function FilterConfig({ activeId }: { activeId: string }) {
           setWhitelist(data.whitelist || []);
           setUseBlacklist(data.useBlacklist || false);
           setUseWhitelist(data.useWhitelist || false);
+          if (data.useWhitelist) setFilterMode('whitelist');
         }
       } catch (error) {
-        console.error("Error cargando filtros:", error);
+        console.error("Error cargando base de datos:", error);
       }
     };
     fetchConfig();
   }, [activeId, firestore]);
 
-  // Guardar configuración EN EL DOCUMENTO PRINCIPAL de la institución
   const saveConfig = async () => {
     if (!firestore || !activeId) return;
     setLoading(true);
     try {
       const instRef = doc(firestore, 'institutions', activeId);
       
-      // Actualizar según el modo activo
-      if (filterMode === 'blacklist') {
-        await updateDoc(instRef, {
-          blacklist: blacklist,
-          useBlacklist: useBlacklist,
-          updatedAt: new Date(),
-          lastUpdatedBy: 'admin'
-        });
-      } else {
-        await updateDoc(instRef, {
-          whitelist: whitelist,
-          useWhitelist: useWhitelist,
-          updatedAt: new Date(),
-          lastUpdatedBy: 'admin'
-        });
-      }
+      const updateData = {
+        blacklist,
+        whitelist,
+        useBlacklist,
+        useWhitelist,
+        updatedAt: new Date(),
+        lastUpdatedBy: 'EDUControl_Admin'
+      };
+
+      await updateDoc(instRef, updateData);
       
       toast({ 
-        title: "✅ Filtros Actualizados", 
-        description: "Los cambios se han aplicado a todas las tablets de la institución." 
+        title: "✅ SISTEMA ACTUALIZADO", 
+        description: "Las políticas de EDUControlPro han sido desplegadas con éxito." 
       });
     } catch (e) {
       console.error(e);
       toast({ 
         variant: "destructive", 
-        title: "❌ Error de Guardado", 
-        description: "No se pudieron aplicar los cambios." 
+        title: "❌ ERROR DE RED", 
+        description: "No se pudo sincronizar con el núcleo de EDUControlPro." 
       });
     } finally {
       setLoading(false);
@@ -82,20 +76,18 @@ export default function FilterConfig({ activeId }: { activeId: string }) {
   };
 
   const addUrl = () => {
-    const formattedUrl = newUrl.trim().toLowerCase().replace(/^(https?:\/\/)/, "");
-    if (!formattedUrl) return;
+    const formattedUrl = newUrl.trim().toLowerCase()
+      .replace(/^(https?:\/\/)/, "")
+      .replace(/\/$/, "");
+
+    if (!formattedUrl || formattedUrl.length < 3) return;
     
     if (filterMode === 'blacklist') {
-      if (!blacklist.includes(formattedUrl)) {
-        setBlacklist([...blacklist, formattedUrl]);
-        setNewUrl('');
-      }
+      if (!blacklist.includes(formattedUrl)) setBlacklist([...blacklist, formattedUrl]);
     } else {
-      if (!whitelist.includes(formattedUrl)) {
-        setWhitelist([...whitelist, formattedUrl]);
-        setNewUrl('');
-      }
+      if (!whitelist.includes(formattedUrl)) setWhitelist([...whitelist, formattedUrl]);
     }
+    setNewUrl('');
   };
 
   const removeUrl = (urlToRemove: string) => {
@@ -107,63 +99,67 @@ export default function FilterConfig({ activeId }: { activeId: string }) {
   };
 
   return (
-    <div className="bg-[#0f1117] rounded-[2.5rem] p-8 shadow-2xl border border-slate-800 text-white">
-      <div className="flex items-center justify-between mb-8">
+    <div className="bg-[#0f1117] rounded-[2.5rem] p-8 shadow-2xl border border-slate-800 text-white transition-all">
+      {/* Header EDUControlPro */}
+      <div className="flex items-center justify-between mb-8 border-b border-slate-800 pb-6">
         <div className="flex items-center gap-4">
           <div className="bg-orange-500 p-4 rounded-2xl shadow-lg shadow-orange-500/20">
             <Lock className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h2 className="text-2xl font-black text-white uppercase italic tracking-tighter">
-              Filtro de Contenido
+            <h2 className="text-2xl font-black text-white uppercase italic tracking-tighter leading-none">
+              Filtro <span className="text-orange-500">Web</span>
             </h2>
-            <p className="text-[10px] text-orange-500 font-black uppercase tracking-[0.2em]">
-              Control de Navegación
+            <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] mt-2">
+              Panel de Control <span className="text-orange-500/80 italic">EDUControlPro</span>
             </p>
           </div>
         </div>
+        <Badge variant="outline" className="border-slate-800 text-slate-500 font-mono text-[9px] px-3">
+          SECURE_ID: {activeId.slice(0, 8).toUpperCase()}
+        </Badge>
       </div>
 
-      {/* Selector de modo: Blacklist / Whitelist */}
-      <div className="grid grid-cols-2 gap-3 mb-6">
-        <button
-          onClick={() => setFilterMode('blacklist')}
-          className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all ${
-            filterMode === 'blacklist' 
-              ? 'border-red-500 bg-red-500/10 text-red-500' 
-              : 'border-slate-800 bg-slate-900/50 text-slate-400'
-          }`}
-        >
-          <ListX className="w-5 h-5" />
-          <span className="text-[10px] font-black uppercase">Lista Negra</span>
-          <span className="text-[8px] text-slate-500">Bloquea sitios específicos</span>
-        </button>
-        <button
-          onClick={() => setFilterMode('whitelist')}
-          className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all ${
-            filterMode === 'whitelist' 
-              ? 'border-green-500 bg-green-500/10 text-green-500' 
-              : 'border-slate-800 bg-slate-900/50 text-slate-400'
-          }`}
-        >
-          <ListChecks className="w-5 h-5" />
-          <span className="text-[10px] font-black uppercase">Lista Blanca</span>
-          <span className="text-[8px] text-slate-500">Solo permite sitios específicos</span>
-        </button>
+      {/* Selectores de Modo */}
+      <div className="grid grid-cols-2 gap-4 mb-8">
+        {[
+          { id: 'blacklist', label: 'Lista Negra', icon: ListX, color: 'red', desc: 'Bloqueo Específico' },
+          { id: 'whitelist', label: 'Lista Blanca', icon: ListChecks, color: 'green', desc: 'Acceso Exclusivo' }
+        ].map((mode) => (
+          <button
+            key={mode.id}
+            onClick={() => setFilterMode(mode.id as any)}
+            className={`p-5 rounded-[2rem] border-2 flex flex-col items-center gap-2 transition-all duration-300 group ${
+              filterMode === mode.id 
+                ? `border-${mode.color}-500 bg-${mode.color}-500/10 text-${mode.color}-500` 
+                : 'border-slate-800 bg-slate-900/30 text-slate-500 opacity-60 hover:opacity-100'
+            }`}
+          >
+            <mode.icon className="w-6 h-6 transition-transform group-hover:scale-110" />
+            <span className="text-[11px] font-black uppercase tracking-tight">{mode.label}</span>
+            <span className="text-[8px] font-bold opacity-60 uppercase italic">{mode.desc}</span>
+          </button>
+        ))}
       </div>
 
-      {/* Switch para activar/desactivar el filtro */}
-      <div className="flex items-center justify-between p-4 bg-slate-900/50 rounded-2xl border border-slate-800 mb-6">
-        <div className="flex items-center gap-3">
-          <Power className={`w-5 h-5 ${filterMode === 'blacklist' ? (useBlacklist ? 'text-green-500' : 'text-red-500') : (useWhitelist ? 'text-green-500' : 'text-red-500')}`} />
+      {/* Switch Maestro */}
+      <div className={`flex items-center justify-between p-5 rounded-[2.2rem] border transition-all duration-500 mb-8 ${
+        (filterMode === 'blacklist' ? useBlacklist : useWhitelist) 
+          ? 'bg-green-500/5 border-green-500/20 shadow-inner' 
+          : 'bg-slate-950/50 border-slate-800'
+      }`}>
+        <div className="flex items-center gap-4">
+          <div className={`p-3 rounded-xl transition-all ${
+            (filterMode === 'blacklist' ? useBlacklist : useWhitelist) ? 'bg-green-500 text-white shadow-lg shadow-green-500/20' : 'bg-slate-800 text-slate-500'
+          }`}>
+            <Power className="w-5 h-5" />
+          </div>
           <div>
-            <p className="text-sm font-black text-white uppercase italic">
-              {filterMode === 'blacklist' ? 'Filtro de Lista Negra' : 'Filtro de Lista Blanca'}
+            <p className="text-xs font-black text-white uppercase italic leading-none">
+              Estado del Escudo {filterMode === 'blacklist' ? 'Negro' : 'Blanco'}
             </p>
-            <p className="text-[8px] text-slate-500">
-              {filterMode === 'blacklist' 
-                ? (useBlacklist ? 'Activado: Se bloquean los sitios de la lista' : 'Desactivado: No se bloquean sitios')
-                : (useWhitelist ? 'Activado: Solo se permiten los sitios de la lista' : 'Desactivado: Se permite cualquier sitio')}
+            <p className="text-[9px] font-bold text-slate-500 uppercase mt-1">
+              {(filterMode === 'blacklist' ? useBlacklist : useWhitelist) ? 'EDUControlPro Protección ON' : 'Filtro en Standby'}
             </p>
           </div>
         </div>
@@ -172,57 +168,59 @@ export default function FilterConfig({ activeId }: { activeId: string }) {
           onCheckedChange={(checked) => {
             if (filterMode === 'blacklist') {
               setUseBlacklist(checked);
-              setUseWhitelist(false); // No pueden estar ambos activos
+              if (checked) setUseWhitelist(false);
             } else {
               setUseWhitelist(checked);
-              setUseBlacklist(false);
+              if (checked) setUseBlacklist(false);
             }
           }}
+          className="data-[state=checked]:bg-green-500"
         />
       </div>
 
       <div className="space-y-6">
         <div className="flex gap-3">
           <div className="relative flex-1">
-            <Globe className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <Globe className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
             <Input 
-              placeholder={filterMode === 'blacklist' ? "ej: youtube.com, tiktok.com" : "ej: classroom.google.com, wikipedia.org"} 
+              placeholder={filterMode === 'blacklist' ? "DOMINIO A RESTRINGIR" : "DOMINIO A AUTORIZAR"} 
               value={newUrl} 
               onChange={(e) => setNewUrl(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && addUrl()}
-              className="pl-12 bg-slate-900 border-slate-800 h-14 rounded-2xl font-bold text-white outline-none focus:ring-2 focus:ring-orange-500/20 transition-all"
+              className="pl-14 bg-slate-950 border-slate-800 h-14 rounded-2xl font-bold text-white focus:ring-2 focus:ring-orange-500/20 uppercase text-xs"
             />
           </div>
           <Button 
             onClick={addUrl} 
-            className="h-14 px-8 bg-orange-500 hover:bg-orange-600 text-white rounded-2xl font-black uppercase tracking-tighter transition-all"
+            className="h-14 px-10 bg-orange-500 hover:bg-orange-600 text-white rounded-2xl font-black uppercase italic shadow-lg shadow-orange-500/20"
           >
             Añadir
           </Button>
         </div>
 
-        <div className="bg-slate-900/30 rounded-3xl p-6 border border-slate-800 min-h-[200px]">
-          <p className="text-[10px] font-black text-orange-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-            <ShieldAlert className="w-3 h-3" /> 
-            {filterMode === 'blacklist' ? 'Sitios bloqueados' : 'Sitios permitidos'}
-          </p>
+        {/* Lista de Dominios */}
+        <div className="bg-slate-950/50 rounded-[2.5rem] p-6 border border-slate-800 min-h-[250px] relative overflow-hidden">
+          <div className="flex items-center gap-2 mb-6 ml-2">
+            <ShieldAlert className="w-4 h-4 text-orange-500" />
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+              Monitor de Dominios de EDUControlPro
+            </p>
+          </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {(filterMode === 'blacklist' ? blacklist : whitelist).length === 0 ? (
-              <div className="col-span-full py-10 text-center">
-                <p className="text-sm font-bold text-slate-500 italic">
-                  {filterMode === 'blacklist' 
-                    ? 'No hay sitios bloqueados. El acceso es libre.' 
-                    : 'No hay sitios en lista blanca. Todos los sitios están bloqueados si el filtro está activo.'}
+              <div className="col-span-full py-16 text-center">
+                <p className="text-[10px] font-black text-slate-700 uppercase italic">
+                  No hay registros en la base de datos local
                 </p>
               </div>
             ) : (
               (filterMode === 'blacklist' ? blacklist : whitelist).map((url) => (
-                <div key={url} className="flex justify-between items-center bg-slate-900/70 p-4 rounded-2xl border border-slate-700 group hover:border-orange-500/30 transition-all">
-                  <span className="text-sm font-black text-slate-300 truncate">{url}</span>
+                <div key={url} className="flex justify-between items-center bg-slate-900/40 p-4 rounded-2xl border border-slate-800 group hover:border-orange-500/40 transition-all">
+                  <span className="text-xs font-bold text-slate-400 truncate tracking-tight lowercase">{url}</span>
                   <button 
                     onClick={() => removeUrl(url)}
-                    className="p-2 hover:bg-red-500/20 rounded-xl text-slate-500 hover:text-red-500 transition-all"
+                    className="p-2 hover:bg-red-500/10 rounded-xl text-slate-600 hover:text-red-500 transition-all"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -234,28 +232,19 @@ export default function FilterConfig({ activeId }: { activeId: string }) {
 
         <Button 
           onClick={saveConfig} 
-          disabled={loading || (filterMode === 'blacklist' ? blacklist.length === 0 && useBlacklist : whitelist.length === 0 && useWhitelist)}
-          className="w-full bg-blue-600 hover:bg-blue-700 text-white py-6 rounded-2xl font-black text-sm uppercase tracking-wider shadow-xl transition-all flex items-center justify-center gap-3 group disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={loading}
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white py-8 rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-2xl transition-all flex items-center justify-center gap-4 group"
         >
           {loading ? (
-            <Loader2 className="w-5 h-5 animate-spin" />
+            <Loader2 className="w-6 h-6 animate-spin text-white" />
           ) : (
             <>
-              <Save className="w-5 h-5 text-orange-300 group-hover:scale-110 transition-transform" />
-              Aplicar Cambios
+              <Save className="w-5 h-5 text-blue-200 group-hover:scale-110 transition-transform" />
+              Sincronizar Políticas EDUControlPro
             </>
           )}
         </Button>
       </div>
     </div>
-  );
-}
-
-function Loader2({ className }: { className?: string }) {
-  return (
-    <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-    </svg>
   );
 }

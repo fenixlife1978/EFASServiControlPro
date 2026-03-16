@@ -11,11 +11,11 @@ const firebaseConfig = {
   storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  // Si tu base de datos no está en la región de US-Central, 
-  // podrías necesitar agregar: databaseURL: "TU_URL_DE_RTDB_AQUI"
+  // IMPORTANTE: Se añade databaseURL para evitar errores de conexión en RTDB
+  databaseURL: `https://${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID}-default-rtdb.firebaseio.com`
 };
 
-// Inicialización segura
+// Inicialización Singleton segura
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
 const auth = getAuth(app);
@@ -23,28 +23,35 @@ const firestore = getFirestore(app);
 const storage = getStorage(app);
 const realtimeDb = getDatabase(app); 
 
-// Tipos de modo de conexión
+// Tipos de modo de conexión para el ecosistema
 export type DbMode = 'cloud' | 'local' | 'hybrid';
 
 // ====================================================
-// FUNCIONES DE CONFIGURACIÓN LOCAL
-// ====================================================
+// FUNCIONES DE CONFIGURACIÓN Y PERSISTENCIA LOCAL
+// ====================================
 
+/**
+ * Obtiene el modo de base de datos actual desde el almacenamiento local.
+ * Por defecto retorna 'hybrid' si no hay configuración previa.
+ */
 export const getDbMode = (): DbMode => {
   if (typeof window !== "undefined") {
     const config = localStorage.getItem('app_config');
     if (config) {
       try {
         const { mode } = JSON.parse(config);
-        return (mode as DbMode) || "cloud";
+        return (mode as DbMode) || "hybrid";
       } catch (e) {
-        return "cloud";
+        return "hybrid";
       }
     }
   }
-  return "cloud";
+  return "hybrid";
 };
 
+/**
+ * Obtiene la URL del servidor local de la sede.
+ */
 export const getLocalServerUrl = (): string => {
   if (typeof window !== "undefined") {
     const config = localStorage.getItem('app_config');
@@ -60,6 +67,9 @@ export const getLocalServerUrl = (): string => {
   return "http://localhost:5000";
 };
 
+/**
+ * Actualiza la configuración de conexión globalmente.
+ */
 export const setDbMode = (mode: DbMode, localUrl?: string) => {
   if (typeof window !== "undefined") {
     localStorage.setItem('app_config', JSON.stringify({ mode, url: localUrl }));
@@ -70,34 +80,39 @@ export const setDbMode = (mode: DbMode, localUrl?: string) => {
 // API CLIENT PARA MODO LOCAL/HÍBRIDO
 // ====================================================
 
+/**
+ * Crea un cliente de API para interactuar con el servidor local de la sede.
+ * Útil para funciones que no pueden esperar a la sincronización de Firebase.
+ */
 export const createApiClient = (baseUrl: string) => {
+  const fetchOptions = {
+    headers: { 'Content-Type': 'application/json' }
+  };
+
   return {
     getDispositivos: async () => {
       const res = await fetch(`${baseUrl}/api/dispositivos`);
       return res.json();
     },
-    getDispositivo: async (id: string) => {
-      const res = await fetch(`${baseUrl}/api/dispositivos/${id}`);
-      return res.json();
-    },
     updateDispositivo: async (id: string, data: any) => {
       const res = await fetch(`${baseUrl}/api/dispositivos/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        ...fetchOptions,
         body: JSON.stringify(data)
       });
       return res.json();
     },
-    getUsuarios: async () => {
-      const res = await fetch(`${baseUrl}/api/usuarios`);
-      return res.json();
-    },
-    getAlertas: async () => {
-      const res = await fetch(`${baseUrl}/api/alertas`);
-      return res.json();
-    },
     getWebHistory: async (deviceId: string) => {
       const res = await fetch(`${baseUrl}/api/web-history/${deviceId}`);
+      return res.json();
+    },
+    // Envía un comando de bloqueo instantáneo al servidor local
+    sendInstantCommand: async (deviceId: string, command: string) => {
+      const res = await fetch(`${baseUrl}/api/commands`, {
+        method: 'POST',
+        ...fetchOptions,
+        body: JSON.stringify({ deviceId, command })
+      });
       return res.json();
     }
   };
@@ -107,6 +122,6 @@ export const createApiClient = (baseUrl: string) => {
 // EXPORTACIONES UNIFICADAS
 // ====================================================
 
-export const db = firestore;     // Firestore (usuarios, instituciones)
-export const rtdb = realtimeDb;   // Realtime Database (dispositivos, señales)
+export const db = firestore;      // Firestore (Estructura de datos pesada)
+export const rtdb = realtimeDb;   // Realtime Database (Señales de control en vivo)
 export { auth, storage, app };

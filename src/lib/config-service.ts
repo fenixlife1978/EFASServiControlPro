@@ -1,26 +1,36 @@
-import { db } from '@/firebase'; // Asegúrate de que la ruta sea @/firebase o @/firebase/config según tu proyecto
+'use client';
+import { db } from '@/firebase/config';
 import { doc, onSnapshot } from 'firebase/firestore';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
+/**
+ * Suscribe la aplicación al PIN maestro de seguridad.
+ * @returns Función de desuscripción.
+ */
 export const subscribeToMasterKey = (callback: (key: string) => void) => {
   const securityDoc = doc(db, 'system_config', 'security');
   
-  // Usamos onSnapshot para que los cambios sean instantáneos (tiempo real)
-  return onSnapshot(securityDoc, (snapshot) => {
-    if (snapshot.exists()) {
-      const data = snapshot.data();
-      
-      // 🔥 CORREGIDO: El campo es 'master_pin', no 'master_key'
-      if (data && data.master_pin) {
-        callback(data.master_pin);
-        console.log("✅ PIN maestro sincronizado desde Firebase");
-      } else {
-        console.warn("⚠️ El documento existe pero el campo 'master_pin' está vacío o falta.");
+  return onSnapshot(
+    securityDoc, 
+    (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data && data.master_pin) {
+          callback(String(data.master_pin));
+          console.log("🔐 Seguridad: PIN maestro sincronizado.");
+        }
       }
-    } else {
-      console.warn("⚠️ No se encontró el documento de seguridad en /system_config/security");
+    }, 
+    (error) => {
+      if (error.code === 'permission-denied') {
+        // 🔥 CORRECCIÓN: Cambiamos 'listen' por 'read' para cumplir con el tipo SecurityRuleContext
+        errorEmitter.emit('permission-error', new FirestorePermissionError({
+          path: 'system_config/security',
+          operation: 'read' 
+        }));
+      }
+      console.error("❌ Error en suscripción de seguridad:", error);
     }
-  }, (error) => {
-    // Esto es vital para evitar el error de "Cloud Firestore backend could not be reached"
-    console.error("❌ Error de conexión con Firestore en el servicio de seguridad:", error);
-  });
+  );
 };

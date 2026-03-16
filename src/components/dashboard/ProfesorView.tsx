@@ -1,17 +1,20 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { db, auth } from '@/firebase/config';
+import { db, auth, rtdb } from '@/firebase/config';
 import { 
-  collection, onSnapshot, query, where, doc, getDoc, 
-  updateDoc, serverTimestamp 
+  collection, query, where, onSnapshot, doc, getDoc 
 } from 'firebase/firestore';
+import { 
+  ref, onValue, update, serverTimestamp as rtdbTimestamp 
+} from 'firebase/database';
 import { onAuthStateChanged } from 'firebase/auth';
 import { 
-  History, User, RefreshCw, AlertTriangle, Search, Lock, Unlock, Globe, ShieldAlert, ShieldCheck
+  History, User, RefreshCw, AlertTriangle, Search, Lock, Unlock, Globe, ShieldAlert, ZapOff
 } from 'lucide-react';
 import { WebHistoryModal } from '@/components/admin/monitoring/WebHistoryModal';
 import { AlertFeed } from '@/components/dashboard/AlertFeed';
+import { toast } from 'sonner';
 
 interface Dispositivo {
   id: string;
@@ -37,9 +40,9 @@ export default function ProfesorView() {
   const [searchTerm, setSearchTerm] = useState('');
   const [historyModal, setHistoryModal] = useState({ isOpen: false, tabletId: '', alumnoNombre: '' });
   const [workingInstitutoId, setWorkingInstitutoId] = useState<string>('');
-  const [modoConcentracion, setModoConcentracion] = useState(false);
-  const [cambiandoModo, setCambiandoModo] = useState(false);
+  const [isBlindando, setIsBlindando] = useState(false);
 
+  // 1. Obtener InstitutoId del localStorage
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const id = localStorage.getItem('InstitutoId');
@@ -47,19 +50,7 @@ export default function ProfesorView() {
     }
   }, []);
 
-  // Escuchar cambios en el modo concentración de la institución
-  useEffect(() => {
-    if (!workingInstitutoId) return;
-    const instRef = doc(db, 'institutions', workingInstitutoId);
-    const unsub = onSnapshot(instRef, (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        setModoConcentracion(data.modoConcentracion || false);
-      }
-    });
-    return () => unsub();
-  }, [workingInstitutoId]);
-
+  // 2. Carga de Perfil del Profesor y Escucha de Alumnos del Aula
   useEffect(() => {
     if (!workingInstitutoId) return;
 
@@ -79,33 +70,33 @@ export default function ProfesorView() {
               seccion: seccionLimpia
             });
 
-            const qAlumnos = query(
-              collection(db, "dispositivos"),
-              where("InstitutoId", "==", workingInstitutoId),
-              where("aulaId", "==", data.aulaId),
-              where("rol", "==", "alumno")
-            );
-
-            const unsubAlumnos = onSnapshot(qAlumnos, (alumnoSnap) => {
-              const docs = alumnoSnap.docs.map(d => ({ id: d.id, ...d.data() } as Dispositivo))
-                .filter(d => {
-                   const sDB = (d.seccion || '').toString().replace(/["']/g, '').replace('SECCION ', '').trim();
-                   return sDB === seccionLimpia;
-                });
-              
-              setAlumnos(docs);
-              setLoading(false);
-            }, (err) => {
-              console.error("Error en query dispositivos:", err);
+            // ESCUCHA RTDB: Filtrado por Sede + Aula + Sección
+            const dispositivosRef = ref(rtdb, `dispositivos`);
+            const unsubRTDB = onValue(dispositivosRef, (snapshot) => {
+              const dataRTDB = snapshot.val();
+              if (dataRTDB) {
+                const listaFiltrada = Object.keys(dataRTDB)
+                  .map(key => ({ id: key, ...dataRTDB[key] } as Dispositivo))
+                  .filter(d => 
+                    d.InstitutoId === workingInstitutoId && 
+                    d.aulaId === data.aulaId && 
+                    d.rol === "alumno" &&
+                    (d.seccion || '').toString().replace('SECCION ', '').trim() === seccionLimpia
+                  );
+                setAlumnos(listaFiltrada);
+              } else {
+                setAlumnos([]);
+              }
               setLoading(false);
             });
 
-            return () => unsubAlumnos();
+            return () => unsubRTDB();
           }
         });
 
         const instRef = doc(db, "institutions", workingInstitutoId);
         getDoc(instRef).then(s => s.exists() && setNombreSede(s.data().nombre));
+
         return () => unsubProf();
       }
     });
@@ -113,51 +104,65 @@ export default function ProfesorView() {
     return () => unsubAuth();
   }, [workingInstitutoId]);
 
+  // 3. Acción de Blindaje Masivo (Solo Aula del Profesor)
+  const handleBlindajeAula = async (bloquear: boolean) => {
+    if (alumnos.length === 0) return;
+    
+    setIsBlindando(true);
+    const toastId = toast.loading(bloquear ? "Blindando aula..." : "Liberando navegación...");
+
+    try {
+      const updates: any = {};
+      alumnos.forEach(alumno => {
+        updates[`/dispositivos/${alumno.id}/cortarNavegacion`] = bloquear;
+        updates[`/dispositivos/${alumno.id}/blockAllBrowsing`] = bloquear;
+        updates[`/dispositivos/${alumno.id}/lastUpdated`] = rtdbTimestamp();
+      });
+
+      await update(ref(rtdb), updates);
+      toast.success(bloquear ? "Aula blindada" : "Navegación restaurada", { id: toastId });
+    } catch (error) {
+      console.error("Error Blindaje:", error);
+      toast.error("Error en la operación masiva", { id: toastId });
+    } finally {
+      setIsBlindando(false);
+    }
+  };
+
+  // 4. Acción Individual
   const handleToggleBlock = async (tabletId: string, isBlocked: boolean) => {
     if (!tabletId) return;
     try {
-      await updateDoc(doc(db, "dispositivos", tabletId), {
-        cortarNavegacion: !isBlocked,
-        blockAllBrowsing: !isBlocked,
-        lastUpdated: serverTimestamp()
-      });
-    } catch (e) { console.error(e); }
-  };
-
-  const handleToggleModoConcentracion = async () => {
-    if (!workingInstitutoId || cambiandoModo) return;
-    setCambiandoModo(true);
-    try {
-      const nuevoValor = !modoConcentracion;
-      await updateDoc(doc(db, 'institutions', workingInstitutoId), {
-        modoConcentracion: nuevoValor,
-        lastUpdated: serverTimestamp()
-      });
-      // También se podría enviar un mensaje a las tablets, pero eso lo hará el MonitorService
-    } catch (error) {
-      console.error("Error cambiando modo concentración:", error);
-    } finally {
-      setCambiandoModo(false);
-    }
+      const updates: any = {};
+      updates[`/dispositivos/${tabletId}/cortarNavegacion`] = !isBlocked;
+      updates[`/dispositivos/${tabletId}/blockAllBrowsing`] = !isBlocked;
+      updates[`/dispositivos/${tabletId}/lastUpdated`] = rtdbTimestamp();
+      await update(ref(rtdb), updates);
+    } catch (e) { console.error("Error individual block:", e); }
   };
 
   const checkIsOnline = (ultimoAcceso: any) => {
     if (!ultimoAcceso) return false;
-    const lastSeenDate = ultimoAcceso.toDate ? ultimoAcceso.toDate() : new Date(ultimoAcceso);
-    const now = new Date();
-    const diff = now.getTime() - lastSeenDate.getTime();
-    return diff < 60000;
+    const lastSeenTime = typeof ultimoAcceso === 'number' ? ultimoAcceso : new Date(ultimoAcceso).getTime();
+    return (Date.now() - lastSeenTime) < 30000;
   };
 
+  // 5. Filtros y Cálculos de UI
   const alumnosFiltrados = alumnos.filter(al => 
     al.alumno_asignado?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const totalAlumnos = alumnos.length;
+  const totalBloqueados = alumnos.filter(al => al.cortarNavegacion).length;
+  const todosBloqueados = totalAlumnos > 0 && totalBloqueados === totalAlumnos;
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500 min-h-[60vh]">
+      
+      {/* HEADER CON CONTROLES */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 border-b border-slate-800 pb-8">
         <div>
-          <h2 className="text-[10px] font-black text-blue-500 uppercase tracking-[0.3em] mb-2 italic">Docente en Línea</h2>
+          <h2 className="text-[10px] font-black text-blue-500 uppercase tracking-[0.3em] mb-2 italic">Panel de Control Docente</h2>
           <h1 className="text-4xl font-black text-white italic uppercase tracking-tighter leading-none mb-4">{nombreSede}</h1>
           <div className="flex flex-wrap items-center gap-3">
             <div className="bg-slate-900/50 p-2 pr-4 rounded-2xl border border-slate-800 flex items-center gap-3">
@@ -172,52 +177,63 @@ export default function ProfesorView() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3 w-full lg:w-auto">
+        <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+          {/* BOTÓN DE BLINDAJE CON CONTADOR DINÁMICO */}
           <button
-            onClick={handleToggleModoConcentracion}
-            disabled={cambiandoModo}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[9px] font-black uppercase italic transition-all ${
-              modoConcentracion
-                ? 'bg-green-600 text-white shadow-lg shadow-green-600/20'
-                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            onClick={() => handleBlindajeAula(!todosBloqueados)}
+            disabled={isBlindando || totalAlumnos === 0}
+            className={`flex flex-col items-center justify-center px-6 py-3 rounded-2xl transition-all border-2 shadow-xl min-w-[200px] ${
+              todosBloqueados
+                ? 'bg-red-600/10 border-red-500 text-red-500 hover:bg-red-600 hover:text-white'
+                : 'bg-blue-600 border-blue-600 text-white hover:bg-blue-700 shadow-blue-500/20'
             }`}
           >
-            <ShieldCheck size={14} />
-            {cambiandoModo ? 'Cambiando...' : modoConcentracion ? 'Modo Concentración Activo' : 'Activar Modo Concentración'}
+            <div className="flex items-center gap-2 mb-1">
+              {todosBloqueados ? <Unlock size={16} /> : <ZapOff size={16} />}
+              <span className="text-[10px] font-black uppercase italic tracking-tighter">
+                {isBlindando ? 'PROCESANDO...' : todosBloqueados ? 'LIBERAR NAVEGACIÓN' : 'BLINDAR TODA EL AULA'}
+              </span>
+            </div>
+            
+            <div className={`text-[9px] font-bold px-3 py-0.5 rounded-full ${
+              todosBloqueados ? 'bg-red-500 text-white' : 'bg-white/20 text-white'
+            }`}>
+              {totalBloqueados} / {totalAlumnos} BLOQUEADOS
+            </div>
           </button>
-          <div className="relative flex-1 lg:w-72">
+
+          <div className="relative flex-1 lg:w-64">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
             <input 
               type="text"
               placeholder="BUSCAR ESTUDIANTE..."
-              className="w-full bg-slate-900 border border-slate-800 rounded-2xl py-3 pl-10 pr-4 text-white text-[9px] font-black uppercase outline-none focus:border-blue-500 transition-all"
+              className="w-full bg-slate-900 border border-slate-800 rounded-2xl py-4 pl-10 pr-4 text-white text-[9px] font-black uppercase outline-none focus:border-blue-500 transition-all"
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
         </div>
       </div>
 
+      {/* GRID DE ESTUDIANTES */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         {loading ? (
           <div className="col-span-full py-20 text-center"><RefreshCw className="animate-spin text-blue-500 mx-auto" /></div>
         ) : alumnosFiltrados.length > 0 ? (
           alumnosFiltrados.map((al) => {
             const online = checkIsOnline(al.ultimoAcceso);
-            const urlActual = al.ultimaUrl || al.current_url || 'Sin actividad';
+            const urlActual = al.ultimaUrl || al.current_url || 'Navegador inactivo';
             
             return (
-              <div key={al.id} className="bg-[#0f1117] border border-slate-800 rounded-[2.5rem] p-6 shadow-2xl hover:border-blue-500/50 transition-all">
+              <div key={al.id} className="bg-[#0f1117] border border-slate-800 rounded-[2.5rem] p-6 shadow-2xl hover:border-blue-500/50 transition-all group">
                 <div className="flex justify-between items-center mb-4">
                   <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${online ? 'bg-green-500 animate-pulse' : 'bg-slate-700'}`} />
+                    <div className={`w-2 h-2 rounded-full ${online ? 'bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-slate-700'}`} />
                     <h3 className="text-[11px] font-black text-white uppercase italic">{al.alumno_asignado}</h3>
                   </div>
-                  {al.shieldMode && (
-                    <ShieldAlert size={14} className="text-orange-500" />
-                  )}
+                  {al.shieldMode && <ShieldAlert size={14} className="text-orange-500 animate-bounce" />}
                 </div>
                 
-                <div className="bg-black/40 p-3 rounded-2xl border border-slate-800/50 mb-4 flex items-center gap-2">
+                <div className="bg-black/40 p-3 rounded-2xl border border-slate-800/50 mb-4 flex items-center gap-2 group-hover:border-blue-500/30 transition-colors">
                   <Globe size={12} className="text-slate-600" />
                   <p className="text-[10px] text-blue-400 font-bold truncate lowercase flex-1">{urlActual}</p>
                 </div>
@@ -252,13 +268,15 @@ export default function ProfesorView() {
           <div className="col-span-full py-32 bg-slate-900/20 border-2 border-dashed border-slate-800 rounded-[3rem] text-center">
              <AlertTriangle size={32} className="text-slate-700 mx-auto mb-4" />
              <p className="text-[10px] font-black text-slate-500 uppercase italic tracking-widest px-4">
-                No hay tablets vinculadas a {datosProfesor.aulaId} - {datosProfesor.seccion}
+                No hay tablets activas en {datosProfesor.aulaId} {datosProfesor.seccion}
              </p>
           </div>
         )}
       </div>
 
+      {/* COMPONENTES EXTRAS */}
       <AlertFeed aulaId={datosProfesor.aulaId} institutoId={workingInstitutoId} />
+      
       <WebHistoryModal 
         isOpen={historyModal.isOpen} 
         onClose={() => setHistoryModal({ ...historyModal, isOpen: false })} 

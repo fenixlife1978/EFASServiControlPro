@@ -46,7 +46,9 @@ export const DatabaseSelector = () => {
       return;
     }
 
-    // Guardar en localStorage usando dbService
+    // 🔥 ADAPTACIÓN HÍBRIDA: 
+    // Al guardar el modo 'hybrid', dbService preparará los listeners duales
+    // (Firestore para documentos, RTDB para comandos de EDUControlPro)
     dbService.saveSettings(mode, url);
     
     // Marcar como configurado (persistente entre sesiones)
@@ -57,7 +59,7 @@ export const DatabaseSelector = () => {
     console.log('localStorage app_config:', localStorage.getItem('app_config'));
     
     // Mostrar mensaje de éxito
-    alert(`✅ Modo ${mode} configurado correctamente`);
+    alert(`✅ Modo ${mode.toUpperCase()} configurado correctamente en EDUControlPro`);
     
     // 🔥 FLUJO CORREGIDO: Ir directamente al dashboard (no al login)
     window.location.href = '/dashboard';
@@ -124,7 +126,7 @@ export const DatabaseSelector = () => {
             ⚙️ CONFIGURACIÓN INICIAL
           </h2>
           <p style={{ color: '#94a3b8', marginBottom: '24px' }}>
-            Selecciona el modo de conexión:
+            Selecciona el modo de conexión para EDUControlPro:
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
@@ -173,8 +175,8 @@ export const DatabaseSelector = () => {
                 textAlign: 'left'
               }}
             >
-              <strong>⚡ Modo Híbrido</strong><br />
-              <span style={{ fontSize: '12px', color: '#94a3b8' }}>Nube + Local</span>
+              <strong>⚡ Modo Híbrido (Recomendado)</strong><br />
+              <span style={{ fontSize: '12px', color: '#f97316' }}>Sincronización RTDB + Firestore</span>
             </button>
           </div>
 
@@ -345,7 +347,7 @@ export const DatabaseSelector = () => {
           }}
         >
           <strong>⚡ Modo Híbrido</strong><br/>
-          <span style={{ fontSize: '10px', color: '#94a3b8' }}>Nube + Local</span>
+          <span style={{ fontSize: '10px', color: '#f97316' }}>Cloud + Local RTDB</span>
         </button>
       </div>
 
@@ -401,7 +403,7 @@ export const DatabaseSelector = () => {
   );
 };
 
-// 🔥 AÑADIDO PARA DEPURACIÓN: Hace dbService accesible en consola
+// 🔥 MANTENIDO: Depuración en consola
 if (typeof window !== 'undefined') {
   (window as any).dbService = dbService;
 }

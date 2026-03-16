@@ -2,38 +2,43 @@
 
 import { useState, useEffect } from 'react';
 import { errorEmitter } from '@/firebase/error-emitter';
-import { FirestorePermissionError } from '@/firebase/errors';
+import { FirestorePermissionError, RTDBPermissionError } from '@/firebase/errors';
 
 /**
- * An invisible component that listens for globally emitted 'permission-error' events.
- * It throws any received error to be caught by Next.js's global-error.tsx.
+ * Componente invisible que escucha eventos globales de error de permisos.
+ * Adaptado para el modelo híbrido de EDUControlPro (Firestore + RTDB).
  */
 export function FirebaseErrorListener() {
-  // Use the specific error type for the state for type safety.
-  const [error, setError] = useState<FirestorePermissionError | null>(null);
+  // Estado para capturar errores de cualquiera de las dos bases de datos
+  const [error, setError] = useState<FirestorePermissionError | RTDBPermissionError | null>(null);
 
   useEffect(() => {
-    // The callback now expects a strongly-typed error, matching the event payload.
-    const handleError = (error: FirestorePermissionError) => {
-      // Set error in state to trigger a re-render.
-      setError(error);
+    // Manejador para errores de Firestore (Documentos, Auditoría, Sedes)
+    const handleFirestoreError = (err: FirestorePermissionError) => {
+      console.error("🔥 [EDUControlPro] Error de permisos en Firestore:", err);
+      setError(err);
     };
 
-    // The typed emitter will enforce that the callback for 'permission-error'
-    // matches the expected payload type (FirestorePermissionError).
-    errorEmitter.on('permission-error', handleError);
+    // Manejador para errores de Realtime Database (Comandos, Bloqueos, Alertas)
+    const handleRTDBError = (err: RTDBPermissionError) => {
+      console.warn("⚡ [EDUControlPro] Error de permisos en Realtime DB:", err);
+      setError(err);
+    };
 
-    // Unsubscribe on unmount to prevent memory leaks.
+    // Suscripción a ambos tipos de eventos en el modelo híbrido
+    errorEmitter.on('permission-error', handleFirestoreError);
+    errorEmitter.on('rtdb-permission-error', handleRTDBError);
+
     return () => {
-      errorEmitter.off('permission-error', handleError);
+      errorEmitter.off('permission-error', handleFirestoreError);
+      errorEmitter.off('rtdb-permission-error', handleRTDBError);
     };
   }, []);
 
-  // On re-render, if an error exists in state, throw it.
+  // Al re-renderizar, si existe un error, lo lanzamos para que lo capture global-error.tsx
   if (error) {
     throw error;
   }
 
-  // This component renders nothing.
   return null;
 }

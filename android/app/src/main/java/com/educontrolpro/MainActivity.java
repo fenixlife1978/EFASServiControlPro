@@ -15,7 +15,6 @@ import android.widget.Toast;
 
 import com.getcapacitor.BridgeActivity;
 import com.capacitorjs.plugins.device.DevicePlugin;
-import com.google.firebase.firestore.FirebaseFirestore;
 
 // IMPORTACIONES PARA PERMISOS Y VPN
 import androidx.activity.result.ActivityResultLauncher;
@@ -23,12 +22,30 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+// HÍBRIDO: Realtime DB + Firestore
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.firestore.FieldValue;
+
+// IMPORTACIONES FALTANTES - AÑADIDAS
+import java.util.Map;
+import java.util.HashMap;
+
 public class MainActivity extends BridgeActivity {
     private static final int DEVICE_ADMIN_REQUEST = 101;
     private static final String CAPACITOR_PREFS = "CapacitorStorage";
     private static final String ADMIN_PREFS = "AdminPrefs";
     private static final String KEY_UNLOCKED = "is_unlocked";
     private static final String KEY_DEVICE_ID = "deviceId";
+    private static final String TAG = "MainActivity";
+    
+    // HÍBRIDO: Realtime DB para operaciones frecuentes
+    private FirebaseDatabase realtimeDb;
+    private DatabaseReference deviceRealtimeRef;
+    
+    // Firestore para respaldo (opcional)
+    private FirebaseFirestore firestore;
     
     // Controlador de VPN
     private VpnController vpnController;
@@ -41,10 +58,9 @@ public class MainActivity extends BridgeActivity {
         new ActivityResultContracts.StartActivityForResult(),
         result -> {
             if (result.getResultCode() == RESULT_OK) {
-                // Permiso concedido, iniciar VPN
                 iniciarVpn();
             } else {
-                Toast.makeText(this, "Permiso VPN necesario para el control parental", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "Permiso VPN necesario", Toast.LENGTH_LONG).show();
             }
         }
     );
@@ -53,45 +69,54 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
+        // Inicializar Firebase HÍBRIDO
+        realtimeDb = FirebaseDatabase.getInstance();
+        firestore = FirebaseFirestore.getInstance();
+        
         // 1. Registro de Plugins (Capacitor)
         registerPlugin(DevicePlugin.class);
         try {
             registerPlugin(LiberarPlugin.class); 
         } catch (Exception e) {
-            Log.e("EDU_Status", "Error al registrar LiberarPlugin: " + e.getMessage());
+            Log.e(TAG, "Error al registrar LiberarPlugin: " + e.getMessage());
         }
 
         // 2. Registrar plugin de VPN
         try {
             registerPlugin(VpnPlugin.class);
         } catch (Exception e) {
-            Log.e("EDU_Status", "Error al registrar VpnPlugin: " + e.getMessage());
+            Log.e(TAG, "Error al registrar VpnPlugin: " + e.getMessage());
         }
 
         // 3. Inicializar controlador de VPN
         vpnController = new VpnController(this);
 
-        // 4. Solicitar permisos necesarios (CÁMARA, etc.)
+        // 4. Solicitar permisos necesarios
         solicitarPermisosNecesarios();
 
-        // 5. Lógica de seguridad (Device Owner / Admin)
+        // 5. Lógica de seguridad
         checkSecurityPrivileges();
 
-        // 6. Verificar vinculación e iniciar MonitorService y VPN
+        // 6. Verificar vinculación
         checkVinculacionYEstado();
 
-        // 7. Monitor de actualizaciones
+        // 7. Obtener referencia Realtime DB si está vinculado
+        SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
+        String deviceId = capPrefs.getString(KEY_DEVICE_ID, null);
+        if (deviceId != null) {
+            deviceRealtimeRef = realtimeDb.getReference("dispositivos").child(deviceId);
+        }
+
+        // 8. Monitor de actualizaciones (opcional, podría ir a Realtime)
         try {
             UpdateManager updateManager = new UpdateManager(this);
             updateManager.listenForUpdates();
         } catch (Exception e) {
-            Log.e("EDU_Status", "UpdateManager no inicializado: " + e.getMessage());
+            Log.e(TAG, "UpdateManager no inicializado: " + e.getMessage());
         }
     }
 
-    // --- NUEVO: SOLICITAR PERMISOS (CÁMARA, ETC.) ---
     private void solicitarPermisosNecesarios() {
-        // Lista de permisos necesarios
         String[] permisos;
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -105,7 +130,6 @@ public class MainActivity extends BridgeActivity {
             };
         }
         
-        // Verificar qué permisos faltan
         boolean necesitaSolicitud = false;
         for (String permiso : permisos) {
             if (ContextCompat.checkSelfPermission(this, permiso) != PackageManager.PERMISSION_GRANTED) {
@@ -114,7 +138,6 @@ public class MainActivity extends BridgeActivity {
             }
         }
         
-        // Solicitar permisos faltantes
         if (necesitaSolicitud) {
             ActivityCompat.requestPermissions(this, permisos, 1001);
         }
@@ -127,11 +150,11 @@ public class MainActivity extends BridgeActivity {
         if (requestCode == 1001) {
             for (int i = 0; i < permissions.length; i++) {
                 if (grantResults[i] == PackageManager.PERMISSION_GRANTED) {
-                    Log.d("EDU_Status", "Permiso concedido: " + permissions[i]);
+                    Log.d(TAG, "Permiso concedido: " + permissions[i]);
                 } else {
-                    Log.d("EDU_Status", "Permiso denegado: " + permissions[i]);
+                    Log.d(TAG, "Permiso denegado: " + permissions[i]);
                     if (permissions[i].equals(Manifest.permission.CAMERA)) {
-                        Toast.makeText(this, "Se necesita permiso de cámara para escanear QR", Toast.LENGTH_LONG).show();
+                        Toast.makeText(this, "Se necesita permiso de cámara", Toast.LENGTH_LONG).show();
                     }
                 }
             }
@@ -143,10 +166,8 @@ public class MainActivity extends BridgeActivity {
     public void solicitarPermisoVpn() {
         Intent intent = VpnService.prepare(this);
         if (intent != null) {
-            // Necesitamos permiso del usuario
             vpnPermissionLauncher.launch(intent);
         } else {
-            // Ya tenemos permiso
             iniciarVpn();
         }
     }
@@ -155,7 +176,7 @@ public class MainActivity extends BridgeActivity {
         if (vpnController != null) {
             vpnController.startVpn();
             vpnActiva = true;
-            Log.d("EDU_Status", "VPN activada manualmente");
+            Log.d(TAG, "VPN activada");
         }
     }
 
@@ -163,16 +184,15 @@ public class MainActivity extends BridgeActivity {
         if (vpnController != null) {
             vpnController.stopVpn();
             vpnActiva = false;
-            Log.d("EDU_Status", "VPN desactivada manualmente");
+            Log.d(TAG, "VPN desactivada");
         }
     }
 
-    // Método para obtener el estado de la VPN (lo necesita VpnPlugin)
     public boolean isVpnActiva() {
         return vpnActiva;
     }
 
-    // --- RE-ACTIVAR BLOQUEO DE ALUMNO ---
+    // --- RE-ACTIVAR BLOQUEO (OPTIMIZADO) ---
     public void reactivarSeguridad() {
         SharedPreferences prefs = getSharedPreferences(ADMIN_PREFS, MODE_PRIVATE);
         prefs.edit().putBoolean(KEY_UNLOCKED, false).apply();
@@ -181,30 +201,30 @@ public class MainActivity extends BridgeActivity {
         String deviceId = capPrefs.getString(KEY_DEVICE_ID, null);
         
         if (deviceId != null) {
-            try {
-                FirebaseFirestore.getInstance().collection("dispositivos")
-                    .document(deviceId)
-                    .update("admin_mode_enable", false);
-            } catch (Exception e) {
-                Log.e("EDU_Status", "No se pudo actualizar Firebase, pero el bloqueo local es efectivo.");
+            // REALTIME DB: Actualización rápida (menos costo)
+            if (deviceRealtimeRef != null) {
+                deviceRealtimeRef.child("admin_mode_enable").setValue(false)
+                    .addOnFailureListener(e -> Log.e(TAG, "Error Realtime DB: " + e.getMessage()));
             }
+            
+            // FIRESTORE: Backup (opcional, solo para eventos importantes)
+            Map<String, Object> backup = new HashMap<>();
+            backup.put("tipo", "REBLOQUEO");
+            backup.put("timestamp", FieldValue.serverTimestamp());
+            firestore.collection("eventos_seguridad").add(backup);
         }
-        Toast.makeText(this, "Seguridad activada: Ajustes bloqueados", Toast.LENGTH_LONG).show();
         
-        // Reiniciar MonitorService y asegurar que la VPN esté corriendo
+        Toast.makeText(this, "Seguridad activada", Toast.LENGTH_LONG).show();
         reiniciarMonitorService();
-        
-        // Solicitar permiso VPN si es necesario y activar
         solicitarPermisoVpn();
     }
 
-    // --- FUNCIÓN PARA LIBERAR DISPOSITIVO TOTALMENTE ---
+    // --- LIBERAR DISPOSITIVO (OPTIMIZADO) ---
     public void liberarDispositivoTotal() {
         DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
         ComponentName adminComponent = new ComponentName(this, AdminReceiver.class);
         
         try {
-            // Detener VPN antes de liberar
             detenerVpn();
 
             if (dpm.isDeviceOwnerApp(getPackageName())) {
@@ -216,20 +236,26 @@ public class MainActivity extends BridgeActivity {
                 }
                 
                 stopService(new Intent(this, MonitorService.class));
-                Log.d("EDU_Status", "¡DISPOSITIVO LIBERADO!");
-                Toast.makeText(this, "Dispositivo Liberado. Reiniciando...", Toast.LENGTH_LONG).show();
+                Log.d(TAG, "DISPOSITIVO LIBERADO");
+                Toast.makeText(this, "Dispositivo Liberado", Toast.LENGTH_LONG).show();
                 
                 SharedPreferences.Editor editor = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE).edit();
                 editor.clear();
                 editor.apply();
                 
+                // Registrar liberación en Realtime DB (rápido)
+                if (deviceRealtimeRef != null) {
+                    deviceRealtimeRef.child("liberado").setValue(true);
+                    deviceRealtimeRef.child("fecha_liberacion").setValue(System.currentTimeMillis());
+                }
+                
                 finishAffinity();
             } else {
                 dpm.removeActiveAdmin(adminComponent);
-                Toast.makeText(this, "Admin eliminado.", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Admin eliminado", Toast.LENGTH_SHORT).show();
             }
         } catch (Exception e) {
-            Log.e("EDU_Status", "Error al liberar: " + e.getMessage());
+            Log.e(TAG, "Error al liberar: " + e.getMessage());
         }
     }
 
@@ -262,14 +288,14 @@ public class MainActivity extends BridgeActivity {
         if (dpm.isDeviceOwnerApp(getPackageName())) {
             try {
                 dpm.setUninstallBlocked(adminComponent, getPackageName(), true);
-                Log.d("EDU_Status", "Modo DEVICE OWNER activo.");
+                Log.d(TAG, "Modo DEVICE OWNER activo");
             } catch (Exception e) {
-                Log.e("EDU_Status", "Error en Device Owner: " + e.getMessage());
+                Log.e(TAG, "Error en Device Owner: " + e.getMessage());
             }
         } else if (!dpm.isAdminActive(adminComponent)) {
             Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
             intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent);
-            intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Protección obligatoria para EDUControlPro.");
+            intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Protección obligatoria");
             startActivityForResult(intent, DEVICE_ADMIN_REQUEST);
         }
     }
@@ -280,12 +306,14 @@ public class MainActivity extends BridgeActivity {
         String institutoId = capPrefs.getString("InstitutoId", null);
         
         if (deviceId == null || institutoId == null) {
-            Log.d("EDU_Status", "Dispositivo NO vinculado.");
+            Log.d(TAG, "Dispositivo NO vinculado");
         } else {
-            Log.d("EDU_Status", "Vinculado a: " + institutoId + " con ID: " + deviceId);
-            reiniciarMonitorService();
+            Log.d(TAG, "Vinculado a: " + institutoId + " - " + deviceId);
             
-            // Iniciar VPN al estar vinculado (solicitando permiso si es necesario)
+            // Inicializar referencia Realtime
+            deviceRealtimeRef = realtimeDb.getReference("dispositivos").child(deviceId);
+            
+            reiniciarMonitorService();
             solicitarPermisoVpn();
         }
     }
@@ -293,7 +321,6 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onDestroy() {
         super.onDestroy();
-        // No detenemos la VPN aquí porque queremos que siga funcionando
-        // incluso si la app se cierra
+   
     }
- }
+}

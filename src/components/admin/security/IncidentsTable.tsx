@@ -5,7 +5,7 @@ import { db } from '@/firebase/config';
 import { collection, query, where, orderBy, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { 
   ShieldAlert, Globe, Monitor, Trash2, Clock, CheckCircle, MessageSquare, History, 
-  Search, Calendar, Download, Share2 
+  Search, Calendar, Download, Share2, Zap, AlertTriangle 
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import jsPDF from 'jspdf';
@@ -19,7 +19,6 @@ interface IncidentsTableProps {
 
 export function IncidentsTable({ institutionId, onViewHistory, onSendMessage }: IncidentsTableProps) {
   const [incidents, setIncidents] = useState<any[]>([]);
-  const [filteredIncidents, setFilteredIncidents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
   // Estados para filtros
@@ -29,7 +28,6 @@ export function IncidentsTable({ institutionId, onViewHistory, onSendMessage }: 
   const [showFilters, setShowFilters] = useState(false);
   const [exportando, setExportando] = useState(false);
 
-  // Cargar incidencias desde la colección global "alertas"
   useEffect(() => {
     if (!institutionId) return;
 
@@ -48,252 +46,185 @@ export function IncidentsTable({ institutionId, onViewHistory, onSendMessage }: 
       setIncidents(data);
       setLoading(false);
     }, (error) => {
-      console.error("Error cargando incidencias:", error);
+      console.error("Error EDUControlPro Alerts:", error);
       setLoading(false);
     });
 
     return () => unsubscribe();
   }, [institutionId]);
 
-  // Aplicar filtros cuando cambien los criterios o los datos
-  useEffect(() => {
+  // Filtrado optimizado con useMemo
+  const filteredIncidents = useMemo(() => {
     let filtradas = incidents;
 
-    // Filtrar por nombre (sin distinguir mayúsculas)
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       filtradas = filtradas.filter(inc => 
         (inc.estudianteNombre?.toLowerCase().includes(term)) ||
         (inc.alumno_asignado?.toLowerCase().includes(term)) ||
-        (inc.aulaId?.toLowerCase().includes(term)) // También buscar por aula
+        (inc.aulaId?.toLowerCase().includes(term))
       );
     }
 
-    // Filtrar por rango de fechas
     if (fechaInicio) {
       const inicio = new Date(fechaInicio);
       inicio.setHours(0, 0, 0, 0);
-      filtradas = filtradas.filter(inc => {
-        const fecha = inc.timestamp instanceof Date ? inc.timestamp : new Date(inc.timestamp);
-        return fecha >= inicio;
-      });
+      filtradas = filtradas.filter(inc => new Date(inc.timestamp) >= inicio);
     }
+
     if (fechaFin) {
       const fin = new Date(fechaFin);
       fin.setHours(23, 59, 59, 999);
-      filtradas = filtradas.filter(inc => {
-        const fecha = inc.timestamp instanceof Date ? inc.timestamp : new Date(inc.timestamp);
-        return fecha <= fin;
-      });
+      filtradas = filtradas.filter(inc => new Date(inc.timestamp) <= fin);
     }
 
-    setFilteredIncidents(filtradas);
+    return filtradas;
   }, [incidents, searchTerm, fechaInicio, fechaFin]);
+
+  // Resumen Estadístico (Valor agregado)
+  const stats = useMemo(() => {
+    const pendientes = incidents.filter(i => i.status !== 'visto').length;
+    const hoy = incidents.filter(inc => {
+      const d = new Date(inc.timestamp);
+      const now = new Date();
+      return d.getDate() === now.getDate() && d.getMonth() === now.getMonth();
+    }).length;
+    return { pendientes, hoy };
+  }, [incidents]);
 
   const markAsResolved = async (id: string) => {
     try {
-      const alertRef = doc(db, "alertas", id);
-      await updateDoc(alertRef, {
+      await updateDoc(doc(db, "alertas", id), {
         status: 'visto',
         resolvedAt: new Date()
       });
     } catch (error) {
-      console.error("Error marcando como visto:", error);
+      console.error("Error updating status:", error);
     }
   };
 
   const deleteIncident = async (id: string) => {
-    if (!confirm("¿Eliminar este registro de infracción?")) return;
+    if (!confirm("¿Desea eliminar permanentemente este registro del sistema?")) return;
     try {
-      const alertRef = doc(db, "alertas", id);
-      await deleteDoc(alertRef);
+      await deleteDoc(doc(db, "alertas", id));
     } catch (error) {
-      console.error("Error eliminando incidencia:", error);
+      console.error("Error deleting incident:", error);
     }
   };
 
-  // Función para compartir usando Web Share API
-  const handleShare = async () => {
-    if (filteredIncidents.length === 0) {
-      alert('No hay datos para compartir');
-      return;
-    }
-
-    const texto = `Reporte de incidencias - ${new Date().toLocaleDateString()}\n` +
-      `Filtros: ${searchTerm ? `Alumno/Aula: ${searchTerm}` : 'Todos'} ` +
-      `${fechaInicio ? `desde ${fechaInicio}` : ''} ${fechaFin ? `hasta ${fechaFin}` : ''}\n\n` +
-      filteredIncidents.map(inc => 
-        `- ${inc.estudianteNombre || inc.alumno_asignado || 'Desconocido'} (Aula: ${inc.aulaId || 'N/A'}): ${inc.descripcion || inc.urlIntentada || inc.url} (${new Date(inc.timestamp).toLocaleString()})`
-      ).join('\n');
-
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: 'Reporte de Incidencias',
-          text: texto,
-        });
-      } catch (error) {
-        console.error('Error al compartir:', error);
-      }
-    } else {
-      // Fallback: copiar al portapapeles
-      navigator.clipboard.writeText(texto).then(() => {
-        alert('Texto copiado al portapapeles');
-      }).catch(() => {
-        alert('No se pudo compartir');
-      });
-    }
-  };
-
-  // Función para generar PDF
   const generatePDF = () => {
-    if (filteredIncidents.length === 0) {
-      alert('No hay datos para exportar');
-      return;
-    }
-
+    if (filteredIncidents.length === 0) return;
     setExportando(true);
-    try {
-      const doc = new jsPDF();
-      doc.setFontSize(18);
-      doc.text('Reporte de Incidencias', 14, 22);
-      doc.setFontSize(10);
-      doc.text(`Institución: ${institutionId}`, 14, 32);
-      if (searchTerm) doc.text(`Filtro: ${searchTerm}`, 14, 38);
-      if (fechaInicio || fechaFin) {
-        let fechaTexto = 'Período: ';
-        if (fechaInicio) fechaTexto += `desde ${new Date(fechaInicio).toLocaleDateString()}`;
-        if (fechaFin) fechaTexto += ` hasta ${new Date(fechaFin).toLocaleDateString()}`;
-        doc.text(fechaTexto, 14, 44);
-      }
+    const docPdf = new jsPDF();
+    
+    docPdf.setFillColor(15, 17, 23);
+    docPdf.rect(0, 0, 210, 25, 'F');
+    docPdf.setTextColor(255, 255, 255);
+    docPdf.setFontSize(16);
+    docPdf.text('REPORTE CRÍTICO DE INCIDENCIAS', 14, 15);
+    
+    const tableRows = filteredIncidents.map(inc => [
+      inc.estudianteNombre || inc.alumno_asignado || 'N/A',
+      inc.aulaId || '-',
+      new Date(inc.timestamp).toLocaleString(),
+      inc.descripcion || inc.urlIntentada || 'Bloqueo Genérico',
+      inc.tipo || 'SISTEMA'
+    ]);
 
-      const tableColumn = ['Alumno', 'Aula', 'Fecha/Hora', 'Descripción', 'Tipo'];
-      const tableRows = filteredIncidents.map(inc => [
-        inc.estudianteNombre || inc.alumno_asignado || 'Desconocido',
-        inc.aulaId || 'N/A',
-        inc.timestamp instanceof Date ? inc.timestamp.toLocaleString() : new Date(inc.timestamp).toLocaleString(),
-        inc.descripcion || inc.urlIntentada || inc.url || '',
-        inc.tipo || ''
-      ]);
+    autoTable(docPdf, {
+      head: [['Alumno', 'Aula', 'Fecha/Hora', 'Detalle', 'Categoría']],
+      body: tableRows,
+      startY: 35,
+      headStyles: { fillColor: [249, 115, 22] },
+      styles: { fontSize: 7 }
+    });
 
-      autoTable(doc, {
-        head: [tableColumn],
-        body: tableRows,
-        startY: (searchTerm || fechaInicio || fechaFin) ? 50 : 40,
-        styles: { fontSize: 8 },
-        headStyles: { fillColor: [249, 115, 22] }
-      });
-
-      doc.save(`incidencias_${new Date().toISOString().slice(0,10)}.pdf`);
-    } catch (error) {
-      console.error('Error generando PDF:', error);
-    } finally {
-      setExportando(false);
-    }
+    docPdf.save(`EFAS_Incidencias_${new Date().getTime()}.pdf`);
+    setExportando(false);
   };
 
-  if (loading) {
-    return (
-      <div className="bg-[#0f1117] border border-white/5 rounded-3xl p-10 text-center">
-        <div className="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-        <p className="text-orange-500 font-black text-[10px] uppercase tracking-widest">CARGANDO INCIDENCIAS...</p>
-      </div>
-    );
-  }
+  if (loading) return (
+    <div className="bg-[#0f1117] border border-white/5 rounded-[2.5rem] p-16 text-center shadow-2xl">
+      <div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full mx-auto mb-6"></div>
+      <p className="text-orange-500 font-black text-[11px] uppercase tracking-[0.3em] italic">Sincronizando con Centinela...</p>
+    </div>
+  );
 
   return (
-    <div className="bg-[#0f1117] border border-white/5 rounded-3xl overflow-hidden shadow-2xl">
-      {/* Header con título y botón de filtros */}
-      <div className="p-6 border-b border-white/5 flex justify-between items-center bg-slate-900/20">
+    <div className="bg-[#0f1117] border border-white/5 rounded-[2.5rem] overflow-hidden shadow-2xl flex flex-col">
+      
+      {/* Header Corporativo con Stats */}
+      <div className="p-8 border-b border-white/5 bg-gradient-to-br from-slate-900/50 to-transparent flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div>
-          <h2 className="text-lg font-black italic text-white uppercase flex items-center gap-2">
-            <ShieldAlert className="text-orange-500 w-5 h-5" /> Registro de Infracciones
+          <h2 className="text-xl font-black italic text-white uppercase flex items-center gap-3">
+            <ShieldAlert className="text-orange-500 w-6 h-6 animate-pulse" /> Registro de <span className="text-orange-500 underline">Infracciones</span>
           </h2>
-          <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-1">
-            Monitoreo de seguridad EDU • {filteredIncidents.length} de {incidents.length} eventos
-          </p>
+          <div className="flex items-center gap-4 mt-2">
+            <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+              <Zap size={12} className="text-orange-500" /> {incidents.length} Eventos totales
+            </div>
+            {stats.pendientes > 0 && (
+              <div className="flex items-center gap-1.5 text-[10px] font-black text-red-500 uppercase tracking-widest bg-red-500/10 px-2 py-0.5 rounded-full border border-red-500/20">
+                <AlertTriangle size={12} /> {stats.pendientes} Pendientes
+              </div>
+            )}
+          </div>
         </div>
-        <button 
-          onClick={() => setShowFilters(!showFilters)} 
-          className="text-slate-400 hover:text-white text-[10px] font-black uppercase flex items-center gap-1 transition-colors"
-        >
-          <Calendar size={14} /> Filtros
-        </button>
+
+        <div className="flex items-center gap-3">
+            <Button 
+                onClick={() => setShowFilters(!showFilters)} 
+                variant="outline"
+                className="bg-slate-900 border-white/10 text-slate-400 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-tighter"
+            >
+                <Calendar size={14} className="mr-2" /> {showFilters ? 'Cerrar Filtros' : 'Filtrar Datos'}
+            </Button>
+            <Button onClick={generatePDF} disabled={exportando} className="bg-orange-500 hover:bg-orange-600 rounded-xl text-[10px] font-black uppercase shadow-lg shadow-orange-500/20">
+                <Download size={14} className="mr-2" /> {exportando ? 'Exportando...' : 'PDF'}
+            </Button>
+        </div>
       </div>
 
-      {/* Panel de filtros */}
+      {/* Panel de Filtros Animado */}
       {showFilters && (
-        <div className="p-4 bg-slate-900/50 border-b border-white/5">
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-            <div className="relative">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
-              <input
-                type="text"
-                placeholder="Buscar alumno o aula..."
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg py-2 pl-8 pr-3 text-white text-xs outline-none focus:border-orange-500"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <div>
-              <input
-                type="date"
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg py-2 px-3 text-white text-xs"
-                value={fechaInicio}
-                onChange={(e) => setFechaInicio(e.target.value)}
-                placeholder="Fecha inicio"
-              />
-            </div>
-            <div>
-              <input
-                type="date"
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg py-2 px-3 text-white text-xs"
-                value={fechaFin}
-                onChange={(e) => setFechaFin(e.target.value)}
-                placeholder="Fecha fin"
-              />
-            </div>
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={handleShare}
-                disabled={filteredIncidents.length === 0}
-                className="bg-blue-600/10 text-blue-500 hover:bg-blue-600 hover:text-white border border-blue-600/20 px-3 py-2 rounded-lg text-[10px] font-black uppercase flex items-center gap-1 transition-all disabled:opacity-50"
-                title="Compartir"
-              >
-                <Share2 size={12} /> Compartir
-              </button>
-              <button
-                onClick={generatePDF}
-                disabled={exportando || filteredIncidents.length === 0}
-                className="bg-orange-600/10 text-orange-500 hover:bg-orange-600 hover:text-white border border-orange-600/20 px-3 py-2 rounded-lg text-[10px] font-black uppercase flex items-center gap-1 transition-all disabled:opacity-50"
-              >
-                <Download size={12} /> {exportando ? 'PDF...' : 'PDF'}
-              </button>
-            </div>
+        <div className="p-6 bg-slate-900/30 border-b border-white/5 grid grid-cols-1 sm:grid-cols-3 gap-4 animate-in slide-in-from-top duration-300">
+          <div className="relative">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+            <input
+              type="text"
+              placeholder="BUSCAR ALUMNO O AULA..."
+              className="w-full bg-slate-950 border border-white/5 rounded-2xl py-3 pl-12 pr-4 text-white text-[10px] font-bold uppercase outline-none focus:border-orange-500 transition-all"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
           </div>
+          <input type="date" className="bg-slate-950 border border-white/5 rounded-2xl py-3 px-4 text-white text-xs uppercase" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} />
+          <input type="date" className="bg-slate-950 border border-white/5 rounded-2xl py-3 px-4 text-white text-xs uppercase" value={fechaFin} onChange={(e) => setFechaFin(e.target.value)} />
         </div>
       )}
 
-      {/* Lista de incidencias */}
-      <div className="divide-y divide-white/5 max-h-[400px] overflow-y-auto custom-scrollbar">
+      {/* Lista de Registros */}
+      <div className="divide-y divide-white/5 max-h-[500px] overflow-y-auto custom-scrollbar bg-slate-950/20">
         {filteredIncidents.length === 0 ? (
-          <div className="p-16 text-center">
-            <ShieldAlert className="w-12 h-12 text-slate-800 mx-auto mb-4" />
-            <p className="text-slate-600 font-black uppercase text-[10px] tracking-widest">
-              No hay incidencias con los filtros seleccionados
+          <div className="p-20 text-center flex flex-col items-center">
+            <div className="w-16 h-16 bg-slate-900 rounded-full flex items-center justify-center mb-4 border border-white/5">
+                <ShieldAlert className="w-8 h-8 text-slate-700" />
+            </div>
+            <p className="text-slate-600 font-black uppercase text-[10px] tracking-[0.2em]">
+              Zona Segura: No se detectan anomalías
             </p>
           </div>
         ) : (
           filteredIncidents.map((inc: any) => (
             <div 
               key={inc.id} 
-              className={`p-5 flex items-center justify-between transition-all ${
-                inc.status === 'visto' ? 'opacity-40 bg-slate-900/20' : 'bg-orange-500/5 hover:bg-orange-500/10'
+              className={`p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-all hover:bg-white/[0.02] ${
+                inc.status === 'visto' ? 'opacity-40 grayscale' : 'border-l-4 border-l-orange-500 bg-orange-500/[0.02]'
               }`}
             >
-              <div className="flex items-center gap-4 flex-1">
-                <div className={`p-3 rounded-2xl ${
-                  inc.status === 'visto' ? 'bg-slate-800' : 'bg-orange-500/20'
+              <div className="flex items-center gap-5 flex-1">
+                <div className={`p-4 rounded-2xl shadow-inner ${
+                  inc.status === 'visto' ? 'bg-slate-900' : 'bg-orange-500/10 border border-orange-500/20'
                 }`}>
                   {inc.tipo?.includes('URL') || inc.url ? (
                     <Globe className={`w-5 h-5 ${inc.status === 'visto' ? 'text-slate-500' : 'text-orange-500'}`} />
@@ -301,91 +232,72 @@ export function IncidentsTable({ institutionId, onViewHistory, onSendMessage }: 
                     <Monitor className={`w-5 h-5 ${inc.status === 'visto' ? 'text-slate-500' : 'text-orange-500'}`} />
                   )}
                 </div>
-                <div className="flex-1">
+                
+                <div className="flex-1 overflow-hidden">
                   <div className="flex items-center gap-3">
-                    <p className="text-white font-black text-sm uppercase">
-                      {inc.estudianteNombre || inc.alumno_asignado || 'ALUMNO'}
+                    <p className="text-white font-black text-sm uppercase italic tracking-tighter">
+                      {inc.estudianteNombre || inc.alumno_asignado || 'AGENTE DESCONOCIDO'}
                     </p>
-                    {inc.deviceId && (
-                      <span className="text-[8px] font-mono text-slate-600">
-                        {inc.deviceId}
-                      </span>
-                    )}
-                  </div>
-                  {/* NUEVO: Aula y Sección */}
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-[8px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full">
-                      Aula: {inc.aulaId || 'N/A'}
+                    <span className="text-[9px] bg-slate-900 px-2 py-0.5 rounded-lg border border-white/5 text-slate-500 font-mono">
+                      {inc.deviceId?.substring(0, 12)}...
                     </span>
-                    {inc.seccion && (
-                      <span className="text-[8px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full">
-                        Sección: {inc.seccion}
-                      </span>
-                    )}
                   </div>
-                  <p className="text-slate-400 text-xs font-medium italic mb-1">
-                    {inc.descripcion || inc.urlIntentada || inc.url || 'Intento de acceso bloqueado'}
+                  
+                  <div className="flex items-center gap-2 mt-1.5 mb-2">
+                    <span className="text-[8px] font-black text-orange-500/70 uppercase">Aula: {inc.aulaId || 'EXTERN'}</span>
+                    <span className="text-slate-700">•</span>
+                    <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest italic">
+                        {inc.timestamp ? new Date(inc.timestamp).toLocaleString() : 'JUSTO AHORA'}
+                    </span>
+                  </div>
+
+                  <p className="text-slate-400 text-xs font-bold leading-relaxed truncate max-w-md">
+                    {inc.descripcion || inc.urlIntentada || inc.url || 'INTENTO DE VIOLACIÓN DE PROTOCOLO'}
                   </p>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[9px] text-slate-600 flex items-center gap-1 font-bold">
-                      <Clock className="w-3 h-3" /> 
-                      {inc.timestamp ? new Date(inc.timestamp).toLocaleString() : 'RECIENTE'}
-                    </span>
-                    {inc.tipo && (
-                      <span className="text-[8px] bg-slate-800 px-2 py-0.5 rounded-full text-slate-400">
-                        {inc.tipo}
-                      </span>
-                    )}
-                  </div>
                 </div>
               </div>
               
-              <div className="flex gap-2 ml-4">
-                {/* Botón de historial (globo) */}
-                {onViewHistory && inc.deviceId && (
-                  <Button
-                    onClick={() => onViewHistory(inc.deviceId, inc.estudianteNombre || inc.alumno_asignado || 'Estudiante')}
-                    variant="ghost"
-                    size="icon"
-                    className="text-slate-500 hover:text-blue-500 h-8 w-8"
-                    title="Ver historial de navegación"
-                  >
-                    <History size={14} />
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end bg-slate-950/50 p-2 sm:bg-transparent rounded-xl">
+                {onViewHistory && (
+                  <Button onClick={() => onViewHistory(inc.deviceId, inc.estudianteNombre || inc.alumno_asignado)} variant="ghost" size="icon" className="text-slate-500 hover:text-blue-500 hover:bg-blue-500/10 rounded-xl" title="Historial">
+                    <History size={18} />
                   </Button>
                 )}
-                {/* Botón de mensaje (notificación) */}
-                {onSendMessage && inc.deviceId && (
-                  <Button
-                    onClick={() => onSendMessage(inc.deviceId, inc.estudianteNombre || inc.alumno_asignado || 'Estudiante')}
-                    variant="ghost"
-                    size="icon"
-                    className="text-slate-500 hover:text-green-500 h-8 w-8"
-                    title="Enviar notificación al alumno"
-                  >
-                    <MessageSquare size={14} />
+                {onSendMessage && (
+                  <Button onClick={() => onSendMessage(inc.deviceId, inc.estudianteNombre || inc.alumno_asignado)} variant="ghost" size="icon" className="text-slate-500 hover:text-green-500 hover:bg-green-500/10 rounded-xl" title="Notificar">
+                    <MessageSquare size={18} />
                   </Button>
                 )}
+                
+                <div className="h-6 w-[1px] bg-white/5 mx-1 hidden sm:block" />
+
                 {inc.status !== 'visto' && (
                   <Button 
                     onClick={() => markAsResolved(inc.id)}
-                    className="bg-orange-600/10 text-orange-500 hover:bg-orange-600 hover:text-white text-[10px] font-black rounded-xl h-8 px-3 border border-orange-600/20"
+                    className="bg-orange-500/10 text-orange-500 hover:bg-orange-500 hover:text-white text-[10px] font-black rounded-xl h-9 px-4 border border-orange-500/20 transition-all"
                   >
-                    <CheckCircle className="w-3 h-3 mr-1" />
-                    VISTO
+                    <CheckCircle className="w-3 h-3 mr-2" /> VISTO
                   </Button>
                 )}
+                
                 <Button 
                   onClick={() => deleteIncident(inc.id)}
-                  variant="ghost"
-                  size="icon"
-                  className="text-slate-700 hover:text-red-500 h-8 w-8"
+                  variant="ghost" 
+                  size="icon" 
+                  className="text-slate-700 hover:text-red-500 hover:bg-red-500/10 rounded-xl"
                 >
-                  <Trash2 className="w-4 h-4" />
+                  <Trash2 size={18} />
                 </Button>
               </div>
             </div>
           ))
         )}
+      </div>
+
+      <div className="p-4 bg-slate-950/50 border-t border-white/5 flex justify-center">
+            <p className="text-[9px] font-black text-slate-700 uppercase tracking-[0.3em] italic">
+                EFAS ServiControl v2.4 • Sistema de Control Parental Educativo
+            </p>
       </div>
     </div>
   );

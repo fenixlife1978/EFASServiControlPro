@@ -9,7 +9,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2 } from 'lucide-react';
+import { Loader2, UserCog, MonitorSmartphone } from 'lucide-react';
 import { db } from '@/firebase/config';
 import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { Badge } from '../ui/badge';
@@ -17,13 +17,13 @@ import { Badge } from '../ui/badge';
 interface EditStudentModalProps {
     isOpen: boolean;
     onOpenChange: (open: boolean) => void;
-    student: any | null; // Alumno de la colección "usuarios"
+    student: any | null; 
     institutionId: string;
     classroomId: string;
 }
 
 const formSchema = z.object({
-  nombre_alumno: z.string().min(3, 'El nombre debe tener al menos 3 caracteres.'),
+    nombre_alumno: z.string().min(3, 'El nombre debe tener al menos 3 caracteres.'),
 });
 
 export function EditStudentModal({ isOpen, onOpenChange, student, institutionId, classroomId }: EditStudentModalProps) {
@@ -35,15 +35,12 @@ export function EditStudentModal({ isOpen, onOpenChange, student, institutionId,
         resolver: zodResolver(formSchema),
     });
     
-    // Cargar datos iniciales
     useEffect(() => {
         if (student) {
             form.reset({ nombre_alumno: student.nombre || student.nombre_alumno || '' });
             
-            // Buscar el deviceId asociado
             const buscarDeviceId = async () => {
                 if (!student.deviceId && student.id) {
-                    // Intentar buscar en dispositivos por este usuario
                     const deviceQuery = await getDoc(doc(db, "dispositivos", student.id));
                     if (deviceQuery.exists()) {
                         setDeviceId(student.id);
@@ -66,7 +63,7 @@ export function EditStudentModal({ isOpen, onOpenChange, student, institutionId,
         setIsSubmitting(true);
         
         try {
-            // 1. Actualizar en colección "usuarios"
+            // 1. Actualizar en "usuarios" (Core del sistema)
             const userRef = doc(db, "usuarios", student.id);
             await updateDoc(userRef, {
                 nombre: values.nombre_alumno,
@@ -74,7 +71,7 @@ export function EditStudentModal({ isOpen, onOpenChange, student, institutionId,
                 updatedAt: new Date()
             });
             
-            // 2. Si hay deviceId asociado, actualizar también en "dispositivos"
+            // 2. Sincronizar con "dispositivos" si existe vinculación activa
             if (deviceId) {
                 const deviceRef = doc(db, "dispositivos", deviceId);
                 await updateDoc(deviceRef, {
@@ -84,18 +81,18 @@ export function EditStudentModal({ isOpen, onOpenChange, student, institutionId,
             }
             
             toast({ 
-                title: '✅ Alumno actualizado', 
-                description: `El nombre se ha cambiado a "${values.nombre_alumno}".` 
+                title: 'PERFIL ACTUALIZADO', 
+                description: `EDUControlPro ha registrado a "${values.nombre_alumno}".` 
             });
             
             onOpenChange(false);
             
         } catch (error) {
-            console.error("Error actualizando alumno:", error);
+            console.error("Error EDUControlPro Update:", error);
             toast({ 
                 variant: 'destructive', 
-                title: '❌ Error', 
-                description: 'No se pudo actualizar el alumno.' 
+                title: 'ERROR DE SISTEMA', 
+                description: 'No se pudo completar la reasignación.' 
             });
         } finally {
             setIsSubmitting(false);
@@ -106,63 +103,92 @@ export function EditStudentModal({ isOpen, onOpenChange, student, institutionId,
 
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-md bg-[#0f1117] border border-slate-800 text-white">
-                <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2 text-white">
-                        <Badge variant="default" className="bg-orange-500">EQUIPO #{student.nro_equipo || student.id?.slice(-4) || 'N/A'}</Badge>
-                        <span className="text-white">Reasignar Alumno</span>
-                    </DialogTitle>
-                </DialogHeader>
-                <Form {...form}>
-                    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                        <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700 text-xs text-slate-300 space-y-2">
-                            <p><strong className="text-orange-500">Institución:</strong> <span className="font-mono">{institutionId}</span></p>
-                            <p><strong className="text-orange-500">Aula:</strong> <span className="font-mono">{classroomId}</span></p>
-                            <p><strong className="text-orange-500">Usuario ID:</strong> <span className="font-mono">{student.id}</span></p>
-                            {deviceId && (
-                                <p><strong className="text-orange-500">Dispositivo:</strong> <span className="font-mono">{deviceId}</span></p>
-                            )}
+            <DialogContent className="sm:max-w-md bg-[#0f1117] border border-slate-800 rounded-[2rem] p-8 shadow-2xl">
+                <DialogHeader className="mb-4">
+                    <div className="flex items-center gap-3 mb-2">
+                        <div className="p-2 bg-orange-500 rounded-xl">
+                            <UserCog className="w-5 h-5 text-white" />
                         </div>
-                        
-                        <FormField
-                            control={form.control}
-                            name="nombre_alumno"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel className="text-slate-300">Nombre Completo del Alumno</FormLabel>
-                                    <FormControl>
-                                        <Input 
-                                            placeholder="Ej: Juan Pérez" 
-                                            {...field} 
-                                            className="bg-slate-900 border-slate-700 text-white"
-                                        />
-                                    </FormControl>
-                                    <FormMessage className="text-red-400" />
-                                </FormItem>
+                        <DialogTitle className="text-xl font-black text-white uppercase italic tracking-tighter">
+                            Editar <span className="text-orange-500">Estudiante</span>
+                        </DialogTitle>
+                    </div>
+                    <div className="flex gap-2">
+                         <Badge className="bg-slate-800 text-[9px] font-black uppercase tracking-widest border-none">
+                            EQ: {student.nro_equipo || 'S/N'}
+                        </Badge>
+                        <Badge className="bg-orange-500/10 text-orange-500 text-[9px] font-black uppercase tracking-widest border-none">
+                            ID: {student.id?.slice(-6).toUpperCase()}
+                        </Badge>
+                    </div>
+                </DialogHeader>
+
+                <div className="space-y-6">
+                    {/* Información de Contexto */}
+                    <div className="grid grid-cols-2 gap-3 bg-slate-900/50 p-4 rounded-2xl border border-slate-800/50">
+                        <div className="space-y-1">
+                            <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Institución</p>
+                            <p className="text-[10px] font-bold text-slate-200 truncate uppercase italic">{institutionId}</p>
+                        </div>
+                        <div className="space-y-1">
+                            <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Aula Asignada</p>
+                            <p className="text-[10px] font-bold text-slate-200 truncate uppercase italic">{classroomId}</p>
+                        </div>
+                    </div>
+
+                    <Form {...form}>
+                        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+                            <FormField
+                                control={form.control}
+                                name="nombre_alumno"
+                                render={({ field }) => (
+                                    <FormItem className="space-y-3">
+                                        <FormLabel className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                                            Nombre Completo del Alumno
+                                        </FormLabel>
+                                        <FormControl>
+                                            <Input 
+                                                placeholder="EJ: MARCOS DÍAZ" 
+                                                {...field} 
+                                                className="bg-slate-950 border-slate-800 text-white rounded-xl h-12 font-bold focus:ring-orange-500/20 uppercase"
+                                            />
+                                        </FormControl>
+                                        <FormMessage className="text-[10px] font-bold text-red-500 uppercase" />
+                                    </FormItem>
+                                )}
+                            />
+
+                            {deviceId && (
+                                <div className="flex items-center gap-2 px-3 py-2 bg-green-500/5 border border-green-500/10 rounded-xl">
+                                    <MonitorSmartphone className="w-3 h-3 text-green-500" />
+                                    <span className="text-[9px] font-black text-green-500 uppercase tracking-tighter">
+                                        Hardware vinculado: {deviceId}
+                                    </span>
+                                </div>
                             )}
-                        />
-                        
-                        <DialogFooter className="flex-col-reverse sm:flex-row gap-2 pt-2">
-                            <Button 
-                                type="button" 
-                                variant="outline" 
-                                onClick={() => onOpenChange(false)} 
-                                disabled={isSubmitting} 
-                                className="w-full sm:w-auto border-slate-700 text-slate-300 hover:bg-slate-800"
-                            >
-                                Cancelar
-                            </Button>
-                            <Button 
-                                type="submit" 
-                                disabled={isSubmitting} 
-                                className="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 text-white"
-                            >
-                                {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                Guardar Cambios
-                            </Button>
-                        </DialogFooter>
-                    </form>
-                </Form>
+                            
+                            <DialogFooter className="gap-3 sm:gap-0 pt-2">
+                                <Button 
+                                    type="button" 
+                                    variant="ghost" 
+                                    onClick={() => onOpenChange(false)} 
+                                    disabled={isSubmitting} 
+                                    className="flex-1 h-12 rounded-xl text-[10px] font-black uppercase text-slate-500 hover:bg-slate-800/50"
+                                >
+                                    Cerrar
+                                </Button>
+                                <Button 
+                                    type="submit" 
+                                    disabled={isSubmitting} 
+                                    className="flex-1 h-12 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-black uppercase shadow-lg shadow-orange-500/20 transition-all"
+                                >
+                                    {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                    Sincronizar Cambios
+                                </Button>
+                            </DialogFooter>
+                        </form>
+                    </Form>
+                </div>
             </DialogContent>
         </Dialog>
     );

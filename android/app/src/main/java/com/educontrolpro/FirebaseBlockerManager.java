@@ -1,13 +1,15 @@
 package com.educontrolpro;
 
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.ValueEventListener;
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
 import com.google.firebase.firestore.FirebaseFirestore;
-import com.google.firebase.firestore.ListenerRegistration;
-import com.google.firebase.firestore.MetadataChanges;
 import com.google.firebase.firestore.FieldValue;
 
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -16,23 +18,38 @@ import android.content.Context;
 
 public class FirebaseBlockerManager {
     private static FirebaseBlockerManager instance;
-    private FirebaseFirestore db;
+    
+    // Realtime Database (para datos pesados/frecuentes)
+    private FirebaseDatabase realtimeDb;
+    private DatabaseReference instConfigRef;
+    private DatabaseReference logsRef;
+    
+    // Firestore (para datos ligeros/respaldo)
+    private FirebaseFirestore firestore;
+    
     private Set<String> sitiosBloqueados;
-    private ListenerRegistration registration;
     private OnBlockedSitesUpdatedListener listener;
     private String currentInstitutionId = null;
     private String currentDeviceId = null;
     private boolean modoCortarNavegacion = false;
-    private Context appContext; // NUEVO: Guardar contexto
+    private Context appContext;
+    
+    // LISTENER DECLARADO - AÑADIDO
+    private ValueEventListener configListener;
 
     public interface OnBlockedSitesUpdatedListener {
         void onBlockedSitesUpdated(Set<String> sitios);
     }
 
     private FirebaseBlockerManager() {
-        db = FirebaseFirestore.getInstance();
+        // Realtime DB para operaciones pesadas
+        realtimeDb = FirebaseDatabase.getInstance();
+        
+        // Firestore para respaldo y consultas complejas
+        firestore = FirebaseFirestore.getInstance();
+        
         sitiosBloqueados = new HashSet<>();
-        SimpleLogger.i("🔥 FirebaseBlockerManager - Inicializado");
+        SimpleLogger.i("🔥 FirebaseBlockerManager - Inicializado (Modo Híbrido)");
     }
 
     public static synchronized FirebaseBlockerManager getInstance() {
@@ -42,16 +59,20 @@ public class FirebaseBlockerManager {
         return instance;
     }
 
-    // NUEVO: Método init que llama ParentalControlVpnService
     public void init(Context context) {
         this.appContext = context.getApplicationContext();
         obtenerIdsLocales();
+        
+        if (currentDeviceId != null) {
+            // Realtime para logs frecuentes
+            logsRef = realtimeDb.getReference("dispositivos").child(currentDeviceId).child("vpn_logs");
+        }
     }
 
     private void obtenerIdsLocales() {
         try {
             if (appContext == null) {
-                SimpleLogger.e("🔥 Error: appContext es null. Llama a init() primero");
+                SimpleLogger.e("🔥 Error: appContext es null");
                 return;
             }
             
@@ -59,146 +80,147 @@ public class FirebaseBlockerManager {
             currentDeviceId = prefs.getString("deviceId", null);
             currentInstitutionId = prefs.getString("InstitutoId", null);
             
-            // Log a Firebase
-            logToFirebase("IDS_OBTENIDOS", "deviceId: " + currentDeviceId + ", institutionId: " + currentInstitutionId);
+            // Log a Realtime (rápido)
+            logToRealtime("IDS_OBTENIDOS", "deviceId: " + currentDeviceId + ", institutionId: " + currentInstitutionId);
             
-            SimpleLogger.i("🔥 IDs locales - deviceId: " + currentDeviceId + 
-                          ", institutionId: " + currentInstitutionId);
+            // Backup a Firestore (solo eventos importantes)
+            if (currentDeviceId != null) {
+                backupToFirestore("IDS_OBTENIDOS", currentDeviceId + " - " + currentInstitutionId);
+            }
+            
+            SimpleLogger.i("🔥 IDs locales - deviceId: " + currentDeviceId + ", institutionId: " + currentInstitutionId);
         } catch (Exception e) {
-            logToFirebase("ERROR_IDS", e.getMessage());
-            SimpleLogger.e("🔥 Error obteniendo IDs: " + e.getMessage());
+            logToRealtime("ERROR_IDS", e.getMessage());
         }
     }
 
-    // Método para enviar logs a Firestore
-    private void logToFirebase(String tipo, String mensaje) {
+    // LOGS PESADOS -> REALTIME DB (miles de escrituras)
+    private void logToRealtime(String tipo, String mensaje) {
         try {
-            if (currentDeviceId == null) return;
+            if (currentDeviceId == null || logsRef == null) return;
             
             Map<String, Object> logEntry = new HashMap<>();
             logEntry.put("tipo", tipo);
             logEntry.put("mensaje", mensaje);
-            logEntry.put("timestamp", FieldValue.serverTimestamp());
+            logEntry.put("timestamp", System.currentTimeMillis());
             logEntry.put("origen", "FirebaseBlockerManager");
             logEntry.put("sitiosCount", sitiosBloqueados != null ? sitiosBloqueados.size() : 0);
             
-            db.collection("dispositivos")
-                .document(currentDeviceId)
-                .collection("vpn_logs")
-                .add(logEntry);
+            // push() genera ID único, perfecto para logs
+            logsRef.push().setValue(logEntry);
+            
         } catch (Exception e) {
-            // Ignorar errores de log
+            SimpleLogger.e("Error en logToRealtime: " + e.getMessage());
+        }
+    }
+
+    // BACKUP LIGERO -> FIRESTORE (solo datos importantes)
+    private void backupToFirestore(String tipo, String descripcion) {
+        try {
+            if (currentDeviceId == null) return;
+            
+            Map<String, Object> backupEntry = new HashMap<>();
+            backupEntry.put("tipo", tipo);
+            backupEntry.put("descripcion", descripcion);
+            backupEntry.put("timestamp", FieldValue.serverTimestamp());
+            backupEntry.put("deviceId", currentDeviceId);
+            
+            firestore.collection("backup_eventos")
+                .add(backupEntry);
+                
+        } catch (Exception e) {
+            // Ignorar errores de backup
         }
     }
 
     public void startListening(OnBlockedSitesUpdatedListener listener) {
         this.listener = listener;
         
-        obtenerIdsLocales(); // Re-obtener por si acaso
+        obtenerIdsLocales();
         
         if (currentInstitutionId == null) {
-            SimpleLogger.e("🔥 ERROR: No hay institutionId, el dispositivo no está vinculado");
-            logToFirebase("ERROR_SIN_INSTITUCION", "No hay institutionId");
+            SimpleLogger.e("🔥 ERROR: No hay institutionId");
+            logToRealtime("ERROR_SIN_INSTITUCION", "No hay institutionId");
             return;
         }
         
-        SimpleLogger.i("🔥 Escuchando cambios para institución: " + currentInstitutionId);
-        logToFirebase("START_LISTENING", "Escuchando institución: " + currentInstitutionId);
+        SimpleLogger.i("🔥 Escuchando institución (Realtime): " + currentInstitutionId);
+        logToRealtime("START_LISTENING", "Escuchando: " + currentInstitutionId);
         
-        // Escuchar cambios en el documento de la institución
-        registration = db.collection("institutions")
-            .document(currentInstitutionId)
-            .addSnapshotListener(MetadataChanges.INCLUDE, (documentSnapshot, error) -> {
-                if (error != null) {
-                    SimpleLogger.e("🔥 Error de Firestore: " + error.getMessage());
-                    logToFirebase("FIRESTORE_ERROR", error.getMessage());
-                    return;
-                }
-
-                if (documentSnapshot != null && documentSnapshot.exists()) {
-                    sitiosBloqueados.clear();
-                    logToFirebase("DOCUMENTO_RECIBIDO", "Documento de institución existe");
-                    
-                    // 1. Leer el campo blacklist de la institución (array)
-                    Object blacklistObj = documentSnapshot.get("blacklist");
-                    if (blacklistObj instanceof List) {
-                        List<?> blacklist = (List<?>) blacklistObj;
-                        SimpleLogger.i("🔥 blacklist de institución encontrada con " + blacklist.size() + " elementos");
-                        logToFirebase("BLACKLIST_RECIBIDA", "Elementos: " + blacklist.size());
-                        
-                        for (Object item : blacklist) {
-                            if (item instanceof String) {
-                                String sitio = ((String) item).toLowerCase().trim();
-                                // Limpiar URLs
-                                sitio = sitio.replace("http://", "")
-                                             .replace("https://", "")
-                                             .replace("www.", "")
-                                             .trim();
-                                if (!sitio.isEmpty()) {
-                                    sitiosBloqueados.add(sitio);
-                                    SimpleLogger.d("🔥 Sitio bloqueado (institución): " + sitio);
-                                }
+        // CONFIGURACIÓN PESADA -> REALTIME DB
+        String path = "instituciones/" + currentInstitutionId + "/config";
+        instConfigRef = realtimeDb.getReference(path);
+        
+        configListener = new ValueEventListener() {
+            @Override
+            public void onDataChange(DataSnapshot snapshot) {
+                sitiosBloqueados.clear();
+                
+                // Leer blacklist de Realtime
+                DataSnapshot blacklistSnap = snapshot.child("blacklist");
+                if (blacklistSnap.exists()) {
+                    for (DataSnapshot sitioSnap : blacklistSnap.getChildren()) {
+                        String sitio = sitioSnap.getValue(String.class);
+                        if (sitio != null) {
+                            sitio = sitio.toLowerCase().trim()
+                                        .replace("http://", "")
+                                        .replace("https://", "")
+                                        .replace("www.", "");
+                            if (!sitio.isEmpty()) {
+                                sitiosBloqueados.add(sitio);
                             }
                         }
-                    } else {
-                        SimpleLogger.w("🔥 No hay campo blacklist en la institución");
-                        logToFirebase("BLACKLIST_NO_ENCONTRADA", "No hay campo blacklist");
                     }
-                    
-                    // 2. Verificar modo cortar navegación
-                    Boolean cortarNavegacion = documentSnapshot.getBoolean("cortarNavegacion");
-                    modoCortarNavegacion = (cortarNavegacion != null && cortarNavegacion);
-                    
-                    if (modoCortarNavegacion) {
-                        SimpleLogger.w("🔥 ⚠️ MODO CORTAR NAVEGACIÓN ACTIVADO - TODO BLOQUEADO");
-                        logToFirebase("MODO_CORTAR", "Cortar navegación activado");
-                        sitiosBloqueados.add("*");
-                    }
-                    
-                    // 3. Leer useBlacklist
-                    Boolean useBlacklist = documentSnapshot.getBoolean("useBlacklist");
-                    logToFirebase("USE_BLACKLIST", "Valor: " + useBlacklist);
-                    
-                    SimpleLogger.i("🔥 Total sitios bloqueados a aplicar: " + sitiosBloqueados.size());
-                    logToFirebase("SITIOS_TOTAL", "Total: " + sitiosBloqueados.size());
-                    
-                    // Notificar al listener
-                    if (this.listener != null) {
-                        this.listener.onBlockedSitesUpdated(new HashSet<>(sitiosBloqueados));
-                        logToFirebase("LISTENER_NOTIFICADO", "Listener notificado con " + sitiosBloqueados.size() + " sitios");
-                    }
-                } else {
-                    SimpleLogger.w("🔥 Documento de institución no existe");
-                    logToFirebase("DOCUMENTO_NO_EXISTE", "La institución " + currentInstitutionId + " no existe");
+                    logToRealtime("BLACKLIST", "Cargados: " + sitiosBloqueados.size());
                 }
-            });
+                
+                // Modo cortar navegación
+                Boolean cortarNavegacion = snapshot.child("cortarNavegacion").getValue(Boolean.class);
+                modoCortarNavegacion = (cortarNavegacion != null && cortarNavegacion);
+                
+                if (modoCortarNavegacion) {
+                    sitiosBloqueados.add("*");
+                    logToRealtime("MODO_CORTAR", "Activado");
+                }
+                
+                // Notificar
+                if (listener != null) {
+                    listener.onBlockedSitesUpdated(new HashSet<>(sitiosBloqueados));
+                }
+                
+                // Backup LIGERO a Firestore (solo cuando cambia)
+                backupToFirestore("CONFIG_UPDATE", "Sitios: " + sitiosBloqueados.size());
+            }
+
+            @Override
+            public void onCancelled(DatabaseError error) {
+                SimpleLogger.e("🔥 Error Realtime: " + error.getMessage());
+                logToRealtime("REALTIME_ERROR", error.getMessage());
+            }
+        };
+        
+        instConfigRef.addValueEventListener(configListener);
     }
 
     public void stopListening() {
-        if (registration != null) {
-            registration.remove();
-            registration = null;
-            logToFirebase("STOP_LISTENING", "Escucha detenida");
-            SimpleLogger.i("🔥 FirebaseBlockerManager - Escucha detenida");
+        if (configListener != null && instConfigRef != null) {
+            instConfigRef.removeEventListener(configListener);
+            configListener = null;
+            logToRealtime("STOP_LISTENING", "Escucha detenida");
         }
     }
 
     public boolean estaBloqueado(String url) {
         if (url == null || url.isEmpty()) return false;
-        
-        if (sitiosBloqueados.isEmpty()) {
-            return false;
-        }
+        if (sitiosBloqueados.isEmpty()) return false;
         
         if (modoCortarNavegacion || sitiosBloqueados.contains("*")) {
-            SimpleLogger.d("🔥 CORTAR NAVEGACIÓN: Bloqueando todo");
             return true;
         }
         
         String urlLower = url.toLowerCase();
         for (String sitio : sitiosBloqueados) {
             if (urlLower.contains(sitio.toLowerCase())) {
-                SimpleLogger.d("🔥 BLOQUEADO: " + url + " contiene " + sitio);
                 return true;
             }
         }

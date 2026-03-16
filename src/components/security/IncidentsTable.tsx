@@ -4,9 +4,9 @@ import React from 'react';
 import { db } from '@/firebase/config';
 import { 
   collection, query, orderBy, onSnapshot, 
-  updateDoc, doc, deleteDoc 
+  updateDoc, doc, Timestamp 
 } from 'firebase/firestore';
-import { ShieldAlert, Globe, Monitor, Trash2, Clock, CheckCircle } from 'lucide-react';
+import { ShieldAlert, Globe, Monitor, Clock, CheckCircle } from 'lucide-react';
 
 export function IncidentsTable({ institutionId }: { institutionId: string }) {
   const [incidents, setIncidents] = React.useState<any[]>([]);
@@ -15,6 +15,7 @@ export function IncidentsTable({ institutionId }: { institutionId: string }) {
   React.useEffect(() => {
     if (!institutionId) return;
 
+    // Referencia a la subcolección de incidencias del instituto
     const q = query(
       collection(db, `institutions/${institutionId}/incidencias`),
       orderBy("timestamp", "desc")
@@ -23,20 +24,37 @@ export function IncidentsTable({ institutionId }: { institutionId: string }) {
     const unsub = onSnapshot(q, (snap) => {
       setIncidents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       setLoading(false);
+    }, (error) => {
+      console.error("Error en el log de EDUControlPro:", error);
+      setLoading(false);
     });
 
     return () => unsub();
   }, [institutionId]);
 
   const markAsResolved = async (id: string) => {
-    const docRef = doc(db, `institutions/${institutionId}/incidencias`, id);
-    await updateDoc(docRef, { status: 'visto', resolvedAt: new Date() });
+    try {
+      const docRef = doc(db, `institutions/${institutionId}/incidencias`, id);
+      await updateDoc(docRef, { 
+        status: 'visto', 
+        resolvedAt: Timestamp.now() 
+      });
+    } catch (error) {
+      console.error("Error al actualizar incidencia:", error);
+    }
+  };
+
+  const formatFecha = (ts: any) => {
+    if (!ts) return "---";
+    if (ts instanceof Timestamp) return ts.toDate().toLocaleString();
+    if (ts.seconds) return new Date(ts.seconds * 1000).toLocaleString();
+    return new Date(ts).toLocaleString();
   };
 
   if (loading) return (
     <div className="p-20 text-center">
       <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-      <p className="text-[10px] font-black text-slate-500 uppercase italic">Escaneando registros de seguridad...</p>
+      <p className="text-[10px] font-black text-slate-500 uppercase italic">Escaneando registros de seguridad EDUControlPro...</p>
     </div>
   );
 
@@ -50,7 +68,7 @@ export function IncidentsTable({ institutionId }: { institutionId: string }) {
               <ShieldAlert className="text-orange-500" size={24} /> Log de Incidencias Global
             </h2>
             <p className="text-[9px] text-slate-500 font-black uppercase tracking-[0.2em] mt-1 italic">
-              Historial de infracciones y bloqueos detectados por Centinela
+              Historial de infracciones y bloqueos detectados por Centinela - EDUControlPro
             </p>
           </div>
           <div className="bg-orange-500/10 border border-orange-500/20 px-4 py-2 rounded-xl">
@@ -76,13 +94,13 @@ export function IncidentsTable({ institutionId }: { institutionId: string }) {
                   </div>
                   <div>
                     <div className="flex items-center gap-2 mb-1">
-                      <p className="text-white font-black text-sm uppercase italic tracking-tighter">{inc.estudianteNombre}</p>
+                      <p className="text-white font-black text-sm uppercase italic tracking-tighter">{inc.estudianteNombre || 'Usuario Desconocido'}</p>
                       <span className="bg-slate-800 px-2 py-0.5 rounded text-[8px] font-black text-slate-400 uppercase tracking-tighter italic">Aula: {inc.aulaId || 'S/A'}</span>
                     </div>
-                    <p className="text-slate-400 text-[11px] font-medium leading-tight max-w-md break-all">{inc.detalle || inc.urlIntentada}</p>
+                    <p className="text-slate-400 text-[11px] font-medium leading-tight max-w-md break-all">{inc.detalle || inc.urlIntentada || 'Acción Bloqueada'}</p>
                     <div className="flex items-center gap-3 mt-2">
                        <span className="text-[9px] text-slate-600 font-black uppercase italic flex items-center gap-1 leading-none">
-                         <Clock size={10} /> {inc.timestamp?.toDate().toLocaleString()}
+                         <Clock size={10} /> {formatFecha(inc.timestamp)}
                        </span>
                     </div>
                   </div>
@@ -106,7 +124,7 @@ export function IncidentsTable({ institutionId }: { institutionId: string }) {
       
       <div className="text-center">
          <p className="text-[9px] text-slate-600 font-black uppercase tracking-[0.4em] italic">
-            EFAS ServiControlPro - Security Operations Center
+            EDUControlPro - Security Operations Center
          </p>
       </div>
     </div>

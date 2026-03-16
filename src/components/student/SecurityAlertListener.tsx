@@ -1,14 +1,15 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { db } from '@/firebase';
-import { collection, query, where, onSnapshot, updateDoc, doc, limit, getDoc } from 'firebase/firestore';
+import { db, rtdb } from '@/firebase/config'; // Asegúrate de exportar rtdb desde tu config
+import { updateDoc, doc } from 'firebase/firestore';
+import { ref, onValue, set } from 'firebase/database';
 import { ShieldAlert, MessageSquare, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface SecurityAlertListenerProps {
   institutionId: string;
-  deviceId: string; // Cambiado de studentId a deviceId para que coincida con la estructura real
+  deviceId: string;
 }
 
 export function SecurityAlertListener({ institutionId, deviceId }: SecurityAlertListenerProps) {
@@ -17,20 +18,21 @@ export function SecurityAlertListener({ institutionId, deviceId }: SecurityAlert
   useEffect(() => {
     if (!institutionId || !deviceId) return;
 
-    // 🔥 CORREGIDO: Escuchar directamente el documento del dispositivo
-    const deviceRef = doc(db, 'dispositivos', deviceId);
-    
-    const unsubscribe = onSnapshot(deviceRef, (snapshot) => {
+    // ⚡ MIGRACIÓN A REALTIME DATABASE (Capa de Comando Inmediato)
+    // Escuchamos el nodo específico del dispositivo para mensajes urgentes
+    const messageRef = ref(rtdb, `comandos/${deviceId}/mensaje_urgente`);
+
+    const unsubscribe = onValue(messageRef, (snapshot) => {
       if (snapshot.exists()) {
-        const data = snapshot.data();
+        const data = snapshot.val();
         
-        // Verificar si hay un mensaje pendiente
-        if (data.pending_message && !data.message_viewed) {
+        // Si el mensaje no ha sido marcado como visto en RTDB
+        if (data.active === true) {
           setActiveAlert({
-            id: snapshot.id,
-            mensaje: data.pending_message,
-            timestamp: data.message_timestamp,
-            sender: data.message_sender
+            mensaje: data.texto,
+            timestamp: data.timestamp,
+            sender: data.sender || 'Dirección',
+            msgId: data.msgId // ID para rastrear en Firestore
           });
         } else {
           setActiveAlert(null);
@@ -38,8 +40,6 @@ export function SecurityAlertListener({ institutionId, deviceId }: SecurityAlert
       } else {
         setActiveAlert(null);
       }
-    }, (error) => {
-      console.error("Error escuchando mensajes:", error);
     });
 
     return () => unsubscribe();
@@ -49,21 +49,29 @@ export function SecurityAlertListener({ institutionId, deviceId }: SecurityAlert
     if (!activeAlert) return;
     
     try {
+      // 1. Desactivar en Realtime Database para que desaparezca la UI de inmediato
+      const messageRef = ref(rtdb, `comandos/${deviceId}/mensaje_urgente`);
+      await set(messageRef, null); 
+
+      // 2. Persistir el acuse de recibo en Firestore (Capa de Auditoría de EDUControlPro)
+      // Esto asegura que el profesor vea en su panel que el alumno leyó el mensaje
       const deviceRef = doc(db, 'dispositivos', deviceId);
       await updateDoc(deviceRef, { 
-        message_viewed: true,
-        message_readAt: new Date()
+        last_message_viewed: true,
+        last_message_readAt: new Date(),
+        // Opcional: registrar en una subcolección de logs si lo prefieres
       });
+
       setActiveAlert(null);
     } catch (error) {
-      console.error("Error al confirmar lectura:", error);
+      console.error("Error al confirmar lectura en EDUControlPro:", error);
     }
   };
 
   if (!activeAlert) return null;
 
   return (
-    <div className="fixed inset-0 z-[10000] bg-black/95 backdrop-blur-xl flex items-center justify-center p-6">
+    <div className="fixed inset-0 z-[10000] bg-black/95 backdrop-blur-xl flex items-center justify-center p-6 select-none">
       <div className="max-w-md w-full bg-[#11141d] border-2 border-orange-500 rounded-[2.5rem] p-8 shadow-[0_0_50px_rgba(249,115,22,0.3)] text-center space-y-6">
         
         <div className="flex justify-center">
@@ -85,7 +93,7 @@ export function SecurityAlertListener({ institutionId, deviceId }: SecurityAlert
             "{activeAlert.mensaje}"
           </p>
           {activeAlert.sender && (
-            <p className="text-xs text-slate-500 mt-2 italic">
+            <p className="text-xs text-slate-500 mt-2 italic uppercase font-bold tracking-widest">
               Remitente: {activeAlert.sender}
             </p>
           )}
@@ -94,12 +102,12 @@ export function SecurityAlertListener({ institutionId, deviceId }: SecurityAlert
         <div className="pt-4">
           <Button 
             onClick={markAsRead}
-            className="w-full bg-orange-600 hover:bg-orange-700 text-white font-black italic rounded-2xl py-8 uppercase text-lg shadow-lg active:scale-95 transition-all"
+            className="w-full bg-orange-600 hover:bg-orange-700 text-white font-black italic rounded-2xl py-8 uppercase text-lg shadow-lg active:scale-95 transition-all border-b-4 border-orange-800"
           >
             <CheckCircle2 className="w-6 h-6 mr-2" /> ENTENDIDO / CONFIRMAR
           </Button>
-          <p className="text-[10px] text-slate-600 font-bold uppercase mt-4 tracking-widest">
-            Este mensaje ha sido registrado en su expediente.
+          <p className="text-[10px] text-slate-600 font-black uppercase mt-4 tracking-widest italic">
+            EDUControlPro - Registro de Seguridad Estudiantil
           </p>
         </div>
 

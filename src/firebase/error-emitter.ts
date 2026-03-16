@@ -1,31 +1,31 @@
 'use client';
-import { FirestorePermissionError } from '@/firebase/errors';
+import { FirestorePermissionError, RTDBPermissionError } from '@/firebase/errors';
 
 /**
- * Defines the shape of all possible events and their corresponding payload types.
- * This centralizes event definitions for type safety across the application.
+ * Define la estructura de todos los eventos posibles y sus tipos de datos asociados.
+ * Centralizado para soportar el modelo híbrido: Firestore + Realtime Database.
  */
 export interface AppEvents {
-  'permission-error': FirestorePermissionError;
+  'permission-error': FirestorePermissionError;   // Errores de documentos (Firestore)
+  'rtdb-permission-error': RTDBPermissionError;    // Errores de comandos/bloqueos (RTDB)
 }
 
-// A generic type for a callback function.
+// Tipo genérico para las funciones callback.
 type Callback<T> = (data: T) => void;
 
 /**
- * A strongly-typed pub/sub event emitter.
- * It uses a generic type T that extends a record of event names to payload types.
+ * Un emisor de eventos pub/sub con tipado fuerte.
+ * Utiliza el mapa de interfaces AppEvents para garantizar la integridad de los datos.
  */
 function createEventEmitter<T extends Record<string, any>>() {
-  // The events object stores arrays of callbacks, keyed by event name.
-  // The types ensure that a callback for a specific event matches its payload type.
+  // Almacena los callbacks indexados por el nombre del evento.
   const events: { [K in keyof T]?: Array<Callback<T[K]>> } = {};
 
   return {
     /**
-     * Subscribe to an event.
-     * @param eventName The name of the event to subscribe to.
-     * @param callback The function to call when the event is emitted.
+     * Suscribirse a un evento.
+     * @param eventName Nombre del evento definido en AppEvents.
+     * @param callback Función que se ejecutará al emitirse el evento.
      */
     on<K extends keyof T>(eventName: K, callback: Callback<T[K]>) {
       if (!events[eventName]) {
@@ -35,9 +35,9 @@ function createEventEmitter<T extends Record<string, any>>() {
     },
 
     /**
-     * Unsubscribe from an event.
-     * @param eventName The name of the event to unsubscribe from.
-     * @param callback The specific callback to remove.
+     * Cancelar la suscripción a un evento.
+     * @param eventName Nombre del evento.
+     * @param callback Referencia de la función a eliminar.
      */
     off<K extends keyof T>(eventName: K, callback: Callback<T[K]>) {
       if (!events[eventName]) {
@@ -47,12 +47,14 @@ function createEventEmitter<T extends Record<string, any>>() {
     },
 
     /**
-     * Publish an event to all subscribers.
-     * @param eventName The name of the event to emit.
-     * @param data The data payload that corresponds to the event's type.
+     * Publicar un evento a todos los suscriptores.
+     * @param eventName Nombre del evento.
+     * @param data Payload que corresponde al tipo definido en la interfaz.
      */
     emit<K extends keyof T>(eventName: K, data: T[K]) {
       if (!events[eventName]) {
+        // Log de advertencia para detectar emisiones huérfanas durante el desarrollo
+        console.warn(`[EventEmitter] El evento '${String(eventName)}' se emitió pero no tiene suscriptores activos.`);
         return;
       }
       events[eventName]?.forEach(callback => callback(data));
@@ -60,5 +62,8 @@ function createEventEmitter<T extends Record<string, any>>() {
   };
 }
 
-// Create and export a singleton instance of the emitter, typed with our AppEvents interface.
+/**
+ * Singleton del emisor de errores exportado para uso global en la aplicación.
+ * Tipado con la interfaz AppEvents para prevenir errores de asignación.
+ */
 export const errorEmitter = createEventEmitter<AppEvents>();

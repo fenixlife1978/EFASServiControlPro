@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '@/firebase/config';
 import { 
   collection, query, where, orderBy, onSnapshot, 
-  Timestamp, updateDoc, doc, deleteDoc 
+  Timestamp, updateDoc, doc, deleteDoc, writeBatch 
 } from 'firebase/firestore';
 import { 
   ShieldAlert, Clock, X, Search, Calendar, Download, Trash2, CheckCircle, Filter
@@ -49,6 +49,7 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
   const [showFilters, setShowFilters] = useState(false);
   const [exportando, setExportando] = useState(false);
 
+  // 1. ESCUCHA EN TIEMPO REAL
   useEffect(() => {
     if (!institutoId) return;
 
@@ -61,7 +62,6 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => {
         const d = doc.data();
-        // Normalización de fecha robusta
         let ts = d.timestamp;
         if (ts instanceof Timestamp) ts = ts.toDate();
         else if (typeof ts === 'string') ts = new Date(ts);
@@ -71,11 +71,15 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
       
       setAlertas(data);
       setLoading(false);
+    }, (error) => {
+      console.error("Error en el feed de EDUControlPro:", error);
+      setLoading(false);
     });
 
     return () => unsubscribe();
   }, [institutoId]);
 
+  // 2. LÓGICA DE FILTRADO
   useEffect(() => {
     let filtradas = [...alertas];
 
@@ -111,35 +115,54 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
     setAppliedFechaFin(tempFechaFin);
   };
 
+  // 3. OPERACIONES MASIVAS OPTIMIZADAS (BATCH)
   const handleMarcarVistas = async () => {
     const targets = filteredAlertas.filter(a => a.status !== 'visto');
     if (targets.length === 0) return;
     
-    const promises = targets.map(a => updateDoc(doc(db, 'alertas', a.id), { status: 'visto' }));
-    await Promise.all(promises);
+    const batch = writeBatch(db);
+    targets.forEach(a => {
+      const docRef = doc(db, 'alertas', a.id);
+      batch.update(docRef, { status: 'visto' });
+    });
+    
+    try {
+      await batch.commit();
+    } catch (err) {
+      console.error("Error al actualizar alertas:", err);
+    }
   };
 
   const handleEliminarTodas = async () => {
     if (!confirm('¿CONFIRMAR ELIMINACIÓN PERMANENTE DE ESTAS ALERTAS?')) return;
-    const promises = filteredAlertas.map(a => deleteDoc(doc(db, 'alertas', a.id)));
-    await Promise.all(promises);
+    
+    const batch = writeBatch(db);
+    filteredAlertas.forEach(a => {
+      const docRef = doc(db, 'alertas', a.id);
+      batch.delete(docRef);
+    });
+
+    try {
+      await batch.commit();
+    } catch (err) {
+      console.error("Error al eliminar alertas:", err);
+    }
   };
 
   const exportarPDF = () => {
     setExportando(true);
     try {
-      const doc = new jsPDF();
+      const docPDF = new jsPDF();
       
-      // Header Estilo EDUControlPro
-      doc.setFillColor(15, 17, 23);
-      doc.rect(0, 0, 210, 40, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(20);
-      doc.text('EDUCONTROLPRO - SECURITY LOGS', 15, 20);
+      docPDF.setFillColor(15, 17, 23);
+      docPDF.rect(0, 0, 210, 40, 'F');
+      docPDF.setTextColor(255, 255, 255);
+      docPDF.setFontSize(20);
+      docPDF.text('EDUCONTROLPRO - SECURITY LOGS', 15, 20);
       
-      doc.setFontSize(8);
-      doc.setTextColor(249, 115, 22);
-      doc.text(`REPORTE DE INCIDENCIAS GENERADO EL: ${new Date().toLocaleString()}`, 15, 28);
+      docPDF.setFontSize(8);
+      docPDF.setTextColor(249, 115, 22);
+      docPDF.text(`REPORTE GENERADO: ${new Date().toLocaleString()}`, 15, 28);
 
       const tableColumn = ['ESTUDIANTE', 'FECHA / HORA', 'INCIDENCIA / URL', 'TIPO'];
       const tableRows = filteredAlertas.map(a => [
@@ -149,7 +172,7 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
         (a.tipo || 'SECURITY').toUpperCase()
       ]);
 
-      autoTable(doc, {
+      autoTable(docPDF, {
         head: [tableColumn],
         body: tableRows,
         startY: 45,
@@ -158,7 +181,7 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
         alternateRowStyles: { fillColor: [245, 245, 245] }
       });
 
-      doc.save(`Alertas_EDU_${institutoId}.pdf`);
+      docPDF.save(`EDUControlPro_Alertas_${new Date().getTime()}.pdf`);
     } catch (error) {
       console.error(error);
     } finally {
@@ -169,13 +192,12 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
   if (loading) return (
     <div className="bg-[#0f1117] border border-slate-800 rounded-[2rem] p-12 text-center animate-pulse">
       <ShieldAlert className="mx-auto text-slate-700 mb-4" size={32} />
-      <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest italic">Sincronizando Feed de Seguridad...</p>
+      <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest italic">Sincronizando Sistema EDUControlPro...</p>
     </div>
   );
 
   return (
     <div className="bg-[#0f1117] border border-slate-800 rounded-[2.5rem] p-6 shadow-2xl relative overflow-hidden">
-      {/* Luces de estado en el fondo */}
       <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/5 blur-[80px] -z-10" />
 
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
@@ -184,7 +206,7 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
             <ShieldAlert className="text-orange-500" size={24} />
             Alertas de <span className="text-orange-500">Seguridad</span>
           </h3>
-          <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mt-1">Registros de actividad bloqueada en tiempo real</p>
+          <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mt-1">EDUControlPro Monitoring System</p>
         </div>
         
         <div className="flex gap-2">

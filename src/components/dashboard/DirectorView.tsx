@@ -1,8 +1,9 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
-import { db, auth } from '@/firebase/config';
+import { db, auth, rtdb } from '@/firebase/config';
+import { ref, onValue, set, serverTimestamp as rtdbTimestamp } from 'firebase/database';
 import { 
-  collection, onSnapshot, query, where, orderBy, doc, getDoc, getDocs, updateDoc, serverTimestamp, deleteDoc 
+  collection, onSnapshot, query, where, orderBy, doc, getDoc, updateDoc, serverTimestamp 
 } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { 
@@ -17,6 +18,7 @@ import { WebHistoryModal } from '@/components/admin/monitoring/WebHistoryModal';
 import { IncidentsTable } from '@/components/admin/security/IncidentsTable';
 
 export default function DirectorView() {
+  // --- ESTADOS ORIGINALES ---
   const [profesores, setProfesores] = useState<any[]>([]);
   const [aulas, setAulas] = useState<any[]>([]);
   const [dispositivos, setDispositivos] = useState<any[]>([]);
@@ -32,11 +34,11 @@ export default function DirectorView() {
   const [messageModal, setMessageModal] = useState({ isOpen: false, tabletId: '', alumnoNombre: '', text: '' });
   const [historyModal, setHistoryModal] = useState({ isOpen: false, tabletId: '', alumnoNombre: '' });
   
-  // Usamos estrictamente "InstitutoId" como en tu DB
+  // --- NUEVO ESTADO PARA REALTIME DATABASE ---
+  const [realtimeMonitoring, setRealtimeMonitoring] = useState<any>({});
+
   const getInstitutoId = () => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('InstitutoId') || '';
-    }
+    if (typeof window !== 'undefined') return localStorage.getItem('InstitutoId') || '';
     return '';
   };
 
@@ -45,7 +47,7 @@ export default function DirectorView() {
   useEffect(() => {
     if (!workingInstitutoId) return;
 
-    // 1. Nombre de la Institución
+    // 1. Nombre de la Institución (Firestore)
     const fetchNombreInst = async () => {
       try {
         const instRef = doc(db, "institutions", workingInstitutoId);
@@ -55,7 +57,7 @@ export default function DirectorView() {
     };
     fetchNombreInst();
 
-    // 2. Nombre del Director
+    // 2. Nombre del Director (Auth + Firestore)
     const unsubAuth = onAuthStateChanged(auth, (user) => {
       if (user?.email) {
         const qDir = query(collection(db, "usuarios"), where("email", "==", user.email.toLowerCase()));
@@ -65,7 +67,7 @@ export default function DirectorView() {
       }
     });
 
-    // 3. Profesores
+    // 3. Profesores (Firestore)
     const qProf = query(
         collection(db, "usuarios"), 
         where("InstitutoId", "==", workingInstitutoId), 
@@ -75,57 +77,53 @@ export default function DirectorView() {
       setProfesores(s.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (err) => console.error("Error profesores:", err));
 
-    // 4. Aulas
-    const qAulas = query(
-        collection(db, "institutions", workingInstitutoId, "Aulas"), 
-        orderBy("aulaId") 
-    );
+    // 4. Aulas (Firestore)
+    const qAulas = query(collection(db, "institutions", workingInstitutoId, "Aulas"), orderBy("aulaId"));
     const unsubAulas = onSnapshot(qAulas, (s) => {
       setAulas(s.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (err) => {
-        console.error("Error aulas:", err);
         const qAulasSimple = query(collection(db, "institutions", workingInstitutoId, "Aulas"));
-        onSnapshot(qAulasSimple, (s) => {
-            setAulas(s.docs.map(d => ({ id: d.id, ...d.data() })));
-        });
+        onSnapshot(qAulasSimple, (s) => setAulas(s.docs.map(d => ({ id: d.id, ...d.data() }))));
     });
 
-    // 5. Dispositivos
-    const qDev = query(
-        collection(db, "dispositivos"), 
-        where("InstitutoId", "==", workingInstitutoId)
-    );
+    // 5. Dispositivos (Mantenemos Firestore para compatibilidad inicial)
+    const qDev = query(collection(db, "dispositivos"), where("InstitutoId", "==", workingInstitutoId));
     const unsubDev = onSnapshot(qDev, (s) => {
       setDispositivos(s.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (err) => console.error("Error dispositivos:", err));
 
+    // 6. NUEVO: Suscripción a Realtime Database para monitoreo vivo
+    const rtRef = ref(rtdb, `monitoring/${workingInstitutoId}`);
+    const unsubRTDB = onValue(rtRef, (snapshot) => {
+      if (snapshot.exists()) setRealtimeMonitoring(snapshot.val());
+    });
+
     return () => { 
-      unsubAuth(); 
-      unsubProf(); 
-      unsubAulas(); 
-      unsubDev(); 
+      unsubAuth(); unsubProf(); unsubAulas(); unsubDev(); unsubRTDB();
     };
   }, [workingInstitutoId]);
 
-  // Cuando se selecciona un aula, filtramos los dispositivos de los alumnos de esa aula
   useEffect(() => {
     if (!aulaSeleccionada || !workingInstitutoId) return;
-    const alumnos = dispositivos.filter(d => 
-      d.aulaId === aulaSeleccionada.aulaId && 
-      d.rol === 'alumno'
-    );
+    const alumnos = dispositivos.filter(d => d.aulaId === aulaSeleccionada.aulaId && d.rol === 'alumno');
     setAlumnosAula(alumnos);
     setLastPulse(new Date().toLocaleTimeString());
   }, [aulaSeleccionada, dispositivos, workingInstitutoId]);
 
-  // Enviar mensaje al alumno
+  // Enviar mensaje mejorado (Dual)
   const handleSendMessage = async () => {
     if (!messageModal.tabletId || !messageModal.text.trim()) return;
     try {
+      // RTDB para acción inmediata
+      await set(ref(rtdb, `commands/${messageModal.tabletId}/message`), {
+        text: messageModal.text,
+        sender: "Dirección Institucional",
+        timestamp: rtdbTimestamp()
+      });
+      // Firestore para historial
       await updateDoc(doc(db, "dispositivos", messageModal.tabletId), {
         pending_message: messageModal.text,
         message_timestamp: serverTimestamp(),
-        message_sender: "Dirección Institucional",
         message_viewed: false
       });
       setMessageModal({ ...messageModal, isOpen: false, text: '' });
@@ -146,16 +144,16 @@ export default function DirectorView() {
     } catch (error) { console.error(error); }
   };
 
-  // Función para verificar estado online
-  const checkIsOnline = (ultimoAcceso: any) => {
-    if (!ultimoAcceso) return false;
-    const lastSeenDate = ultimoAcceso.toDate ? ultimoAcceso.toDate() : new Date(ultimoAcceso);
-    const now = new Date();
-    const diff = now.getTime() - lastSeenDate.getTime();
-    return diff < 60000; // 60 segundos de tolerancia
+  // Función de estado online con soporte RTDB
+  const checkIsOnline = (deviceId: string, firestoreOnline: boolean) => {
+    const rtInfo = realtimeMonitoring[deviceId];
+    if (rtInfo && rtInfo.lastActive) {
+      return (Date.now() - rtInfo.lastActive) < 30000;
+    }
+    return firestoreOnline; // Backup: si no hay RTDB, usamos el valor de Firestore
   };
 
-  if (!workingInstitutoId) return <div className="p-10 text-red-500 font-black italic uppercase">Acceso Denegado. No se encontró InstitutoId.</div>;
+  if (!workingInstitutoId) return <div className="p-10 text-red-500 font-black italic uppercase text-center">Acceso Denegado. No se encontró InstitutoId.</div>;
 
   return (
     <div className="animate-in fade-in duration-500 p-4 lg:p-0 relative space-y-8">
@@ -187,7 +185,6 @@ export default function DirectorView() {
         </div>
 
         <div className="col-span-12 lg:col-span-8">
-            {/* MONITOR DOCENTE */}
             <section className="bg-[#0f1117] border border-slate-800 rounded-[2.5rem] overflow-hidden shadow-2xl h-full">
                 <div className="p-8 border-b border-slate-800 bg-black/40 flex justify-between items-center">
                   <h3 className="text-xs font-black text-white uppercase italic flex items-center gap-2">
@@ -196,9 +193,11 @@ export default function DirectorView() {
                 </div>
                 <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
                   {profesores.length > 0 ? profesores.map(prof => {
-                      const device = dispositivos.find(d => d.id === prof.tabletId);
-                      const online = device?.online ? true : false;
-                      const urlActual = device?.ultimaUrl || 'Sin actividad';
+                      const rtDev = realtimeMonitoring[prof.tabletId];
+                      const fsDev = dispositivos.find(d => d.id === prof.tabletId);
+                      const online = checkIsOnline(prof.tabletId, fsDev?.online);
+                      const urlActual = rtDev?.currentUrl || fsDev?.ultimaUrl || 'Sin actividad';
+                      
                       return (
                         <div key={prof.id} className="bg-slate-900/40 border border-slate-800/60 p-5 rounded-3xl group">
                           <div className="flex items-center gap-3 mb-3">
@@ -228,20 +227,19 @@ export default function DirectorView() {
       {/* STATS RÁPIDOS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-[#0f1117] border border-slate-800 p-6 rounded-[2rem] flex items-center gap-5">
-           <Briefcase className="text-blue-500" size={24} />
-           <div><p className="text-[9px] font-black text-slate-500 uppercase italic">Docentes</p><p className="text-2xl font-black text-white italic">{profesores.length}</p></div>
+            <Briefcase className="text-blue-500" size={24} />
+            <div><p className="text-[9px] font-black text-slate-500 uppercase italic">Docentes</p><p className="text-2xl font-black text-white italic">{profesores.length}</p></div>
         </div>
         <div className="bg-[#0f1117] border border-slate-800 p-6 rounded-[2rem] flex items-center gap-5">
-           <Layout className="text-orange-500" size={24} />
-           <div><p className="text-[9px] font-black text-slate-500 uppercase italic">Aulas</p><p className="text-2xl font-black text-white italic">{aulas.length}</p></div>
+            <Layout className="text-orange-500" size={24} />
+            <div><p className="text-[9px] font-black text-slate-500 uppercase italic">Aulas</p><p className="text-2xl font-black text-white italic">{aulas.length}</p></div>
         </div>
         <div className="bg-[#0f1117] border border-slate-800 p-6 rounded-[2rem] flex items-center gap-5">
-           <Tablet className="text-green-500" size={24} />
-           <div><p className="text-[9px] font-black text-slate-500 uppercase italic">Dispositivos</p><p className="text-2xl font-black text-white italic">{dispositivos.length}</p></div>
+            <Tablet className="text-green-500" size={24} />
+            <div><p className="text-[9px] font-black text-slate-500 uppercase italic">Dispositivos</p><p className="text-2xl font-black text-white italic">{dispositivos.length}</p></div>
         </div>
       </div>
 
-      {/* LOG DE INCIDENCIAS GLOBAL con acciones de historial y mensaje */}
       <IncidentsTable 
         institutionId={workingInstitutoId}
         onViewHistory={(deviceId, alumnoNombre) => setHistoryModal({ isOpen: true, tabletId: deviceId, alumnoNombre })}
@@ -311,7 +309,7 @@ export default function DirectorView() {
         </div>
       </div>
 
-      {/* MODAL SUPERVISIÓN LIVE AULA (con datos reales) */}
+      {/* MODAL SUPERVISIÓN LIVE AULA */}
       {aulaSeleccionada && (
         <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/95 backdrop-blur-xl">
           <div className="bg-[#0f1117] border border-slate-800 w-full max-w-4xl rounded-[2.5rem] overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
@@ -330,7 +328,10 @@ export default function DirectorView() {
             </div>
             <div className="p-8 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-4">
               {alumnosAula.length > 0 ? alumnosAula.map(alumno => {
-                const online = checkIsOnline(alumno.ultimoAcceso);
+                const rtInfo = realtimeMonitoring[alumno.id];
+                const online = checkIsOnline(alumno.id, alumno.online);
+                const url = rtInfo?.currentUrl || alumno.ultimaUrl || 'Sin actividad';
+
                 return (
                   <div key={alumno.id} className="bg-slate-900/50 border border-slate-800 p-4 rounded-3xl border-l-4 border-l-blue-500">
                     <div className="flex justify-between items-center mb-2">
@@ -338,7 +339,7 @@ export default function DirectorView() {
                       <span className="text-[9px] text-slate-600 font-black italic">TABLET: {alumno.id}</span>
                     </div>
                     <div className="bg-black/40 p-3 rounded-xl border border-slate-800/50 flex items-center justify-between">
-                      <p className="text-[10px] text-blue-400 font-medium truncate flex-1">{alumno.ultimaUrl || 'Sin actividad'}</p>
+                      <p className="text-[10px] text-blue-400 font-medium truncate flex-1">{url}</p>
                       <span className={`ml-2 w-2 h-2 rounded-full ${online ? 'bg-green-500 animate-pulse' : 'bg-slate-600'}`} />
                     </div>
                   </div>

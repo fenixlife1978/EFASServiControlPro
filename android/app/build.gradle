@@ -62,10 +62,19 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     
-    // --- FIREBASE ---
+    // --- FIREBASE BOM (gestión de versiones) ---
     implementation platform('com.google.firebase:firebase-bom:33.1.0')
+    
+    // Firestore (para backup y datos históricos)
     implementation 'com.google.firebase:firebase-firestore'
+    
+    // 🔥 REALTIME DATABASE (para operaciones frecuentes)
+    implementation 'com.google.firebase:firebase-database'
+    
+    // Firebase Auth (para autenticación)
     implementation 'com.google.firebase:firebase-auth'
+    
+    // Firebase Analytics (opcional)
     implementation 'com.google.firebase:firebase-analytics'
     
     // ML Kit

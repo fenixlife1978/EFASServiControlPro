@@ -1,14 +1,15 @@
 'use client';
 import { useState } from 'react';
-import { db } from '@/firebase/config';
+import { db, rtdb } from '@/firebase/config'; // Importamos rtdb
 import { doc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { ref, update, serverTimestamp as rtdbTimestamp } from 'firebase/database'; // Métodos RTDB
 import { useToast } from '@/hooks/use-toast';
-import { X } from 'lucide-react';
+import { X, UserPlus } from 'lucide-react';
 
 interface Props {
-  deviceId: string;         // ID del dispositivo (ej: DEV-0001)
-  InstitutoId: string;      
-  aulaId: string;           
+  deviceId: string;
+  InstitutoId: string;
+  aulaId: string;
   seccion: string;
   onClose: () => void;
   onSuccess?: () => void;
@@ -26,12 +27,12 @@ export default function AssignStudentModal({ deviceId, InstitutoId, aulaId, secc
     setLoading(true);
 
     try {
-      // 1. Generar ID único para el usuario basado en el nombre
+      // 1. Generar ID único para el usuario
       const baseName = name.toLowerCase().trim().replace(/\s+/g, '_').normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       const suffix = deviceId.slice(-4);
       const customId = `${baseName}_${suffix}`;
 
-      // 2. Crear el usuario en la colección "usuarios"
+      // 2. Crear el usuario en Firestore (Colección Usuarios)
       const userRef = doc(db, "usuarios", customId);
       await setDoc(userRef, {
         nombre: name.trim(),
@@ -45,13 +46,26 @@ export default function AssignStudentModal({ deviceId, InstitutoId, aulaId, secc
         createdAt: serverTimestamp()
       });
 
-      // 3. Actualizar el dispositivo
+      // 3. Actualizar Dispositivo en Firestore (Metadatos persistentes)
       const deviceRef = doc(db, "dispositivos", deviceId);
       await updateDoc(deviceRef, {
         alumno_asignado: name.trim(),
         status: 'active',
         vinculado: true,
         lastUpdated: serverTimestamp()
+      });
+
+      // 4. MIGRACIÓN A RTDB: Reflejar vinculación para monitoreo en tiempo real
+      const rtdbRef = ref(rtdb, `dispositivos/${deviceId}`);
+      await update(rtdbRef, {
+        alumno_asignado: name.trim(),
+        status: 'active',
+        vinculado: true,
+        InstitutoId: InstitutoId,
+        aulaId: aulaId,
+        seccion: seccion,
+        rol: "alumno", // Importante para el filtrado en ProfesorView
+        lastUpdated: rtdbTimestamp()
       });
 
       toast({ 
@@ -76,8 +90,7 @@ export default function AssignStudentModal({ deviceId, InstitutoId, aulaId, secc
 
   return (
     <div className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center z-[200] p-4">
-      <div className="bg-[#0f1117] rounded-3xl p-8 w-full max-w-md border border-slate-800 shadow-2xl">
-        {/* Botón cerrar */}
+      <div className="bg-[#0f1117] rounded-[2.5rem] p-8 w-full max-w-md border border-slate-800 shadow-2xl relative">
         <button 
           onClick={onClose}
           className="absolute top-6 right-6 text-slate-500 hover:text-white transition-colors"
@@ -87,25 +100,23 @@ export default function AssignStudentModal({ deviceId, InstitutoId, aulaId, secc
 
         <div className="text-center mb-6">
           <div className="bg-orange-500 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-orange-500/20">
-            <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
-            </svg>
+            <UserPlus className="w-8 h-8 text-white" />
           </div>
           <h2 className="text-2xl font-black text-white uppercase italic tracking-tighter">Vincular Estudiante</h2>
-          <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mt-1">
-            Asignar nombre al dispositivo
+          <p className="text-slate-500 text-[10px] font-black uppercase tracking-wider mt-1">
+            Asignar identidad al dispositivo
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
-            <label className="block text-[10px] font-black text-orange-500 uppercase tracking-widest mb-2">
+            <label className="block text-[10px] font-black text-orange-500 uppercase tracking-widest mb-2 ml-1">
               Nombre y Apellido del Alumno
             </label>
             <input 
               autoFocus
               required
-              className="w-full bg-slate-900 border border-slate-800 p-4 rounded-2xl outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 transition-all font-bold text-white placeholder:text-slate-600"
+              className="w-full bg-slate-900 border border-slate-800 p-4 rounded-2xl outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 transition-all font-bold text-white placeholder:text-slate-700"
               placeholder="Ej. Juan Pérez"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -113,18 +124,18 @@ export default function AssignStudentModal({ deviceId, InstitutoId, aulaId, secc
           </div>
 
           <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800 space-y-2">
-            <div>
-              <p className="text-[8px] font-bold text-slate-500 uppercase mb-1">Dispositivo</p>
-              <p className="text-sm font-mono font-bold text-orange-500">{deviceId}</p>
+            <div className="flex justify-between items-center">
+              <p className="text-[8px] font-black text-slate-500 uppercase">Dispositivo</p>
+              <p className="text-sm font-mono font-black text-orange-500">{deviceId}</p>
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-800/50">
               <div>
-                <p className="text-[8px] font-bold text-slate-500 uppercase mb-1">Aula</p>
-                <p className="text-xs font-bold text-white">{aulaId}</p>
+                <p className="text-[8px] font-black text-slate-500 uppercase">Aula</p>
+                <p className="text-xs font-bold text-white uppercase italic">{aulaId}</p>
               </div>
               <div>
-                <p className="text-[8px] font-bold text-slate-500 uppercase mb-1">Sección</p>
-                <p className="text-xs font-bold text-white">{seccion}</p>
+                <p className="text-[8px] font-black text-slate-500 uppercase">Sección</p>
+                <p className="text-xs font-bold text-white uppercase italic">{seccion}</p>
               </div>
             </div>
           </div>
@@ -132,17 +143,17 @@ export default function AssignStudentModal({ deviceId, InstitutoId, aulaId, secc
           <button 
             disabled={loading}
             type="submit"
-            className="w-full bg-orange-500 hover:bg-orange-600 text-white py-4 rounded-2xl font-black text-sm uppercase tracking-wider shadow-xl shadow-orange-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full bg-orange-500 hover:bg-orange-600 text-white py-4 rounded-2xl font-black text-sm uppercase tracking-wider shadow-xl shadow-orange-500/20 transition-all disabled:opacity-50"
           >
-            {loading ? 'REGISTRANDO...' : 'FINALIZAR VINCULACIÓN'}
+            {loading ? 'PROCESANDO...' : 'FINALIZAR VINCULACIÓN'}
           </button>
           
           <button 
             type="button" 
             onClick={onClose} 
-            className="w-full text-slate-500 text-[10px] font-bold uppercase py-2 hover:text-white transition-colors"
+            className="w-full text-slate-500 text-[10px] font-black uppercase py-2 hover:text-white transition-colors"
           >
-            Cancelar
+            Cancelar operación
           </button>
         </form>
       </div>

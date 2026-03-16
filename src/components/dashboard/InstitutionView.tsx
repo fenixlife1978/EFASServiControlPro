@@ -1,17 +1,19 @@
+'use client';
 import React, { useState, useEffect } from 'react';
-import { db, auth } from '@/firebase/config';
+import { db, auth, rtdb } from '@/firebase/config';
+import { ref, onValue, update, remove } from 'firebase/database'; // Añadidos update y remove
 import { 
   collection, query, onSnapshot, where, addDoc, serverTimestamp, 
   doc, getDoc, updateDoc, deleteDoc, setDoc 
 } from 'firebase/firestore';
 import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
 import { 
-  ShieldAlert, Radio, Users, LogOut, Lock, Search, MessageSquare, Send,
-  Plus, DoorOpen, Activity, Monitor, Globe, ChevronRight, Tablet, User, 
-  ArrowLeft, Settings, Trash2, Zap, Save, Building2, Key, Info, Edit3, Link2, Check, X, HardDrive, Smartphone, MapPin, ShieldCheck,
-  Unlock, RefreshCcw
+  ShieldAlert, Activity, Users, LogOut, Lock, Search, MessageSquare, 
+  Plus, DoorOpen, Globe, ArrowLeft, Settings, Trash2, Zap, Smartphone, 
+  User, Unlock, RefreshCcw, ShieldCheck, Edit3
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
+import { toast } from 'sonner'; // Importación de Sonner
 import { GlobalControls } from '@/components/admin/config/GlobalControls';
 import { WebHistoryModal } from '@/components/admin/monitoring/WebHistoryModal';
 import { SecurityRules } from '@/components/admin/config/SecurityRules';
@@ -37,64 +39,65 @@ export default function InstitutionView() {
   const [showModal, setShowModal] = useState(false);
   const [newAula, setNewAula] = useState<any>({ aulaId: '', seccion: '', status: 'active' });
   const [isSaving, setIsSaving] = useState(false);
+  const [realtimeStats, setRealtimeStats] = useState<any>({});
 
   const inputStyle = "w-full bg-slate-900 border border-slate-800 p-4 rounded-xl text-white font-bold text-xs uppercase outline-none focus:border-orange-500 transition-all";
 
-  // --- LÓGICA DE ESTADO ONLINE REAL CORREGIDA (usa ultimoAcceso) ---
-  const checkIsOnline = (ultimoAcceso: any) => {
-    if (!ultimoAcceso) return "no_data"; 
-    
-    const lastSeenDate = ultimoAcceso.toDate ? ultimoAcceso.toDate() : new Date(ultimoAcceso);
+  // --- NUEVAS FUNCIONES DE GESTIÓN DE DISPOSITIVOS ---
+  
+  const handleUpdateDeviceName = async (deviceId: string, currentName: string) => {
+    const newName = prompt("INGRESE EL NOMBRE DEL NUEVO ALUMNO ASIGNADO:", currentName);
+    if (!newName || newName === currentName) return;
+
+    const toastId = toast.loading("Actualizando asignación...");
+    try {
+      // 1. Actualizar en Firestore
+      await updateDoc(doc(db, "dispositivos", deviceId), {
+        alumno_asignado: newName.toUpperCase(),
+        lastUpdated: serverTimestamp()
+      });
+
+      // 2. Sincronizar con RTDB para cambios en vivo
+      const deviceRef = ref(rtdb, `dispositivos/${deviceId}`);
+      await update(deviceRef, { nombre: newName.toUpperCase() });
+
+      toast.success("Dispositivo reasignado correctamente", { id: toastId });
+    } catch (error) {
+      toast.error("Error al reasignar", { id: toastId });
+      console.error(error);
+    }
+  };
+
+  const handleDeleteDevice = async (deviceId: string) => {
+    if (!confirm(`¿ESTÁ SEGURO DE ELIMINAR EL DISPOSITIVO ${deviceId}? ESTA ACCIÓN NO SE PUEDE DESHACER.`)) return;
+
+    const toastId = toast.loading("Eliminando registro del sistema...");
+    try {
+      // Eliminar de Firestore
+      await deleteDoc(doc(db, "dispositivos", deviceId));
+      
+      // Eliminar de RTDB
+      const deviceRef = ref(rtdb, `dispositivos/${deviceId}`);
+      await remove(deviceRef);
+
+      toast.success("Dispositivo eliminado con éxito", { id: toastId });
+    } catch (error) {
+      toast.error("No se pudo eliminar el dispositivo", { id: toastId });
+    }
+  };
+
+  // --- LÓGICA DE ESTADO ONLINE ---
+  const checkIsOnline = (deviceId: string, firestoreUltimoAcceso: any) => {
+    const rtData = realtimeStats[deviceId];
+    if (rtData && rtData.lastActive) {
+      const diff = Date.now() - rtData.lastActive;
+      return diff < 30000 ? "online" : "offline";
+    }
+    if (!firestoreUltimoAcceso) return "no_data"; 
+    const lastSeenDate = firestoreUltimoAcceso.toDate ? firestoreUltimoAcceso.toDate() : new Date(firestoreUltimoAcceso);
     const now = new Date();
-    // Tolerancia de 60 segundos para considerar Online
     const diff = now.getTime() - lastSeenDate.getTime();
     return diff < 60000 ? "online" : "offline";
-  };
-
-  // --- FILTRADO DE DISPOSITIVOS POR AULA ---
-  useEffect(() => {
-    if (selectedAula && institutionId) {
-      const filtrados = tablets.filter(dev => 
-        dev.InstitutoId === institutionId && 
-        dev.aulaId === selectedAula.aulaId && 
-        dev.seccion === selectedAula.seccion
-      );
-      setAlumnos(filtrados);
-    } else {
-      setAlumnos([]);
-    }
-  }, [selectedAula, tablets, institutionId]);
-
-  // --- ACCIONES NATIVAS ---
-  const handleRebloquear = async () => {
-    try {
-      await LiberarBtn.ejecutarRebloqueo();
-      alert("✅ SEGURIDAD RESTAURADA");
-    } catch (e) {
-      alert("Error: Plugin no detectado.");
-    }
-  };
-
-  const handleChangePin = async () => {
-    const newPin = prompt("NUEVO PIN (4 dígitos):");
-    if (newPin && /^\d{4}$/.test(newPin)) {
-      setIsSaving(true);
-      try {
-        await setDoc(doc(db, "system_config", "security"), { 
-          master_pin: newPin,
-          last_change: serverTimestamp()
-        }, { merge: true });
-        alert(`✅ PIN GLOBAL ACTUALIZADO: ${newPin}`);
-      } catch (e) { alert("Error Firebase."); }
-      setIsSaving(false);
-    }
-  };
-
-  const handleLiberarDispositivo = async () => {
-    const pass = prompt("CLAVE MAESTRA:");
-    if (pass === "EDU-ADMIN-2026") { 
-      try { await LiberarBtn.ejecutarLiberacion(); } catch (e) { alert("Error Plugin."); }
-    }
   };
 
   // --- LISTENERS FIREBASE ---
@@ -116,42 +119,100 @@ export default function InstitutionView() {
       setTablets(s.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
-    return () => { unsubAulas(); unsubTablets(); };
+    const rtRef = ref(rtdb, `monitoring/${institutionId}`);
+    const unsubRTDB = onValue(rtRef, (snapshot) => {
+      if (snapshot.exists()) setRealtimeStats(snapshot.val());
+    });
+
+    return () => { unsubAulas(); unsubTablets(); unsubRTDB(); };
   }, [institutionId]);
+
+  useEffect(() => {
+    if (selectedAula && institutionId) {
+      const filtrados = tablets.filter(dev => 
+        dev.InstitutoId === institutionId && 
+        dev.aulaId === selectedAula.aulaId && 
+        dev.seccion === selectedAula.seccion
+      );
+      setAlumnos(filtrados);
+    } else {
+      setAlumnos([]);
+    }
+  }, [selectedAula, tablets, institutionId]);
+
+  // --- ACCIONES NATIVAS ---
+  const handleRebloquear = async () => {
+    try {
+      await LiberarBtn.ejecutarRebloqueo();
+      toast.success("SEGURIDAD RESTAURADA NATIVAMENTE");
+    } catch (e) { toast.error("Plugin nativo no detectado"); }
+  };
+
+  const handleChangePin = async () => {
+    const newPin = prompt("NUEVO PIN (4 dígitos):");
+    if (newPin && /^\d{4}$/.test(newPin)) {
+      setIsSaving(true);
+      try {
+        await setDoc(doc(db, "system_config", "security"), { 
+          master_pin: newPin,
+          last_change: serverTimestamp()
+        }, { merge: true });
+        toast.success(`PIN GLOBAL ACTUALIZADO: ${newPin}`);
+      } catch (e) { toast.error("Error al guardar en Firebase"); }
+      setIsSaving(false);
+    }
+  };
+
+  const handleLiberarDispositivo = async () => {
+    const pass = prompt("CLAVE MAESTRA:");
+    if (pass === "EDU-ADMIN-2026") { 
+      try { await LiberarBtn.ejecutarLiberacion(); toast.warning("DISPOSITIVO LIBERADO"); } catch (e) { toast.error("Error Plugin"); }
+    }
+  };
 
   const handleUpdateInstitution = async () => {
     if (!institutionId) return;
     setIsSaving(true);
-    await updateDoc(doc(db, "institutions", institutionId), {
-      nombre: institutionName,
-      direccion: instData.direccion,
-      telefono: instData.telefono
-    });
+    try {
+      await updateDoc(doc(db, "institutions", institutionId), {
+        nombre: institutionName,
+        direccion: instData.direccion,
+        telefono: instData.telefono
+      });
+      toast.success("Información de sede actualizada");
+    } catch (e) { toast.error("Error al actualizar"); }
     setIsSaving(false);
-    alert("Sede actualizada");
   };
 
   const handleSaveAula = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAula.aulaId || !newAula.seccion || !institutionId) return;
     setIsSaving(true);
-    const customAulaId = newAula.aulaId.toUpperCase().trim().replace(/\s+/g, '_');
-    const aulaRef = doc(db, "institutions", institutionId, "Aulas", customAulaId);
-    await setDoc(aulaRef, {
-      aulaId: customAulaId, seccion: newAula.seccion.toUpperCase().trim(),
-      InstitutoId: institutionId, status: 'active', updatedAt: serverTimestamp()
-    });
-    setShowModal(false);
+    try {
+      const customAulaId = newAula.aulaId.toUpperCase().trim().replace(/\s+/g, '_');
+      const aulaRef = doc(db, "institutions", institutionId, "Aulas", customAulaId);
+      await setDoc(aulaRef, {
+        aulaId: customAulaId, seccion: newAula.seccion.toUpperCase().trim(),
+        InstitutoId: institutionId, status: 'active', updatedAt: serverTimestamp()
+      });
+      setShowModal(false);
+      toast.success("Aula creada exitosamente");
+    } catch (e) { toast.error("Error al crear aula"); }
     setIsSaving(false);
   };
 
   const handleDeleteAula = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (confirm('¿ELIMINAR AULA?')) await deleteDoc(doc(db, `institutions/${institutionId}/Aulas`, id));
+    if (confirm('¿ELIMINAR AULA COMPLETAMENTE?')) {
+      try {
+        await deleteDoc(doc(db, `institutions/${institutionId}/Aulas`, id));
+        toast.error("Aula eliminada");
+      } catch (e) { toast.error("Error al eliminar"); }
+    }
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0c10] text-slate-300 font-sans">
+    <div className="min-h-screen bg-[#0a0c10] text-slate-300 font-sans italic-text-fix">
       <nav className="fixed left-0 top-0 h-full w-20 bg-[#0f1117] border-r border-slate-800/50 flex flex-col items-center py-8 gap-8 z-50">
         <div className="bg-orange-500 p-3 rounded-2xl shadow-lg shadow-orange-500/20"><ShieldAlert className="text-white w-6 h-6" /></div>
         <div className="flex-1 flex flex-col gap-6 pt-10">
@@ -168,7 +229,7 @@ export default function InstitutionView() {
           <div>
             <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.4em] text-orange-500 mb-1">
               <span className="w-2 h-2 bg-orange-500 rounded-full animate-ping"></span>
-              EDUControlPro Enterprise Shield v3.0
+              EFAS ServiControlPro v3.0
             </div>
             <h1 className="text-2xl font-black italic uppercase text-white tracking-tighter">
               {institutionName} <span className="text-slate-500 font-light ml-2">/ {activeSection.toUpperCase()}</span>
@@ -178,6 +239,7 @@ export default function InstitutionView() {
         </header>
 
         <div className="p-8 max-w-[1600px] mx-auto grid grid-cols-12 gap-8">
+          {/* BARRA LATERAL IZQUIERDA */}
           <div className="col-span-12 lg:col-span-4 space-y-6">
             <div className="bg-[#0f1117] p-8 rounded-[2.5rem] border border-slate-800 shadow-2xl">
               <h2 className="text-xl font-black italic uppercase text-white mb-6 flex items-center gap-3"><Lock className="text-orange-500 w-5 h-5" /> Master Switch</h2>
@@ -191,9 +253,11 @@ export default function InstitutionView() {
             </div>
           </div>
 
+          {/* CONTENIDO PRINCIPAL */}
           <div className="col-span-12 lg:col-span-8">
             <div className="bg-[#0f1117] p-10 rounded-[3rem] border border-slate-800 min-h-[600px] relative">
               
+              {/* VISTA: MAPA DE AULAS */}
               {activeSection === 'dashboard' && !selectedAula && (
                 <>
                   <div className="flex justify-between items-center mb-10">
@@ -217,6 +281,7 @@ export default function InstitutionView() {
                 </>
               )}
 
+              {/* VISTA: LISTA DE DISPOSITIVOS POR AULA */}
               {activeSection === 'dashboard' && selectedAula && (
                 <div className="animate-in fade-in slide-in-from-right duration-300">
                   <div className="flex justify-between items-center mb-10">
@@ -227,7 +292,7 @@ export default function InstitutionView() {
                       <h2 className="text-3xl font-black italic uppercase text-white tracking-tighter">
                         {selectedAula.aulaId} <span className="text-orange-500 font-light">Secc. {selectedAula.seccion}</span>
                       </h2>
-                      <p className="text-[10px] text-slate-500 font-bold uppercase">{alumnos.length} Dispositivos en este salón</p>
+                      <p className="text-[10px] text-slate-500 font-bold uppercase">{alumnos.length} Dispositivos Vinculados</p>
                     </div>
                   </div>
 
@@ -238,38 +303,61 @@ export default function InstitutionView() {
                       </div>
                     ) : (
                       alumnos.map((alumno) => {
-                        // CORREGIDO: Usar ultimoAcceso en lugar de lastSeen
-                        const status = checkIsOnline(alumno.ultimoAcceso);
+                        const status = checkIsOnline(alumno.id, alumno.ultimoAcceso);
                         return (
-                          <div key={alumno.id} className="bg-slate-900/40 border border-slate-800 p-6 rounded-[2rem] flex items-center justify-between group">
+                          <div key={alumno.id} className="bg-slate-900/40 border border-slate-800 p-6 rounded-[2rem] flex items-center justify-between group transition-all hover:border-slate-700">
                             <div className="flex items-center gap-5">
-                              <div className="w-12 h-12 bg-slate-800 rounded-2xl flex items-center justify-center text-orange-500">
-                                <User size={20} />
+                              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors ${status === 'online' ? 'bg-orange-500 text-white' : 'bg-slate-800 text-slate-500'}`}>
+                                <Smartphone size={20} />
                               </div>
                               <div>
-                                <h4 className="font-black uppercase text-white italic text-lg">
-                                  {alumno.alumno_asignado || "ALUMNO NO ASIGNADO"}
+                                <h4 className="font-black uppercase text-white italic text-lg leading-none mb-1">
+                                  {alumno.alumno_asignado || "DESCONOCIDO"}
                                 </h4>
                                 <div className="flex flex-col gap-1">
-                                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">
-                                    DEVICE ID: {alumno.id}
+                                  <span className="text-[9px] font-bold text-slate-600 uppercase tracking-tighter">
+                                    ID: {alumno.id}
                                   </span>
                                   <div className="flex items-center gap-2">
                                     <span className={`flex items-center gap-1 text-[8px] font-black px-2 py-0.5 rounded uppercase ${
-                                      status === "online" ? 'bg-green-500/10 text-green-500' : 
-                                      status === "offline" ? 'bg-red-500/10 text-red-500' : 
-                                      'bg-slate-500/10 text-slate-400'
+                                      status === "online" ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'
                                     }`}>
-                                      <span className={`w-1.5 h-1.5 rounded-full ${status === "online" ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
-                                      {status === "online" ? 'SISTEMA ACTIVO' : status === "offline" ? 'DESCONECTADO' : 'SIN REPORTE DE ACTIVIDAD'}
+                                      <span className={`w-1 h-1 rounded-full ${status === "online" ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
+                                      {status === "online" ? 'SISTEMA ACTIVO' : 'DESCONECTADO'}
                                     </span>
+                                    {realtimeStats[alumno.id]?.currentUrl && (
+                                      <span className="text-[8px] text-blue-400 font-bold truncate max-w-[120px] italic">
+                                        🔗 {realtimeStats[alumno.id].currentUrl}
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
                               </div>
                             </div>
-                            <div className="flex gap-2">
-                              <button onClick={() => setHistoryModal({ isOpen: true, tabletId: alumno.id, alumnoNombre: alumno.alumno_asignado || alumno.id })} className="p-3 bg-slate-800 hover:bg-orange-500 text-slate-500 hover:text-white rounded-xl transition-all"><Globe size={16}/></button>
-                              <button className="p-3 bg-slate-800 hover:bg-blue-500 text-slate-500 hover:text-white rounded-xl transition-all"><MessageSquare size={16}/></button>
+
+                            {/* BOTONES DE ACCIÓN (Aparecen con el Hover) */}
+                            <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button 
+                                onClick={() => handleUpdateDeviceName(alumno.id, alumno.alumno_asignado)}
+                                className="p-3 bg-slate-800 hover:bg-blue-600 text-slate-400 hover:text-white rounded-xl transition-all"
+                                title="Reasignar Alumno"
+                              >
+                                <Edit3 size={16}/>
+                              </button>
+                              <button 
+                                onClick={() => setHistoryModal({ isOpen: true, tabletId: alumno.id, alumnoNombre: alumno.alumno_asignado || alumno.id })} 
+                                className="p-3 bg-slate-800 hover:bg-orange-500 text-slate-400 hover:text-white rounded-xl transition-all"
+                                title="Ver Historial Web"
+                              >
+                                <Globe size={16}/>
+                              </button>
+                              <button 
+                                onClick={() => handleDeleteDevice(alumno.id)}
+                                className="p-3 bg-slate-800 hover:bg-red-600 text-slate-400 hover:text-white rounded-xl transition-all"
+                                title="Eliminar del Sistema"
+                              >
+                                <Trash2 size={16}/>
+                              </button>
                             </div>
                           </div>
                         );
@@ -279,6 +367,7 @@ export default function InstitutionView() {
                 </div>
               )}
 
+              {/* VISTAS DE CONFIGURACIÓN Y SEGURIDAD */}
               {activeSection === 'settings' && (
                 <div className="space-y-10">
                   <h2 className="text-4xl font-black italic uppercase text-white tracking-tighter">Ajustes <span className="text-orange-500 font-light">de Sede</span></h2>
@@ -303,6 +392,7 @@ export default function InstitutionView() {
         </div>
       </main>
 
+      {/* MODAL: NUEVA AULA */}
       {showModal && (
         <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
           <div className="bg-[#0f1117] border border-slate-800 rounded-[2.5rem] p-10 w-full max-w-md">
@@ -319,6 +409,7 @@ export default function InstitutionView() {
         </div>
       )}
 
+      {/* MODAL: HISTORIAL WEB */}
       {historyModal.isOpen && (
         <WebHistoryModal 
           isOpen={historyModal.isOpen} 
