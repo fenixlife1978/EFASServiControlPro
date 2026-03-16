@@ -4,7 +4,7 @@ import { useSearchParams } from 'next/navigation';
 import { db } from '@/firebase/config';
 import { collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { useInstitution } from '../../institution-context';
-import EnrollmentQR from '@/components/admin/EnrollmentQR';
+import VincularUI from '@/components/VincularUI';  // ✅ CORREGIDO: ahora importa VincularUI
 import AssignStudentModal from '@/components/admin/AssignStudentModal';
 import DirectMessage from '@/components/admin/messaging/DirectMessage';
 import { Tablet, ShieldCheck, ShieldAlert, Wifi, QrCode, X, UserRoundPen, MessageSquare, ChevronLeft } from 'lucide-react';
@@ -128,7 +128,7 @@ function MonitorContent() {
             <button onClick={() => setShowQR(false)} className="absolute -top-4 -right-4 bg-white text-slate-900 p-2 rounded-full shadow-xl hover:bg-orange-500 hover:text-white transition-all z-10">
               <X className="w-6 h-6" />
             </button>
-            <EnrollmentQR InstitutoId={institutionId!} aulaId={aulaId!} />
+            <VincularUI />  {/* ✅ CORREGIDO: ahora usa VincularUI */}
           </div>
         </div>
       )}
@@ -138,7 +138,7 @@ function MonitorContent() {
           deviceId={editingDevice.id} 
           InstitutoId={institutionId || ""}
           aulaId={aulaId || ""}
-          seccion={aulaSeccion}  // ← AGREGADO: sección del aula
+          seccion={aulaSeccion}
           onClose={() => setEditingDevice(null)} 
         />
       )}
