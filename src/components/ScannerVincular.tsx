@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
 import { db, rtdb } from '@/firebase/config';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { ref, update as rtdbUpdate } from 'firebase/database';
+import { ref, set, update as rtdbUpdate } from 'firebase/database';
 // 🔥 CORRECCIÓN ERROR 2307: El import correcto es '@capacitor/device'
 import { Device } from '@capacitor/device'; 
 import { Preferences } from '@capacitor/preferences';
@@ -67,14 +67,16 @@ export default function ScannerVincular() {
       await Preferences.set({ key: 'deviceId', value: String(deviceId) });
       await Preferences.set({ key: 'InstitutoId', value: String(instId) });
       await Preferences.set({ key: 'aulaId', value: String(data.aulaId || '') });
+      await Preferences.set({ key: 'seccion', value: String(data.seccion || '') });
+      await Preferences.set({ key: 'rol', value: String(data.rol || 'alumno') });
 
       // 5. INFO HARDWARE
       const info = await Device.getInfo();
       const idHardware = await Device.getId();
 
-      // --- OPERACIÓN HÍBRIDA ---
+      // --- OPERACIÓN HÍBRIDA OPTIMIZADA ---
 
-      // 6. FIRESTORE (Registro)
+      // 6. FIRESTORE: SOLO DATOS PERMANENTES (1 sola escritura)
       const deviceRef = doc(db, "dispositivos", deviceId);
       try {
         await updateDoc(deviceRef, {
@@ -82,13 +84,14 @@ export default function ScannerVincular() {
           status: 'active',
           rol: data.rol || 'alumno',
           InstitutoId: instId,
+          aulaId: data.aulaId || '',
+          seccion: data.seccion || '',
           hardware: { 
             modelo: info.model, 
             marca: info.manufacturer, 
             uuid: idHardware.identifier 
           },
-          online: true,
-          ultimoAcceso: serverTimestamp()
+          // ✅ NO PONER "online", "ultimoAcceso" AQUÍ (van a RTDB)
         });
       } catch (e: any) {
         if (e.code === 'permission-denied') {
@@ -100,23 +103,43 @@ export default function ScannerVincular() {
         throw e;
       }
 
-      // 7. REALTIME DATABASE (Control en vivo)
+      // 7. REALTIME DATABASE: DATOS VOLÁTILES (miles de escrituras)
+      // Ruta directa para el dispositivo (más simple que control_sedes)
+      const rtdbDeviceRef = ref(rtdb, `dispositivos/${deviceId}`);
+      
+      try {
+        await set(rtdbDeviceRef, {
+          online: true,
+          url_actual: '',
+          lastSeen: Date.now(),
+          bloqueado: false,
+          modelo: info.model,
+          institutoId: instId,
+          aulaId: data.aulaId || '',
+          seccion: data.seccion || ''
+        });
+      } catch (e: any) {
+        errorEmitter.emit('rtdb-permission-error', new RTDBPermissionError({
+          path: `dispositivos/${deviceId}`,
+          operation: 'write',  // 'write' es el valor permitid,
+          requestResourceData: { online: true }
+        }));
+        throw e;
+      }
+
+      // 8. También mantener control_sedes para compatibilidad (opcional)
       if (instId) {
-        const rtdbRef = ref(rtdb, `control_sedes/${instId}/dispositivos/${deviceId}`);
+        const rtdbControlRef = ref(rtdb, `control_sedes/${instId}/dispositivos/${deviceId}`);
         try {
-          await rtdbUpdate(rtdbRef, {
+          await rtdbUpdate(rtdbControlRef, {
             connected: true,
             locked: false,
             lastSeen: Date.now(),
             model: info.model
           });
         } catch (e: any) {
-          errorEmitter.emit('rtdb-permission-error', new RTDBPermissionError({
-            path: `control_sedes/${instId}/dispositivos/${deviceId}`,
-            operation: 'patch',
-            requestResourceData: { connected: true }
-          }));
-          throw e;
+          // No crítico si falla
+          console.warn("Error en control_sedes:", e);
         }
       }
 

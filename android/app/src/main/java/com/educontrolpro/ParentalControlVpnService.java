@@ -187,6 +187,7 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
             builder.addAddress(VPN_ADDRESS, 32);
             builder.addRoute("0.0.0.0", 0);
             
+            // DNS servers OBLIGATORIOS
             builder.addDnsServer(DNS1);
             builder.addDnsServer(DNS2);
             builder.addDnsServer(DNS3);
@@ -222,9 +223,58 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
                     if (length > 0) {
                         packet.limit(length);
                         
-                        if (debeBloquearPaquete(packetArray, length)) {
+                        // 🔍 ANALIZAR PAQUETE CON PARSERS MEJORADOS
+                        boolean bloquear = false;
+                        
+                        try {
+                            // Parsear cabecera IP
+                            PacketParser.IpHeader ip = PacketParser.parseIpHeader(packet);
+                            
+                            // Solo analizar tráfico saliente (desde dispositivo)
+                            if (ip.sourceIp.startsWith("10.0.0.")) { // Nuestra IP virtual
+                                
+                                if (ip.protocol == 6) { // TCP
+                                    PacketParser.TcpHeader tcp = PacketParser.parseTcpHeader(packet, ip.headerLength);
+                                    
+                                    // Bloquear HTTP (puerto 80)
+                                    if (tcp.destPort == 80) {
+                                        SimpleLogger.d("🚫 BLOQUEADO HTTP: " + ip.destIp + ":" + tcp.destPort);
+                                        bloquear = true;
+                                    }
+                                    
+                                } else if (ip.protocol == 17) { // UDP
+                                    PacketParser.UdpHeader udp = PacketParser.parseUdpHeader(packet, ip.headerLength);
+                                    
+                                    // Analizar DNS (puerto 53)
+                                    if (udp.destPort == 53) {
+                                        try {
+                                            String domain = DnsParser.parseDomain(packet, ip.headerLength, 8);
+                                            
+                                            if (!domain.isEmpty()) {
+                                                // Verificar contra lista de sitios bloqueados
+                                                for (String sitio : sitiosBloqueados) {
+                                                    if (domain.contains(sitio) || sitio.contains(domain)) {
+                                                        SimpleLogger.d("🚫 BLOQUEADO DNS: " + domain);
+                                                        bloquear = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        } catch (Exception e) {
+                                            // Ignorar errores de parsing DNS
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            // Error parseando paquete, permitir por defecto
+                        }
+                        
+                        if (bloquear) {
                             totalPaquetesBloqueados++;
+                            // NO REENVIAR = BLOQUEADO
                         } else {
+                            // ✅ REENVIAR SIEMPRE los paquetes permitidos
                             out.write(packetArray, 0, length);
                             out.flush();
                             totalPaquetesPermitidos++;
@@ -267,40 +317,7 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
     }
 
     private boolean debeBloquearPaquete(byte[] packet, int length) {
-        if (sitiosBloqueados == null || sitiosBloqueados.isEmpty()) {
-            return false;
-        }
-        
-        if (length < 10) return false;
-        
-        try {
-            int analyzeLength = Math.min(length, 512);
-            String packetContent = new String(packet, 0, analyzeLength).toLowerCase();
-            
-            if (packetContent.contains("host:") || 
-                packetContent.contains("get ") || 
-                packetContent.contains("post ")) {
-                
-                for (String sitio : sitiosBloqueados) {
-                    if (sitio != null && !sitio.isEmpty() && packetContent.contains(sitio.toLowerCase())) {
-                        
-                        long ahora = System.currentTimeMillis();
-                        if (!sitio.equals(ultimaUrlBloqueada) || 
-                            ahora - ultimoBloqueoTime > BLOQUEO_COOLDOWN) {
-                            
-                            SimpleLogger.d("🚫 BLOQUEADO: " + sitio);
-                            ultimaUrlBloqueada = sitio;
-                            ultimoBloqueoTime = ahora;
-                        }
-                        
-                        return true;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            // Ignorar
-        }
-        
+        // Este método ya no se usa, pero lo mantenemos por compatibilidad
         return false;
     }
 
