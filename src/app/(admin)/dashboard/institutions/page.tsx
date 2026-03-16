@@ -57,8 +57,7 @@ export default function InstitutionsPage() {
       console.error(error);
       alert("Error en despliegue de nodo: " + error);
     } finally {
-      setLoadingPermissions(false);
-      setLoading(false);
+      setLoading(false); // CORREGIDO: eliminado setLoadingPermissions
     }
   };
 
