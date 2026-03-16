@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useEffect, useState } from 'react'
-import { db, rtdb } from '@/firebase/config' // Importamos ambos
+import { db, rtdb } from '@/firebase/config'
 import { ref, onValue } from 'firebase/database'
 import { collection, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore'
 import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
@@ -30,19 +30,18 @@ const violationsConfig = {
 } satisfies ChartConfig
 
 interface ReportChartsProps {
-  tabletId: string;
+  deviceId: string;
 }
 
-export function ReportCharts({ tabletId }: ReportChartsProps) {
+export function ReportCharts({ deviceId }: ReportChartsProps) {
   const [usageData, setUsageData] = useState<any[]>([]);
   const [violationsData, setViolationsData] = useState<any[]>([]);
 
   useEffect(() => {
-    if (!tabletId) return;
+    if (!deviceId) return;
 
     // 1. HÍBRIDO - REALTIME DATABASE: Tiempo de uso actual
-    // Escuchamos la rama de estadísticas de la tablet
-    const usageRef = ref(rtdb, `stats/${tabletId}/apps_usage`);
+    const usageRef = ref(rtdb, `stats/${deviceId}/apps_usage`);
     const unsubscribeUsage = onValue(usageRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
@@ -52,13 +51,18 @@ export function ReportCharts({ tabletId }: ReportChartsProps) {
           fill: `var(--color-${key.toLowerCase()})`
         }));
         setUsageData(formattedData);
+      } else {
+        setUsageData([]);
       }
+    }, (error) => {
+      console.error("Error leyendo RTDB:", error);
+      setUsageData([]);
     });
 
     // 2. HÍBRIDO - FIRESTORE: Contador de infracciones histórico
     const q = query(
       collection(db, "alertas"),
-      where("deviceId", "==", tabletId),
+      where("deviceId", "==", deviceId),
       orderBy("timestamp", "desc"),
       limit(20)
     );
@@ -85,13 +89,24 @@ export function ReportCharts({ tabletId }: ReportChartsProps) {
       }));
       
       setViolationsData(formattedViolations);
+    }, (error) => {
+      console.error("Error leyendo Firestore:", error);
+      setViolationsData([]);
     });
 
     return () => {
       unsubscribeUsage();
       unsubscribeAlerts();
     };
-  }, [tabletId]);
+  }, [deviceId]);
+
+  if (!deviceId) {
+    return (
+      <div className="p-8 text-center text-slate-500 font-bold uppercase text-xs">
+        Selecciona un dispositivo para ver los reportes
+      </div>
+    );
+  }
 
   return (
     <div className="grid gap-6 md:grid-cols-1 lg:grid-cols-2">
@@ -106,21 +121,27 @@ export function ReportCharts({ tabletId }: ReportChartsProps) {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ChartContainer config={usageConfig} className="min-h-[200px] w-full">
-            <BarChart accessibilityLayer data={usageData} layout="vertical" margin={{ left: 10 }}>
-              <YAxis
-                dataKey="app"
-                type="category"
-                tickLine={false}
-                tickMargin={10}
-                axisLine={false}
-                tick={{ fill: '#64748b', fontSize: 10, fontWeight: 'bold' }}
-              />
-              <XAxis dataKey="time" type="number" hide />
-              <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
-              <Bar dataKey="time" radius={8} />
-            </BarChart>
-          </ChartContainer>
+          {usageData.length === 0 ? (
+            <div className="h-[200px] flex items-center justify-center text-slate-600 text-xs font-bold uppercase">
+              Sin datos de uso
+            </div>
+          ) : (
+            <ChartContainer config={usageConfig} className="min-h-[200px] w-full">
+              <BarChart accessibilityLayer data={usageData} layout="vertical" margin={{ left: 10 }}>
+                <YAxis
+                  dataKey="app"
+                  type="category"
+                  tickLine={false}
+                  tickMargin={10}
+                  axisLine={false}
+                  tick={{ fill: '#64748b', fontSize: 10, fontWeight: 'bold' }}
+                />
+                <XAxis dataKey="time" type="number" hide />
+                <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
+                <Bar dataKey="time" radius={8} />
+              </BarChart>
+            </ChartContainer>
+          )}
         </CardContent>
       </Card>
 
@@ -135,31 +156,37 @@ export function ReportCharts({ tabletId }: ReportChartsProps) {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ChartContainer config={violationsConfig} className="min-h-[200px] w-full">
-            <LineChart
-              accessibilityLayer
-              data={violationsData}
-              margin={{ top: 20, right: 20, left: 20, bottom: 20 }}
-            >
-              <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#ffffff10" />
-              <XAxis
-                dataKey="date"
-                tickLine={false}
-                axisLine={false}
-                tickMargin={12}
-                tick={{ fill: '#64748b', fontSize: 10, fontWeight: 'bold' }}
-              />
-              <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
-              <Line
-                dataKey="violations"
-                type="monotone"
-                stroke="#f97316"
-                strokeWidth={3}
-                dot={{ r: 4, fill: '#f97316', strokeWidth: 2 }}
-                activeDot={{ r: 6, fill: '#fff' }}
-              />
-            </LineChart>
-          </ChartContainer>
+          {violationsData.length === 0 || violationsData.every(d => d.violations === 0) ? (
+            <div className="h-[200px] flex items-center justify-center text-slate-600 text-xs font-bold uppercase">
+              Sin alertas esta semana
+            </div>
+          ) : (
+            <ChartContainer config={violationsConfig} className="min-h-[200px] w-full">
+              <LineChart
+                accessibilityLayer
+                data={violationsData}
+                margin={{ top: 20, right: 20, left: 20, bottom: 20 }}
+              >
+                <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#ffffff10" />
+                <XAxis
+                  dataKey="date"
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={12}
+                  tick={{ fill: '#64748b', fontSize: 10, fontWeight: 'bold' }}
+                />
+                <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
+                <Line
+                  dataKey="violations"
+                  type="monotone"
+                  stroke="#f97316"
+                  strokeWidth={3}
+                  dot={{ r: 4, fill: '#f97316', strokeWidth: 2 }}
+                  activeDot={{ r: 6, fill: '#fff' }}
+                />
+              </LineChart>
+            </ChartContainer>
+          )}
         </CardContent>
       </Card>
     </div>

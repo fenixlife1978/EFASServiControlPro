@@ -19,7 +19,7 @@ export default function ReportsPage() {
       {/* Nota: La lógica de migración de Firestore a Realtime Database 
           debe realizarse dentro del componente <ReportCharts /> 
       */}
-      <ReportCharts />
+      <ReportCharts deviceId="GLOBAL" />
     </div>
   );
 }
