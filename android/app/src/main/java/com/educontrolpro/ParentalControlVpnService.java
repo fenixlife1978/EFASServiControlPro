@@ -177,8 +177,18 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
         return START_STICKY;
     }
 
+    // Método auxiliar para convertir bytes a hexadecimal (para logs)
+    private String bytesToHex(byte[] bytes, int len) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < len; i++) {
+            sb.append(String.format("%02X ", bytes[i]));
+        }
+        return sb.toString();
+    }
+
     private void runVpn() {
         SimpleLogger.i("VPN Service - Configurando interfaz");
+        logToRealtime("VPN_DEBUG", "Iniciando runVpn()");
         
         try {
             Builder builder = new Builder();
@@ -197,16 +207,20 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
             try {
                 builder.addDisallowedApplication(packageName);
                 SimpleLogger.i("VPN Service - App EXCLUIDA: " + packageName);
+                logToRealtime("VPN_DEBUG", "App excluida: " + packageName);
             } catch (PackageManager.NameNotFoundException e) {
+                logToRealtime("VPN_ERROR", "Error excluyendo app: " + e.getMessage());
                 SimpleLogger.e("VPN Service - Error al excluir: " + e.getMessage());
             }
 
             vpnInterface = builder.establish();
             if (vpnInterface == null) {
+                logToRealtime("VPN_ERROR", "No se pudo establecer interfaz");
                 SimpleLogger.e("VPN Service - No se pudo establecer interfaz");
                 return;
             }
 
+            logToRealtime("VPN_DEBUG", "Interfaz establecida correctamente");
             SimpleLogger.i("VPN Service - Interfaz establecida");
 
             ByteBuffer packet = ByteBuffer.allocate(65535);
@@ -215,12 +229,23 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
             try (FileInputStream in = new FileInputStream(vpnInterface.getFileDescriptor());
                  FileOutputStream out = new FileOutputStream(vpnInterface.getFileDescriptor())) {
                 
+                int packetCount = 0;
+                int blockedCount = 0;
                 long lastStatTime = System.currentTimeMillis();
                 long lastRealtimeLog = lastStatTime;
+                long lastTraficoLog = lastStatTime;
 
                 while (isRunning.get() && !Thread.interrupted()) {
                     int length = in.read(packetArray);
                     if (length > 0) {
+                        packetCount++;
+                        
+                        // LOG CADA 10 PAQUETES
+                        if (packetCount % 10 == 0 && System.currentTimeMillis() - lastTraficoLog > 5000) {
+                            logToRealtime("VPN_TRAFICO", "Paquetes leídos: " + packetCount);
+                            lastTraficoLog = System.currentTimeMillis();
+                        }
+                        
                         packet.limit(length);
                         
                         // 🔍 ANALIZAR PAQUETE CON PARSERS MEJORADOS
@@ -272,6 +297,7 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
                         
                         if (bloquear) {
                             totalPaquetesBloqueados++;
+                            blockedCount++;
                             // NO REENVIAR = BLOQUEADO
                         } else {
                             // ✅ REENVIAR SIEMPRE los paquetes permitidos
@@ -286,8 +312,9 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
                     
                     // Log a console cada 30 segundos
                     if (now - lastStatTime > 30000) {
-                        SimpleLogger.d("Stats - P: " + totalPaquetesPermitidos + 
-                                      ", B: " + totalPaquetesBloqueados);
+                        SimpleLogger.d("Stats - Leídos: " + packetCount + 
+                                      ", Permitidos: " + totalPaquetesPermitidos + 
+                                      ", Bloqueados: " + totalPaquetesBloqueados);
                         lastStatTime = now;
                     }
                     
@@ -297,7 +324,8 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
                             totalPaquetesBloqueados > ultimosBloqueosReportados) {
                             
                             logToRealtime("VPN_STATS", 
-                                "P: " + totalPaquetesPermitidos + 
+                                "Leídos: " + packetCount + 
+                                ", P: " + totalPaquetesPermitidos + 
                                 ", B: " + totalPaquetesBloqueados);
                             
                             ultimosPaquetesReportados = totalPaquetesPermitidos;
@@ -307,9 +335,11 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
                     }
                 }
             } catch (IOException e) {
+                logToRealtime("VPN_ERROR", "Error E/S: " + e.getMessage());
                 SimpleLogger.e("VPN Service - Error: " + e.getMessage());
             }
         } catch (Exception e) {
+            logToRealtime("VPN_ERROR", "Error general: " + e.getMessage());
             SimpleLogger.e("VPN Service - Error: " + e.getMessage());
         } finally {
             stopVpn();
@@ -337,6 +367,8 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
 
         isRunning.set(false);
         SimpleLogger.i("VPN Service - Cerrando túnel");
+        logToRealtime("VPN_STOP", "Cerrando túnel - P: " + totalPaquetesPermitidos + 
+                     ", B: " + totalPaquetesBloqueados);
 
         if (blockerManager != null) {
             blockerManager.stopListening();
@@ -363,11 +395,6 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
 
         stopForeground(true);
         stopSelf();
-        
-        if (!cuotaExcedida) {
-            logToRealtime("VPN_STOP", "Detenida - P: " + totalPaquetesPermitidos + 
-                         ", B: " + totalPaquetesBloqueados);
-        }
     }
 
     private Notification createNotification() {
@@ -397,12 +424,14 @@ public class ParentalControlVpnService extends VpnService implements FirebaseBlo
     @Override
     public void onRevoke() {
         SimpleLogger.w("VPN Service - Permiso revocado");
+        logToRealtime("VPN_REVOKED", "Permiso revocado por el usuario");
         stopVpn();
         super.onRevoke();
     }
 
     @Override
     public void onDestroy() {
+        logToRealtime("VPN_DESTROY", "Servicio destruido");
         stopVpn();
         super.onDestroy();
     }

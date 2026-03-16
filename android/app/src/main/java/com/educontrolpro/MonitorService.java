@@ -2,10 +2,12 @@ package com.educontrolpro;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.AccessibilityServiceInfo;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.widget.Toast;
 
 // --- MIGRACIÓN A REALTIME DATABASE ---
 import com.google.firebase.database.DataSnapshot;
@@ -30,7 +32,9 @@ import org.json.JSONObject;
 import org.json.JSONException;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -51,7 +55,7 @@ public class MonitorService extends AccessibilityService {
     private FirebaseFirestore firestore;
     
     // WebSocket para servidor local
-    private String serverMode = "cloud"; // cloud, local, hybrid
+    private String serverMode = "cloud";
     private String serverUrl = "";
     private WebSocket localWebSocket;
     private OkHttpClient client;
@@ -60,13 +64,24 @@ public class MonitorService extends AccessibilityService {
     private String institutoId;
     private String alumnoActual;
     private boolean isServiceActive = true;
-    private boolean adminMode = false; // Modo Técnico (Acceso Total)
+    private boolean adminMode = false; // Modo Técnico (paraliza TODO)
+    
+    // --- LISTAS PROHIBIDAS ---
+    private Set<String> palabrasProhibidas = new HashSet<>();
+    private Set<String> sitiosProhibidos = new HashSet<>();
+    private Set<String> appsProhibidas = new HashSet<>();
+    
+    // --- CONTROL DE BÚSQUEDAS ---
+    private String ultimoTextoIngresado = "";
+    private String paqueteNavegadorActual = "";
+    private long ultimaExpulsionTime = 0;
+    private static final long EXPULSION_COOLDOWN = 2000; // 2 segundos entre expulsiones
     
     // --- OPTIMIZACIÓN DE TIEMPO REAL ---
-    private static final long HEARTBEAT_INTERVAL = 30000; // 30 SEGUNDOS
-    private static final long WRITE_DELAY = 5000;        // 5 segundos entre reportes de URL
-    private static final long BACKUP_INTERVAL = 86400000; // 24 horas para backup a Firestore
-    private static final int MAX_ALERTAS_POR_DISPOSITIVO = 200; // Máximo 200 alertas por dispositivo
+    private static final long HEARTBEAT_INTERVAL = 30000;
+    private static final long WRITE_DELAY = 5000;
+    private static final long BACKUP_INTERVAL = 86400000;
+    private static final int MAX_ALERTAS_POR_DISPOSITIVO = 200;
     
     private String ultimaUrlReportada = "";
     private long lastWriteTime = 0;
@@ -78,10 +93,7 @@ public class MonitorService extends AccessibilityService {
     public void onCreate() {
         super.onCreate();
         
-        // Inicializar Realtime Database
         mDatabase = FirebaseDatabase.getInstance().getReference();
-        
-        // Inicializar Firestore para backup
         firestore = FirebaseFirestore.getInstance();
         
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -92,30 +104,75 @@ public class MonitorService extends AccessibilityService {
         Log.d(TAG, "MonitorService iniciado. Device ID: " + deviceDocId);
         
         if (deviceDocId != null) {
-            cargarConfiguracionLocal(); // Cargar modo de conexión
+            cargarConfiguracionLocal();
             iniciarListenerControl();
+            cargarListasProhibidas(); // ✅ NUEVO: Cargar listas prohibidas
             startHeartbeat();
-            limpiarAlertasAntiguas(); // Limpiar al iniciar
+            limpiarAlertasAntiguas();
         }
     }
 
     // ============================================================
-    // CONFIGURACIÓN LOCAL (para servidor propio)
+    // CARGAR LISTAS PROHIBIDAS DESDE REALTIME DATABASE
+    // ============================================================
+    private void cargarListasProhibidas() {
+        if (institutoId == null) return;
+        
+        DatabaseReference instRef = mDatabase.child("instituciones").child(institutoId).child("config");
+        
+        instRef.addListenerForSingleValueEvent(new ValueEventListener() {
+            @Override
+            public void onDataChange(DataSnapshot snapshot) {
+                // Palabras prohibidas
+                DataSnapshot palabrasSnap = snapshot.child("palabras_prohibidas");
+                if (palabrasSnap.exists()) {
+                    for (DataSnapshot palabra : palabrasSnap.getChildren()) {
+                        palabrasProhibidas.add(palabra.getValue(String.class).toLowerCase());
+                    }
+                }
+                
+                // Sitios prohibidos
+                DataSnapshot sitiosSnap = snapshot.child("blacklist");
+                if (sitiosSnap.exists()) {
+                    for (DataSnapshot sitio : sitiosSnap.getChildren()) {
+                        sitiosProhibidos.add(sitio.getValue(String.class).toLowerCase());
+                    }
+                }
+                
+                // Apps prohibidas
+                DataSnapshot appsSnap = snapshot.child("apps_prohibidas");
+                if (appsSnap.exists()) {
+                    for (DataSnapshot app : appsSnap.getChildren()) {
+                        appsProhibidas.add(app.getValue(String.class).toLowerCase());
+                    }
+                }
+                
+                Log.d(TAG, "📋 Listas cargadas: " + palabrasProhibidas.size() + " palabras, " +
+                      sitiosProhibidos.size() + " sitios, " + appsProhibidas.size() + " apps");
+            }
+
+            @Override
+            public void onCancelled(DatabaseError error) {
+                Log.e(TAG, "Error cargando listas: " + error.getMessage());
+            }
+        });
+    }
+
+    // ============================================================
+    // CONFIGURACIÓN LOCAL
     // ============================================================
     private void cargarConfiguracionLocal() {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        
-        // Leer configuración guardada por el selector web
         String appConfig = prefs.getString("app_config", null);
+        
         if (appConfig != null) {
             try {
                 JSONObject config = new JSONObject(appConfig);
                 serverMode = config.optString("mode", "cloud");
                 serverUrl = config.optString("url", "");
                 
-                Log.d(TAG, "📡 Configuración cargada: modo=" + serverMode + ", url=" + serverUrl);
+                Log.d(TAG, "📡 Configuración: modo=" + serverMode + ", url=" + serverUrl);
                 
-                // Si es modo local, conectar WebSocket
                 if (serverMode.equals("local") && !serverUrl.isEmpty()) {
                     conectarWebSocketLocal();
                 }
@@ -128,7 +185,6 @@ public class MonitorService extends AccessibilityService {
     private void conectarWebSocketLocal() {
         if (serverUrl.isEmpty() || deviceDocId == null) return;
         
-        // Limpiar URL (quitar http://, dejar solo IP:puerto)
         String wsUrl = serverUrl.replace("http://", "ws://").replace("https://", "wss://");
         String fullUrl = wsUrl + "?deviceId=" + deviceDocId;
         
@@ -138,9 +194,7 @@ public class MonitorService extends AccessibilityService {
         localWebSocket = client.newWebSocket(request, new WebSocketListener() {
             @Override
             public void onOpen(WebSocket webSocket, okhttp3.Response response) {
-                Log.d(TAG, "✅ WebSocket local conectado: " + wsUrl);
-                
-                // Enviar heartbeat inicial
+                Log.d(TAG, "✅ WebSocket local conectado");
                 try {
                     JSONObject hello = new JSONObject();
                     hello.put("type", "register");
@@ -148,23 +202,19 @@ public class MonitorService extends AccessibilityService {
                     hello.put("alumno", alumnoActual);
                     webSocket.send(hello.toString());
                 } catch (JSONException e) {
-                    Log.e(TAG, "Error en registro WebSocket: " + e.getMessage());
+                    Log.e(TAG, "Error en registro: " + e.getMessage());
                 }
             }
 
             @Override
             public void onMessage(WebSocket webSocket, String text) {
-                Log.d(TAG, "📨 Mensaje recibido: " + text);
-                
-                // Procesar comandos desde el servidor local
+                Log.d(TAG, "📨 Mensaje: " + text);
                 try {
                     JSONObject msg = new JSONObject(text);
-                    String type = msg.optString("type");
-                    
-                    if ("comando".equals(type)) {
+                    if ("comando".equals(msg.optString("type"))) {
                         String comando = msg.optString("comando");
                         if ("bloquear".equals(comando)) {
-                            ejecutarBloqueoLocal();
+                            adminMode = false;
                         } else if ("desbloquear".equals(comando)) {
                             adminMode = true;
                         }
@@ -176,42 +226,20 @@ public class MonitorService extends AccessibilityService {
 
             @Override
             public void onClosed(WebSocket webSocket, int code, String reason) {
-                Log.d(TAG, "WebSocket cerrado: " + reason);
-                // Reintentar después de 5 segundos
+                Log.d(TAG, "WebSocket cerrado, reconectando...");
                 new android.os.Handler().postDelayed(() -> {
-                    if (serverMode.equals("local")) {
-                        conectarWebSocketLocal();
-                    }
+                    if (serverMode.equals("local")) conectarWebSocketLocal();
                 }, 5000);
             }
 
             @Override
             public void onFailure(WebSocket webSocket, Throwable t, okhttp3.Response response) {
                 Log.e(TAG, "❌ Error WebSocket: " + t.getMessage());
-                // Reintentar después de 10 segundos
                 new android.os.Handler().postDelayed(() -> {
-                    if (serverMode.equals("local")) {
-                        conectarWebSocketLocal();
-                    }
+                    if (serverMode.equals("local")) conectarWebSocketLocal();
                 }, 10000);
             }
         });
-    }
-
-    private void ejecutarBloqueoLocal() {
-        adminMode = false;
-        
-        // Notificar al servidor local
-        if (localWebSocket != null && serverMode.equals("local")) {
-            try {
-                JSONObject notif = new JSONObject();
-                notif.put("type", "bloqueado");
-                notif.put("deviceId", deviceDocId);
-                localWebSocket.send(notif.toString());
-            } catch (JSONException e) {
-                Log.e(TAG, "Error notificando bloqueo: " + e.getMessage());
-            }
-        }
     }
 
     // ============================================================
@@ -225,17 +253,21 @@ public class MonitorService extends AccessibilityService {
             public void onDataChange(DataSnapshot snapshot) {
                 Boolean enabled = snapshot.getValue(Boolean.class);
                 adminMode = (enabled != null && enabled);
-                Log.d(TAG, "ESTADO TÉCNICO: " + (adminMode ? "LIBERADO" : "PROTEGIDO"));
                 
-                // Registrar cambio de modo como alerta
-                if (enabled != null && enabled) {
-                    registrarAlertaConLimite("MODO_TECNICO", "Acceso técnico activado", "");
+                if (adminMode) {
+                    Log.w(TAG, "🔓 MODO TÉCNICO ACTIVADO - TODAS LAS FUNCIONES SUSPENDIDAS");
+                    Toast.makeText(MonitorService.this, 
+                        "🔓 MODO TÉCNICO - Monitor suspendido", Toast.LENGTH_SHORT).show();
+                } else {
+                    Log.i(TAG, "🔒 MODO TÉCNICO DESACTIVADO - Monitor activo");
+                    Toast.makeText(MonitorService.this, 
+                        "🔒 Monitor de seguridad activado", Toast.LENGTH_SHORT).show();
                 }
             }
 
             @Override
             public void onCancelled(DatabaseError error) {
-                Log.e(TAG, "Error en listener RTDB: " + error.getMessage());
+                Log.e(TAG, "Error en listener: " + error.getMessage());
             }
         };
         
@@ -243,14 +275,184 @@ public class MonitorService extends AccessibilityService {
     }
 
     // ============================================================
-    // GESTIÓN DE ALERTAS (HÍBRIDO: RTDB + WebSocket Local)
+    // PROCESAMIENTO DE EVENTOS (CORAZÓN DEL SISTEMA)
+    // ============================================================
+    @Override
+    public void onAccessibilityEvent(AccessibilityEvent event) {
+        // SI MODO TÉCNICO ESTÁ ACTIVADO, NO HACER NADA
+        if (adminMode || !isServiceActive || deviceDocId == null) return;
+
+        int type = event.getEventType();
+        String packageName = event.getPackageName() != null ? event.getPackageName().toString() : "";
+        
+        // ========================================================
+        // 1. DETECTAR APPS PROHIBIDAS Y CONFIGURACIÓN
+        // ========================================================
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            // CONFIGURACIÓN - SIEMPRE PROHIBIDA (expulsión inmediata)
+            if (packageName.contains("settings") || 
+                packageName.contains("configuración") ||
+                packageName.contains("com.android.settings")) {
+                expulsarConMensaje("INTENTO_AJUSTES", 
+                    "Acceso a configuración bloqueado - Contacte al administrador");
+                return;
+            }
+            
+            // APPS PROHIBIDAS
+            for (String appProhibida : appsProhibidas) {
+                if (packageName.contains(appProhibida)) {
+                    expulsarConMensaje("APP_PROHIBIDA", 
+                        "App no permitida: " + appProhibida);
+                    return;
+                }
+            }
+        }
+        
+        // ========================================================
+        // 2. CAPTURAR TEXTO INGRESADO (sin expulsar aún)
+        // ========================================================
+        if (type == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED && esNavegador(packageName)) {
+            capturarTextoIngresado(event, packageName);
+        }
+        
+        // ========================================================
+        // 3. DETECTAR ACCIÓN DE BÚSQUEDA (CLICK O ENTER)
+        // ========================================================
+        if (type == AccessibilityEvent.TYPE_VIEW_CLICKED && esNavegador(packageName)) {
+            procesarBusqueda(packageName);
+        }
+        
+        // ========================================================
+        // 4. REPORTAR URL ACTUAL (funcionalidad existente)
+        // ========================================================
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && esNavegador(packageName)) {
+            String url = extraerUrl(event);
+            if (url != null && !url.isEmpty()) {
+                actualizarUrlActual(url);
+            }
+        }
+    }
+
+    // ============================================================
+    // CAPTURAR TEXTO INGRESADO (SIN EXPULSAR)
+    // ============================================================
+    private void capturarTextoIngresado(AccessibilityEvent event, String packageName) {
+        AccessibilityNodeInfo source = event.getSource();
+        if (source != null) {
+            CharSequence text = source.getText();
+            if (text != null && text.length() > 0) {
+                ultimoTextoIngresado = text.toString();
+                paqueteNavegadorActual = packageName;
+                Log.d(TAG, "📝 Texto capturado: " + ultimoTextoIngresado);
+            }
+            source.recycle();
+        }
+    }
+
+    // ============================================================
+    // PROCESAR BÚSQUEDA (SOLO AL HACER CLICK)
+    // ============================================================
+    private void procesarBusqueda(String packageName) {
+        if (ultimoTextoIngresado.isEmpty()) return;
+        
+        // Evitar expulsiones múltiples en poco tiempo
+        long ahora = System.currentTimeMillis();
+        if (ahora - ultimaExpulsionTime < EXPULSION_COOLDOWN) return;
+        
+        String textoLower = ultimoTextoIngresado.toLowerCase();
+        
+        // Verificar palabras prohibidas
+        for (String palabra : palabrasProhibidas) {
+            if (textoLower.contains(palabra)) {
+                ultimaExpulsionTime = ahora;
+                expulsarConMensaje("PALABRA_PROHIBIDA", 
+                    "Búsqueda con término prohibido: " + palabra);
+                return;
+            }
+        }
+        
+        // Verificar sitios prohibidos (para búsquedas que son URLs)
+        for (String sitio : sitiosProhibidos) {
+            if (textoLower.contains(sitio)) {
+                ultimaExpulsionTime = ahora;
+                expulsarConMensaje("SITIO_BLOQUEADO", 
+                    "Intento de acceso a sitio restringido");
+                return;
+            }
+        }
+    }
+
+    // ============================================================
+    // EXPULSIÓN CON MENSAJE (CORAZÓN DEL SISTEMA)
+    // ============================================================
+    private void expulsarConMensaje(String tipo, String descripcion) {
+        Log.w(TAG, "🚫 EXPULSIÓN: " + tipo + " - " + descripcion);
+        
+        // 1. Mostrar mensaje Toast
+        Toast.makeText(
+            this,
+            "🚫 ACCESO PROHIBIDO - EDUControlPro",
+            Toast.LENGTH_SHORT
+        ).show();
+        
+        // 2. Registrar alerta
+        registrarAlertaConLimite(tipo, descripcion, "");
+        
+        // 3. Expulsar al escritorio
+        Intent homeIntent = new Intent(Intent.ACTION_MAIN);
+        homeIntent.addCategory(Intent.CATEGORY_HOME);
+        homeIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(homeIntent);
+        
+        // 4. Limpiar campo de búsqueda después de expulsar
+        new android.os.Handler().postDelayed(this::limpiarCampoBusqueda, 500);
+    }
+
+    // ============================================================
+    // LIMPIAR CAMPO DE BÚSQUEDA
+    // ============================================================
+    private void limpiarCampoBusqueda() {
+        if (paqueteNavegadorActual.isEmpty()) return;
+        
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root != null) {
+                limpiarNodos(root);
+                root.recycle();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error limpiando campo: " + e.getMessage());
+        }
+        
+        ultimoTextoIngresado = "";
+        Log.d(TAG, "🧹 Campo de búsqueda limpiado");
+    }
+
+    private void limpiarNodos(AccessibilityNodeInfo node) {
+        if (node == null) return;
+        
+        if (node.getClassName() != null && 
+            (node.getClassName().toString().contains("EditText") ||
+             node.getClassName().toString().contains("UrlBar") ||
+             node.getClassName().toString().contains("SearchBox"))) {
+            
+            node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, null);
+        }
+        
+        for (int i = 0; i < node.getChildCount(); i++) {
+            limpiarNodos(node.getChild(i));
+        }
+    }
+
+    // ============================================================
+    // REGISTRO DE ALERTAS
     // ============================================================
     private void registrarAlertaConLimite(String tipo, String descripcion, String detalle) {
         if (deviceDocId == null) return;
         
         long timestamp = System.currentTimeMillis();
         
-        // 1. Si está en modo local, enviar por WebSocket
+        // 1. WebSocket local si aplica
         if (serverMode.equals("local") && localWebSocket != null) {
             try {
                 JSONObject alertaWS = new JSONObject();
@@ -258,18 +460,16 @@ public class MonitorService extends AccessibilityService {
                 alertaWS.put("deviceId", deviceDocId);
                 alertaWS.put("tipo", tipo);
                 alertaWS.put("descripcion", descripcion);
-                alertaWS.put("detalle", detalle);
                 alertaWS.put("timestamp", timestamp);
                 alertaWS.put("alumno", alumnoActual);
-                
                 localWebSocket.send(alertaWS.toString());
-                Log.d(TAG, "📤 Alerta enviada por WebSocket local");
+                Log.d(TAG, "📤 Alerta enviada por WebSocket");
             } catch (JSONException e) {
-                Log.e(TAG, "Error enviando alerta por WebSocket: " + e.getMessage());
+                Log.e(TAG, "Error en WebSocket: " + e.getMessage());
             }
         }
         
-        // 2. SIEMPRE guardar en RTDB (backup)
+        // 2. RTDB
         String key = String.valueOf(timestamp);
         DatabaseReference alertaRef = mDatabase
             .child("alertas")
@@ -288,12 +488,12 @@ public class MonitorService extends AccessibilityService {
         
         alertaRef.setValue(alerta)
             .addOnSuccessListener(aVoid -> {
-                Log.d(TAG, "Alerta registrada en RTDB: " + tipo);
+                Log.d(TAG, "Alerta registrada: " + tipo);
                 mantenerUltimasNAlertas(MAX_ALERTAS_POR_DISPOSITIVO);
             })
             .addOnFailureListener(e -> Log.e(TAG, "Error registrando alerta: " + e.getMessage()));
         
-        // 3. Backup a Firestore (solo una vez al día)
+        // 3. Backup a Firestore (diario)
         long ahora = System.currentTimeMillis();
         if (ahora - ultimoBackupFirestore > BACKUP_INTERVAL) {
             backupAlertasFirestore();
@@ -301,52 +501,39 @@ public class MonitorService extends AccessibilityService {
         }
     }
 
+    // ============================================================
+    // MÉTODOS EXISTENTES (sin cambios)
+    // ============================================================
     private void mantenerUltimasNAlertas(int maxAlertas) {
         DatabaseReference alertasRef = mDatabase.child("alertas").child(deviceDocId);
-        
         alertasRef.orderByChild("timestamp").addListenerForSingleValueEvent(new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
                 long totalAlertas = snapshot.getChildrenCount();
-                
                 if (totalAlertas > maxAlertas) {
                     long aBorrar = totalAlertas - maxAlertas;
                     long contador = 0;
-                    
                     for (DataSnapshot child : snapshot.getChildren()) {
                         if (contador < aBorrar) {
-                            child.getRef().removeValue()
-                                .addOnSuccessListener(aVoid -> 
-                                    Log.d(TAG, "Alerta antigua eliminada: " + child.getKey()))
-                                .addOnFailureListener(e -> 
-                                    Log.e(TAG, "Error eliminando alerta: " + e.getMessage()));
+                            child.getRef().removeValue();
                             contador++;
-                        } else {
-                            break;
-                        }
+                        } else break;
                     }
-                    Log.d(TAG, "Limpieza completada: " + aBorrar + " alertas eliminadas");
+                    Log.d(TAG, "Limpieza: " + aBorrar + " alertas eliminadas");
                 }
             }
-
-            @Override
-            public void onCancelled(DatabaseError error) {
-                Log.e(TAG, "Error en limpieza de alertas: " + error.getMessage());
-            }
+            @Override public void onCancelled(DatabaseError error) {}
         });
     }
 
     private void limpiarAlertasAntiguas() {
         DatabaseReference alertasRef = mDatabase.child("alertas").child(deviceDocId);
-        
-        // Eliminar alertas de más de 7 días
         long hace7Dias = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000);
         
         alertasRef.orderByChild("timestamp").addListenerForSingleValueEvent(new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
                 int eliminadas = 0;
-                
                 for (DataSnapshot child : snapshot.getChildren()) {
                     Long timestamp = child.child("timestamp").getValue(Long.class);
                     if (timestamp != null && timestamp < hace7Dias) {
@@ -354,19 +541,12 @@ public class MonitorService extends AccessibilityService {
                         eliminadas++;
                     }
                 }
-                
                 if (eliminadas > 0) {
-                    Log.d(TAG, "Limpieza por antigüedad: " + eliminadas + " alertas eliminadas");
+                    Log.d(TAG, "Limpieza antigüedad: " + eliminadas + " alertas");
                 }
-                
-                // Luego aplicar límite de cantidad
                 mantenerUltimasNAlertas(MAX_ALERTAS_POR_DISPOSITIVO);
             }
-
-            @Override
-            public void onCancelled(DatabaseError error) {
-                Log.e(TAG, "Error en limpieza por antigüedad: " + error.getMessage());
-            }
+            @Override public void onCancelled(DatabaseError error) {}
         });
     }
 
@@ -381,82 +561,13 @@ public class MonitorService extends AccessibilityService {
                     Map<String, Object> alerta = (Map<String, Object>) alertaSnap.getValue();
                     if (alerta != null) {
                         alerta.put("backupTimestamp", FieldValue.serverTimestamp());
-                        
-                        firestore.collection("alertas_historicas")
-                            .add(alerta)
-                            .addOnFailureListener(e -> Log.e(TAG, "Error backup Firestore: " + e.getMessage()));
+                        firestore.collection("alertas_historicas").add(alerta);
                     }
                 }
-                Log.d(TAG, "Backup de alertas completado");
+                Log.d(TAG, "Backup completado");
             }
-
-            @Override
-            public void onCancelled(DatabaseError error) {
-                Log.e(TAG, "Error leyendo alertas para backup: " + error.getMessage());
-            }
+            @Override public void onCancelled(DatabaseError error) {}
         });
-    }
-
-    // ============================================================
-    // PROCESAMIENTO DE EVENTOS DE ACCESIBILIDAD
-    // ============================================================
-    @Override
-    public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (!isServiceActive || deviceDocId == null || adminMode) return;
-
-        int type = event.getEventType();
-        
-        // Detectar intentos de abrir Configuración
-        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            CharSequence packageName = event.getPackageName();
-            if (packageName != null && packageName.toString().contains("settings")) {
-                registrarAlertaConLimite(
-                    "INTENTO_AJUSTES",
-                    "Acceso denegado a configuración",
-                    packageName.toString()
-                );
-            }
-        }
-        
-        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
-            type == AccessibilityEvent.TYPE_VIEW_CLICKED ||
-            type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
-            
-            procesarEvento(event);
-        }
-    }
-
-    private void procesarEvento(AccessibilityEvent event) {
-        try {
-            CharSequence packageName = event.getPackageName();
-            if (packageName == null) return;
-            
-            String packageStr = packageName.toString();
-            String url = null;
-            
-            // Filtro de navegadores
-            if (packageStr.contains("chrome") || packageStr.contains("browser") ||
-                packageStr.contains("firefox") || packageStr.contains("opera") ||
-                packageStr.contains("edge") || packageStr.contains("samsung.android.app.sbrowser")) {
-                
-                url = extraerUrl(event);
-            }
-            
-            if (url != null && !url.isEmpty()) {
-                actualizarUrlActual(url);
-                
-                // Detectar sitios bloqueados
-                if (url.contains("facebook") || url.contains("tiktok") || url.contains("instagram")) {
-                    registrarAlertaConLimite(
-                        "SITIO_BLOQUEADO",
-                        "Intento de acceso a sitio restringido",
-                        url
-                    );
-                }
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error procesando navegación: " + e.getMessage());
-        }
     }
 
     private String extraerUrl(AccessibilityEvent event) {
@@ -521,17 +632,14 @@ public class MonitorService extends AccessibilityService {
         if (url.startsWith("http://")) url = url.substring(7);
         if (url.startsWith("https://")) url = url.substring(8);
         if (url.startsWith("www.")) url = url.substring(4);
-        
         int queryIndex = url.indexOf('?');
         if (queryIndex > 0) url = url.substring(0, queryIndex);
-        
         if (url.length() > 100) url = url.substring(0, 100);
         return url;
     }
 
     private void startHeartbeat() {
         if (heartbeatTimer != null) heartbeatTimer.cancel();
-        
         heartbeatTimer = new Timer();
         heartbeatTimer.scheduleAtFixedRate(new TimerTask() {
             @Override
@@ -543,10 +651,8 @@ public class MonitorService extends AccessibilityService {
 
     private void enviarHeartbeat() {
         if (deviceDocId == null || !isServiceActive) return;
-        
         long ahora = System.currentTimeMillis();
-        
-        if (ahora - ultimoHeartbeatExitoso < 20000) return; 
+        if (ahora - ultimoHeartbeatExitoso < 20000) return;
         
         Map<String, Object> heartbeat = new HashMap<>();
         heartbeat.put("ultimoHeartbeat", ServerValue.TIMESTAMP);
@@ -558,6 +664,15 @@ public class MonitorService extends AccessibilityService {
                 ultimoHeartbeatExitoso = ahora;
                 Log.d(TAG, "Heartbeat OK");
             });
+    }
+
+    private boolean esNavegador(String packageName) {
+        return packageName.contains("chrome") || 
+               packageName.contains("browser") ||
+               packageName.contains("firefox") || 
+               packageName.contains("opera") ||
+               packageName.contains("edge") || 
+               packageName.contains("samsung.android.app.sbrowser");
     }
 
     @Override
@@ -580,7 +695,6 @@ public class MonitorService extends AccessibilityService {
             heartbeatTimer = null;
         }
         
-        // Cerrar WebSocket local
         if (localWebSocket != null) {
             localWebSocket.close(1000, "Service destroyed");
             localWebSocket = null;
@@ -599,11 +713,12 @@ public class MonitorService extends AccessibilityService {
         AccessibilityServiceInfo info = new AccessibilityServiceInfo();
         info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED |
                          AccessibilityEvent.TYPE_VIEW_CLICKED |
+                         AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED |
                          AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED;
         info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
         info.flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
         info.notificationTimeout = 100;
         setServiceInfo(info);
-        Log.d(TAG, "Accesibilidad configurada");
+        Log.d(TAG, "MonitorService configurado");
     }
 }
