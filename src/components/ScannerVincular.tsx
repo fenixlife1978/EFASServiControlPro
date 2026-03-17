@@ -67,9 +67,10 @@ export default function ScannerVincular() {
       const info = await Device.getInfo();
       const idHardware = await Device.getId();
 
-      // FIRESTORE
+      // --- FIRESTORE ---
       const deviceRef = doc(db, 'dispositivos', deviceId);
       try {
+        console.log('📝 Escribiendo en Firestore:', deviceId);
         await setDoc(deviceRef, {
           vinculado: true,
           status: 'active',
@@ -82,18 +83,16 @@ export default function ScannerVincular() {
             marca: info.manufacturer,
             uuid: idHardware.identifier,
           },
+          createdAt: new Date().toISOString()
         }, { merge: true });
+        console.log('✅ Firestore OK');
       } catch (e: any) {
-        if (e.code === 'permission-denied') {
-          errorEmitter.emit('permission-error', new FirestorePermissionError({
-            path: `dispositivos/${deviceId}`,
-            operation: 'write',
-          }));
-        }
-        throw e;
+        console.error('❌ Error en Firestore:', e);
+        setError(`Error Firestore: ${e.code} - ${e.message}`);
+        throw e; // Detenemos el proceso para que el error se muestre
       }
 
-      // REALTIME DATABASE
+      // --- REALTIME DATABASE ---
       const rtdbDeviceRef = ref(rtdb, `dispositivos/${deviceId}`);
       try {
         await set(rtdbDeviceRef, {
@@ -107,11 +106,8 @@ export default function ScannerVincular() {
           seccion: data.seccion || '',
         });
       } catch (e: any) {
-        errorEmitter.emit('rtdb-permission-error', new RTDBPermissionError({
-          path: `dispositivos/${deviceId}`,
-          operation: 'write',
-          requestResourceData: { online: true },
-        }));
+        console.error('❌ Error en RTDB:', e);
+        setError(`Error RTDB: ${e.message || e.code}`);
         throw e;
       }
 
@@ -125,7 +121,7 @@ export default function ScannerVincular() {
             model: info.model,
           });
         } catch (e: any) {
-          console.warn('Error en control_sedes:', e);
+          console.warn('⚠️ Error en control_sedes:', e);
         }
       }
 
@@ -134,7 +130,7 @@ export default function ScannerVincular() {
         window.location.href = '/';
       }, 1500);
     } catch (e: any) {
-      console.error('Error crítico:', e);
+      console.error('🔥 Error crítico:', e);
       setError(e.message || 'Error al vincular');
     } finally {
       setIsScanning(false);
@@ -163,7 +159,7 @@ export default function ScannerVincular() {
         {error ? (
           <div className="bg-red-500/10 border border-red-500/30 rounded-3xl p-6 mb-6">
             <p className="text-red-500 text-[11px] font-bold uppercase mb-2">⚠️ ERROR</p>
-            <p className="text-slate-400 text-[10px] break-words">{error}</p>
+            <p className="text-slate-400 text-[10px] break-words whitespace-pre-wrap">{error}</p>
           </div>
         ) : (
           <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-8">

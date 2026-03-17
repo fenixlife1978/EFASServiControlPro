@@ -16,11 +16,11 @@ interface WebHistory {
 interface WebHistoryModalProps {
   isOpen: boolean;
   onClose: () => void;
-  tabletId: string;
+  deviceId: string;          // Cambiado de tabletId a deviceId
   alumnoNombre: string;
 }
 
-export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: WebHistoryModalProps) {
+export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre }: WebHistoryModalProps) {
   const [history, setHistory] = useState<WebHistory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -33,12 +33,12 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
   const [fechaFin, setFechaFin] = useState<string>('');
 
   useEffect(() => {
-    if (!isOpen || !tabletId) return;
+    if (!isOpen || !deviceId) return;
     setLoading(true);
 
     const q = query(
       collection(db, 'web_history'),
-      where('deviceId', '==', tabletId),
+      where('deviceId', '==', deviceId),
       orderBy('timestamp', 'desc'),
       limit(100) 
     );
@@ -56,7 +56,7 @@ export function WebHistoryModal({ isOpen, onClose, tabletId, alumnoNombre }: Web
     });
 
     return () => unsubscribe();
-  }, [isOpen, tabletId]);
+  }, [isOpen, deviceId]);
 
   const filteredHistory = useMemo(() => {
     let result = history;

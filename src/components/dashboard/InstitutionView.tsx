@@ -8,22 +8,24 @@ import {
 } from 'firebase/firestore';
 import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
 import { 
-  ShieldAlert, Activity, Users, LogOut, Lock, Search, MessageSquare, 
+  ShieldAlert, Activity, LogOut, Lock, Search, MessageSquare, 
   Plus, DoorOpen, Globe, ArrowLeft, Settings, Trash2, Zap, Smartphone, 
-  User, Unlock, RefreshCcw, ShieldCheck, Edit3
+  User, Unlock, RefreshCcw, ShieldCheck, Edit3, List, AlertTriangle
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { toast } from 'sonner';
 import { GlobalControls } from '@/components/admin/config/GlobalControls';
 import { WebHistoryModal } from '@/components/admin/monitoring/WebHistoryModal';
-import { SecurityRules } from '@/components/admin/config/SecurityRules';
+import { SecurityAnalytics } from '@/components/admin/config/SecurityAnalytics'; // <-- NUEVO componente
+import { WhitelistRules } from '@/components/admin/config/WhitelistRules';
+import { BlockedAttempts } from '@/components/admin/monitoring/BlockedAttempts';
 
 export default function InstitutionView() {
   const { institutionId, setInstitutionId } = useInstitution();
   const [institutionName, setInstitutionName] = useState('Cargando...');
   const [instData, setInstData] = useState<any>({ direccion: '', telefono: '' });
-  const [activeSection, setActiveSection] = useState<'dashboard' | 'monitoring' | 'users' | 'settings' | 'security'>('dashboard');
-  const [historyModal, setHistoryModal] = useState({ isOpen: false, tabletId: '', alumnoNombre: '' });
+  const [activeSection, setActiveSection] = useState<'dashboard' | 'settings' | 'security' | 'lists' | 'blocked'>('dashboard');
+  const [historyModal, setHistoryModal] = useState({ isOpen: false, deviceId: '', alumnoNombre: '' });
   const [aulas, setAulas] = useState<any[]>([]);
   const [tablets, setTablets] = useState<any[]>([]);
   const [selectedAula, setSelectedAula] = useState<any>(null);
@@ -202,8 +204,9 @@ export default function InstitutionView() {
         <div className="flex-1 flex flex-col gap-6 pt-10">
           <button onClick={() => { setActiveSection('dashboard'); setSelectedAula(null); }} className={`p-3 rounded-xl transition-all ${activeSection === 'dashboard' ? 'text-orange-500 bg-orange-500/10' : 'text-slate-600 hover:text-white'}`}><Activity className="w-5 h-5" /></button>
           <button onClick={() => setActiveSection('security')} className={`p-3 rounded-xl transition-all ${activeSection === 'security' ? 'text-orange-500 bg-orange-500/10' : 'text-slate-600 hover:text-white'}`}><ShieldCheck className="w-5 h-5" /></button>
-          <button onClick={() => setActiveSection('users')} className={`p-3 rounded-xl transition-all ${activeSection === 'users' ? 'text-orange-500 bg-orange-500/10' : 'text-slate-600 hover:text-white'}`}><Users className="w-5 h-5" /></button>
           <button onClick={() => setActiveSection('settings')} className={`p-3 rounded-xl transition-all ${activeSection === 'settings' ? 'text-orange-500 bg-orange-500/10' : 'text-slate-600 hover:text-white'}`}><Settings className="w-5 h-5" /></button>
+          <button onClick={() => setActiveSection('lists')} className={`p-3 rounded-xl transition-all ${activeSection === 'lists' ? 'text-orange-500 bg-orange-500/10' : 'text-slate-600 hover:text-white'}`}><List className="w-5 h-5" /></button>
+          <button onClick={() => setActiveSection('blocked')} className={`p-3 rounded-xl transition-all ${activeSection === 'blocked' ? 'text-orange-500 bg-orange-500/10' : 'text-slate-600 hover:text-white'}`}><AlertTriangle className="w-5 h-5" /></button>
         </div>
         <button onClick={() => signOut(auth)} className="p-3 text-slate-600 hover:text-red-500 transition-colors"><LogOut className="w-5 h-5" /></button>
       </nav>
@@ -329,7 +332,7 @@ export default function InstitutionView() {
                                 <Edit3 size={16}/>
                               </button>
                               <button 
-                                onClick={() => setHistoryModal({ isOpen: true, tabletId: alumno.id, alumnoNombre: alumno.alumno_asignado || alumno.id })} 
+                                onClick={() => setHistoryModal({ isOpen: true, deviceId: alumno.id, alumnoNombre: alumno.alumno_asignado || alumno.id })} 
                                 className="p-3 bg-slate-800 hover:bg-orange-500 text-slate-400 hover:text-white rounded-xl transition-all"
                                 title="Ver Historial Web"
                               >
@@ -368,8 +371,9 @@ export default function InstitutionView() {
                 </div>
               )}
 
-              {activeSection === 'security' && <SecurityRules institutionId={institutionId!} />}
-              {activeSection === 'users' && <div className="text-center py-20 uppercase font-black italic text-slate-700">Módulo de Usuarios en Construcción</div>}
+              {activeSection === 'security' && <SecurityAnalytics />}
+              {activeSection === 'lists' && <WhitelistRules />}
+              {activeSection === 'blocked' && <BlockedAttempts />}
             </div>
           </div>
         </div>
@@ -397,7 +401,7 @@ export default function InstitutionView() {
         <WebHistoryModal 
           isOpen={historyModal.isOpen} 
           onClose={() => setHistoryModal({ ...historyModal, isOpen: false })} 
-          tabletId={historyModal.tabletId} 
+          deviceId={historyModal.deviceId} 
           alumnoNombre={historyModal.alumnoNombre} 
         />
       )}

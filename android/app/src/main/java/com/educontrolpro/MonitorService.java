@@ -59,15 +59,18 @@ public class MonitorService extends AccessibilityService {
     private boolean isServiceActive = true;
     private boolean adminMode = false;
 
+    // Listas prohibidas
     private Set<String> palabrasProhibidas = new HashSet<>();
     private Set<String> sitiosProhibidos = new HashSet<>();
     private Set<String> appsProhibidas = new HashSet<>();
 
+    // Control de búsquedas
     private String ultimoTextoIngresado = "";
     private String paqueteNavegadorActual = "";
     private long ultimaExpulsionTime = 0;
     private static final long EXPULSION_COOLDOWN = 2000;
 
+    // Optimización
     private static final long HEARTBEAT_INTERVAL = 30000;
     private static final long WRITE_DELAY = 5000;
     private static final long BACKUP_INTERVAL = 86400000;
@@ -78,6 +81,9 @@ public class MonitorService extends AccessibilityService {
     private Timer heartbeatTimer;
     private long ultimoHeartbeatExitoso = 0;
     private long ultimoBackupFirestore = 0;
+
+    // Timer para recargar listas cada 5 minutos
+    private Timer recargaListasTimer;
 
     @Override
     public void onCreate() {
@@ -97,13 +103,25 @@ public class MonitorService extends AccessibilityService {
             cargarConfiguracionLocal();
             iniciarListenerControl();
             cargarListasProhibidas();
+            // Recargar listas cada 5 minutos para reflejar cambios en la blacklist
+            iniciarRecargaPeriodica();
             startHeartbeat();
             limpiarAlertasAntiguas();
         }
     }
 
+    private void iniciarRecargaPeriodica() {
+        recargaListasTimer = new Timer();
+        recargaListasTimer.scheduleAtFixedRate(new TimerTask() {
+            @Override
+            public void run() {
+                cargarListasProhibidas();
+            }
+        }, 300000, 300000); // 5 minutos
+    }
+
     // ============================================================
-    // CONFIGURACIÓN LOCAL (para servidor propio)
+    // CONFIGURACIÓN LOCAL
     // ============================================================
     private void cargarConfiguracionLocal() {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -219,7 +237,7 @@ public class MonitorService extends AccessibilityService {
     }
 
     // ============================================================
-    // CARGAR LISTAS PROHIBIDAS
+    // CARGAR LISTAS PROHIBIDAS (con logs mejorados)
     // ============================================================
     private void cargarListasProhibidas() {
         if (institutoId == null) return;
@@ -229,29 +247,64 @@ public class MonitorService extends AccessibilityService {
         instRef.addListenerForSingleValueEvent(new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
+                palabrasProhibidas.clear();
+                sitiosProhibidos.clear();
+                appsProhibidas.clear();
+
+                // 1. Palabras prohibidas (array específico)
                 DataSnapshot palabrasSnap = snapshot.child("palabras_prohibidas");
                 if (palabrasSnap.exists()) {
                     for (DataSnapshot palabra : palabrasSnap.getChildren()) {
-                        palabrasProhibidas.add(palabra.getValue(String.class).toLowerCase());
+                        String valor = palabra.getValue(String.class);
+                        if (valor != null) {
+                            palabrasProhibidas.add(valor.toLowerCase());
+                        }
                     }
+                    Log.d(TAG, "📋 Palabras prohibidas (específicas): " + palabrasProhibidas.size());
+                } else {
+                    Log.d(TAG, "⚠️ No hay campo 'palabras_prohibidas'");
                 }
 
-                DataSnapshot sitiosSnap = snapshot.child("blacklist");
-                if (sitiosSnap.exists()) {
-                    for (DataSnapshot sitio : sitiosSnap.getChildren()) {
-                        sitiosProhibidos.add(sitio.getValue(String.class).toLowerCase());
-                    }
-                }
-
+                // 2. Apps prohibidas (array específico)
                 DataSnapshot appsSnap = snapshot.child("apps_prohibidas");
                 if (appsSnap.exists()) {
                     for (DataSnapshot app : appsSnap.getChildren()) {
-                        appsProhibidas.add(app.getValue(String.class).toLowerCase());
+                        String valor = app.getValue(String.class);
+                        if (valor != null) {
+                            appsProhibidas.add(valor.toLowerCase());
+                        }
                     }
+                    Log.d(TAG, "📋 Apps prohibidas: " + appsProhibidas);
+                } else {
+                    Log.d(TAG, "⚠️ No hay campo 'apps_prohibidas'");
                 }
 
-                Log.d(TAG, "📋 Listas cargadas: " + palabrasProhibidas.size() + " palabras, " +
-                        sitiosProhibidos.size() + " sitios, " + appsProhibidas.size() + " apps");
+                // 3. Blacklist (sitios) - también la usaremos para palabras y sitios
+                DataSnapshot sitiosSnap = snapshot.child("blacklist");
+                if (sitiosSnap.exists()) {
+                    for (DataSnapshot sitio : sitiosSnap.getChildren()) {
+                        String valor = sitio.getValue(String.class);
+                        if (valor != null) {
+                            String valorLower = valor.toLowerCase();
+                            sitiosProhibidos.add(valorLower);
+                            // Además, para búsquedas, añadimos cada elemento como palabra prohibida
+                            // (para bloquear búsquedas que contengan "facebook", "porno", etc.)
+                            palabrasProhibidas.add(valorLower);
+                        }
+                    }
+                    Log.d(TAG, "📋 Blacklist cargada: " + sitiosProhibidos.size() + " sitios");
+                } else {
+                    Log.d(TAG, "⚠️ No hay campo 'blacklist'");
+                }
+
+                Log.d(TAG, "📋 TOTAL: Palabras=" + palabrasProhibidas.size() +
+                        ", Sitios=" + sitiosProhibidos.size() +
+                        ", Apps=" + appsProhibidas.size());
+
+                // Mostrar algunos ejemplos para depuración
+                if (!palabrasProhibidas.isEmpty()) {
+                    Log.d(TAG, "Ejemplos palabras: " + palabrasProhibidas.iterator().next());
+                }
             }
 
             @Override
@@ -271,17 +324,28 @@ public class MonitorService extends AccessibilityService {
         int type = event.getEventType();
         String packageName = event.getPackageName() != null ? event.getPackageName().toString() : "";
 
+        // Log para depuración (opcional, comentar en producción)
+        // Log.d(TAG, "Evento: " + type + " paquete: " + packageName);
+
+        // ========================================================
+        // DETECTAR APPS PROHIBIDAS Y CONFIGURACIÓN
+        // ========================================================
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            // Configuración - siempre prohibida
             if (packageName.contains("settings") ||
                     packageName.contains("configuración") ||
                     packageName.contains("com.android.settings")) {
+                Log.i(TAG, "🔴 Intento de abrir Configuración: " + packageName);
                 expulsarConMensaje("INTENTO_AJUSTES",
                         "Acceso a configuración bloqueado - Contacte al administrador");
                 return;
             }
 
+            // Apps prohibidas
             for (String appProhibida : appsProhibidas) {
-                if (packageName.contains(appProhibida)) {
+                // Usamos startsWith para evitar falsos positivos (ej. "com.facebook.katana" vs "com.facebook.orca")
+                if (packageName.startsWith(appProhibida)) {
+                    Log.i(TAG, "🔴 App prohibida detectada: " + packageName + " (coincide con " + appProhibida + ")");
                     expulsarConMensaje("APP_PROHIBIDA",
                             "App no permitida: " + appProhibida);
                     return;
@@ -289,14 +353,23 @@ public class MonitorService extends AccessibilityService {
             }
         }
 
+        // ========================================================
+        // CAPTURAR TEXTO INGRESADO (solo en navegadores)
+        // ========================================================
         if (type == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED && esNavegador(packageName)) {
             capturarTextoIngresado(event, packageName);
         }
 
+        // ========================================================
+        // DETECTAR ACCIÓN DE BÚSQUEDA (CLICK O ENTER)
+        // ========================================================
         if (type == AccessibilityEvent.TYPE_VIEW_CLICKED && esNavegador(packageName)) {
             procesarBusqueda(packageName);
         }
 
+        // ========================================================
+        // REPORTAR URL ACTUAL (cuando cambia la ventana en navegador)
+        // ========================================================
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && esNavegador(packageName)) {
             String url = extraerUrl(event);
             if (url != null && !url.isEmpty()) {
@@ -305,6 +378,9 @@ public class MonitorService extends AccessibilityService {
         }
     }
 
+    // ============================================================
+    // CAPTURAR TEXTO INGRESADO
+    // ============================================================
     private void capturarTextoIngresado(AccessibilityEvent event, String packageName) {
         AccessibilityNodeInfo source = event.getSource();
         if (source != null) {
@@ -318,16 +394,28 @@ public class MonitorService extends AccessibilityService {
         }
     }
 
+    // ============================================================
+    // PROCESAR BÚSQUEDA (SOLO AL HACER CLICK)
+    // ============================================================
     private void procesarBusqueda(String packageName) {
-        if (ultimoTextoIngresado.isEmpty()) return;
+        if (ultimoTextoIngresado.isEmpty()) {
+            Log.d(TAG, "⚠️ Búsqueda sin texto previo, ignorando");
+            return;
+        }
 
         long ahora = System.currentTimeMillis();
-        if (ahora - ultimaExpulsionTime < EXPULSION_COOLDOWN) return;
+        if (ahora - ultimaExpulsionTime < EXPULSION_COOLDOWN) {
+            Log.d(TAG, "⏳ Cooldown activo, ignorando búsqueda");
+            return;
+        }
 
         String textoLower = ultimoTextoIngresado.toLowerCase();
+        Log.d(TAG, "🔍 Procesando búsqueda: \"" + textoLower + "\"");
 
+        // Verificar palabras prohibidas
         for (String palabra : palabrasProhibidas) {
             if (textoLower.contains(palabra)) {
+                Log.i(TAG, "🚫 Palabra prohibida detectada: \"" + palabra + "\" en \"" + textoLower + "\"");
                 ultimaExpulsionTime = ahora;
                 expulsarConMensaje("PALABRA_PROHIBIDA",
                         "Búsqueda con término prohibido: " + palabra);
@@ -335,16 +423,23 @@ public class MonitorService extends AccessibilityService {
             }
         }
 
+        // Verificar sitios prohibidos (para búsquedas que son URLs)
         for (String sitio : sitiosProhibidos) {
             if (textoLower.contains(sitio)) {
+                Log.i(TAG, "🚫 Sitio prohibido detectado: \"" + sitio + "\" en búsqueda");
                 ultimaExpulsionTime = ahora;
                 expulsarConMensaje("SITIO_BLOQUEADO",
                         "Intento de acceso a sitio restringido");
                 return;
             }
         }
+
+        Log.d(TAG, "✅ Búsqueda permitida");
     }
 
+    // ============================================================
+    // EXPULSIÓN CON MENSAJE
+    // ============================================================
     private void expulsarConMensaje(String tipo, String descripcion) {
         Log.w(TAG, "🚫 EXPULSIÓN: " + tipo + " - " + descripcion);
 
@@ -360,6 +455,9 @@ public class MonitorService extends AccessibilityService {
         new android.os.Handler().postDelayed(this::limpiarCampoBusqueda, 500);
     }
 
+    // ============================================================
+    // LIMPIAR CAMPO DE BÚSQUEDA
+    // ============================================================
     private void limpiarCampoBusqueda() {
         if (paqueteNavegadorActual.isEmpty()) return;
 
@@ -392,6 +490,9 @@ public class MonitorService extends AccessibilityService {
         }
     }
 
+    // ============================================================
+    // REGISTRO DE ALERTAS
+    // ============================================================
     private void registrarAlertaConLimite(String tipo, String descripcion, String detalle) {
         if (deviceDocId == null) return;
 
@@ -446,6 +547,9 @@ public class MonitorService extends AccessibilityService {
         }
     }
 
+    // ============================================================
+    // MANTENER SOLO LAS ÚLTIMAS N ALERTAS
+    // ============================================================
     private void mantenerUltimasNAlertas(int maxAlertas) {
         DatabaseReference alertasRef = mDatabase.child("alertas").child(deviceDocId);
         alertasRef.orderByChild("timestamp").addListenerForSingleValueEvent(new ValueEventListener() {
@@ -468,6 +572,9 @@ public class MonitorService extends AccessibilityService {
         });
     }
 
+    // ============================================================
+    // LIMPIAR ALERTAS ANTIGUAS (MÁS DE 7 DÍAS)
+    // ============================================================
     private void limpiarAlertasAntiguas() {
         DatabaseReference alertasRef = mDatabase.child("alertas").child(deviceDocId);
         long hace7Dias = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000);
@@ -492,6 +599,9 @@ public class MonitorService extends AccessibilityService {
         });
     }
 
+    // ============================================================
+    // BACKUP A FIRESTORE (UNA VEZ AL DÍA)
+    // ============================================================
     private void backupAlertasFirestore() {
         if (deviceDocId == null || firestore == null) return;
 
@@ -512,6 +622,9 @@ public class MonitorService extends AccessibilityService {
         });
     }
 
+    // ============================================================
+    // EXTRACCIÓN DE URL
+    // ============================================================
     private String extraerUrl(AccessibilityEvent event) {
         AccessibilityNodeInfo nodeInfo = event.getSource();
         if (nodeInfo != null) {
@@ -550,6 +663,9 @@ public class MonitorService extends AccessibilityService {
         return t.contains("http") || t.contains(".") || t.contains("www");
     }
 
+    // ============================================================
+    // ACTUALIZAR URL ACTUAL
+    // ============================================================
     private void actualizarUrlActual(String url) {
         String urlLimpia = limpiarUrl(url);
         if (urlLimpia.isEmpty() || urlLimpia.equals(ultimaUrlReportada)) return;
@@ -580,6 +696,9 @@ public class MonitorService extends AccessibilityService {
         return url;
     }
 
+    // ============================================================
+    // HEARTBEAT
+    // ============================================================
     private void startHeartbeat() {
         if (heartbeatTimer != null) heartbeatTimer.cancel();
         heartbeatTimer = new Timer();
@@ -608,6 +727,9 @@ public class MonitorService extends AccessibilityService {
                 });
     }
 
+    // ============================================================
+    // UTILIDADES
+    // ============================================================
     private boolean esNavegador(String packageName) {
         return packageName.contains("chrome") ||
                 packageName.contains("browser") ||
@@ -635,6 +757,11 @@ public class MonitorService extends AccessibilityService {
         if (heartbeatTimer != null) {
             heartbeatTimer.cancel();
             heartbeatTimer = null;
+        }
+
+        if (recargaListasTimer != null) {
+            recargaListasTimer.cancel();
+            recargaListasTimer = null;
         }
 
         if (localWebSocket != null) {
