@@ -69,6 +69,7 @@ export default function ScannerVincular() {
       const idHardware = await Device.getId();
 
       // --- FIRESTORE: Crear documento si no existe (con setDoc y merge) ---
+      let firestoreError = null;
       const deviceRef = doc(db, "dispositivos", deviceId);
       try {
         await setDoc(deviceRef, {
@@ -84,14 +85,17 @@ export default function ScannerVincular() {
             uuid: idHardware.identifier 
           },
         }, { merge: true });
+        console.log('Documento creado en Firestore');
       } catch (e: any) {
+        firestoreError = e;
+        console.error('Error en Firestore:', e);
         if (e.code === 'permission-denied') {
           errorEmitter.emit('permission-error', new FirestorePermissionError({
             path: `dispositivos/${deviceId}`,
-            operation: 'write' // ✅ CORREGIDO: 'write' en lugar de 'set'
+            operation: 'write'
           }));
         }
-        throw e;
+        // No lanzamos el error para que continúe con RTDB
       }
 
       // --- REALTIME DATABASE: Datos volátiles ---
@@ -107,13 +111,15 @@ export default function ScannerVincular() {
           aulaId: data.aulaId || '',
           seccion: data.seccion || ''
         });
+        console.log('Datos guardados en RTDB');
       } catch (e: any) {
+        console.error('Error en RTDB:', e);
         errorEmitter.emit('rtdb-permission-error', new RTDBPermissionError({
           path: `dispositivos/${deviceId}`,
-          operation: 'write', // ✅ CORREGIDO: 'write'
+          operation: 'write',
           requestResourceData: { online: true }
         }));
-        throw e;
+        throw e; // Si falla RTDB, consideramos error crítico
       }
 
       // --- Control sedes (opcional) ---
@@ -131,11 +137,17 @@ export default function ScannerVincular() {
         }
       }
 
-      await Toast.show({ text: '✅ Tablet vinculada correctamente' });
+      // Si hubo error en Firestore pero RTDB funcionó, mostramos advertencia
+      if (firestoreError) {
+        await Toast.show({ text: '⚠️ Vinculado parcialmente (error en Firestore)', duration: 'long' });
+        setError('Error en Firestore, pero el dispositivo quedó registrado en RTDB');
+      } else {
+        await Toast.show({ text: '✅ Tablet vinculada correctamente' });
+      }
       
       setTimeout(() => {
         window.location.href = "/";
-      }, 1500);
+      }, 2000); // Aumentamos tiempo para ver mensaje
 
     } catch (e: any) {
       console.error("Error crítico de vinculación:", e);
