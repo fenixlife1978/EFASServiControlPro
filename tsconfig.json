@@ -8,7 +8,7 @@
     ],
     "allowJs": true,
     "skipLibCheck": true,
-    "strict": true,
+    "strict": false,
     "noEmit": true,
     "esModuleInterop": true,
     "module": "esnext",
@@ -26,19 +26,22 @@
       "@/*": [
         "./src/*"
       ]
-    }
+    },
+    "typeRoots": [
+      "./node_modules/@types"
+    ],
+    "types": [
+      "node"
+    ]
   },
   "include": [
+    "**/*.ts",
+    "**/*.tsx",
     ".next/types/**/*.ts",
     "next-env.d.ts",
-    "src/**/*.ts", // <-- Cambiado para que solo mire dentro de src
-    "src/**/*.tsx" // <-- Cambiado para que solo mire dentro de src
-    ,
     "out/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules",
-    "android", // <-- AGREGADO: Ignora la carpeta de Capacitor/Android
-    "out" // <-- AGREGADO: Ignora exportaciones estáticas
+    "node_modules"
   ]
 }

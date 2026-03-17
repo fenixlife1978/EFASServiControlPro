@@ -4,7 +4,7 @@ import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
 import { db, rtdb } from '@/firebase/config';
 import { doc, setDoc } from 'firebase/firestore';
 import { ref, set, update as rtdbUpdate } from 'firebase/database';
-import { Device } from '@capacitor/device'; 
+import { Device } from '@capacitor/device';
 import { Preferences } from '@capacitor/preferences';
 import { Toast } from '@capacitor/toast';
 import { Capacitor } from '@capacitor/core';
@@ -26,14 +26,13 @@ export default function ScannerVincular() {
     try {
       setIsScanning(true);
       setError(null);
-      
+
       const status = await BarcodeScanner.checkPermissions();
       if (status.camera !== 'granted') {
         await BarcodeScanner.requestPermissions();
       }
 
       const { barcodes } = await BarcodeScanner.scan();
-      
       if (barcodes.length === 0) {
         setError('No se detectó ningún código QR');
         setIsScanning(false);
@@ -68,9 +67,8 @@ export default function ScannerVincular() {
       const info = await Device.getInfo();
       const idHardware = await Device.getId();
 
-      // --- FIRESTORE: Crear documento si no existe (con setDoc y merge) ---
-      let firestoreError = null;
-      const deviceRef = doc(db, "dispositivos", deviceId);
+      // FIRESTORE
+      const deviceRef = doc(db, 'dispositivos', deviceId);
       try {
         await setDoc(deviceRef, {
           vinculado: true,
@@ -79,26 +77,23 @@ export default function ScannerVincular() {
           InstitutoId: instId,
           aulaId: data.aulaId || '',
           seccion: data.seccion || '',
-          hardware: { 
-            modelo: info.model, 
-            marca: info.manufacturer, 
-            uuid: idHardware.identifier 
+          hardware: {
+            modelo: info.model,
+            marca: info.manufacturer,
+            uuid: idHardware.identifier,
           },
         }, { merge: true });
-        console.log('Documento creado en Firestore');
       } catch (e: any) {
-        firestoreError = e;
-        console.error('Error en Firestore:', e);
         if (e.code === 'permission-denied') {
           errorEmitter.emit('permission-error', new FirestorePermissionError({
             path: `dispositivos/${deviceId}`,
-            operation: 'write'
+            operation: 'write',
           }));
         }
-        // No lanzamos el error para que continúe con RTDB
+        throw e;
       }
 
-      // --- REALTIME DATABASE: Datos volátiles ---
+      // REALTIME DATABASE
       const rtdbDeviceRef = ref(rtdb, `dispositivos/${deviceId}`);
       try {
         await set(rtdbDeviceRef, {
@@ -109,20 +104,17 @@ export default function ScannerVincular() {
           modelo: info.model,
           institutoId: instId,
           aulaId: data.aulaId || '',
-          seccion: data.seccion || ''
+          seccion: data.seccion || '',
         });
-        console.log('Datos guardados en RTDB');
       } catch (e: any) {
-        console.error('Error en RTDB:', e);
         errorEmitter.emit('rtdb-permission-error', new RTDBPermissionError({
           path: `dispositivos/${deviceId}`,
           operation: 'write',
-          requestResourceData: { online: true }
+          requestResourceData: { online: true },
         }));
-        throw e; // Si falla RTDB, consideramos error crítico
+        throw e;
       }
 
-      // --- Control sedes (opcional) ---
       if (instId) {
         const rtdbControlRef = ref(rtdb, `control_sedes/${instId}/dispositivos/${deviceId}`);
         try {
@@ -130,27 +122,19 @@ export default function ScannerVincular() {
             connected: true,
             locked: false,
             lastSeen: Date.now(),
-            model: info.model
+            model: info.model,
           });
         } catch (e: any) {
-          console.warn("Error en control_sedes:", e);
+          console.warn('Error en control_sedes:', e);
         }
       }
 
-      // Si hubo error en Firestore pero RTDB funcionó, mostramos advertencia
-      if (firestoreError) {
-        await Toast.show({ text: '⚠️ Vinculado parcialmente (error en Firestore)', duration: 'long' });
-        setError('Error en Firestore, pero el dispositivo quedó registrado en RTDB');
-      } else {
-        await Toast.show({ text: '✅ Tablet vinculada correctamente' });
-      }
-      
+      await Toast.show({ text: '✅ Tablet vinculada correctamente' });
       setTimeout(() => {
-        window.location.href = "/";
-      }, 2000); // Aumentamos tiempo para ver mensaje
-
+        window.location.href = '/';
+      }, 1500);
     } catch (e: any) {
-      console.error("Error crítico de vinculación:", e);
+      console.error('Error crítico:', e);
       setError(e.message || 'Error al vincular');
     } finally {
       setIsScanning(false);
@@ -167,28 +151,28 @@ export default function ScannerVincular() {
         <div className="w-28 h-28 bg-orange-500/10 rounded-[2.5rem] flex items-center justify-center mx-auto mb-8 border-2 border-orange-500/20">
           <div className="w-14 h-14 bg-orange-500 rounded-2xl animate-pulse shadow-2xl shadow-orange-500/40"></div>
         </div>
-        
+
         <h2 className="text-4xl font-black italic uppercase tracking-tighter mb-3">
           EDU<span className="text-orange-500">ControlPro</span>
         </h2>
-        
+
         <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] mb-8">
           VINCULACIÓN DE HARDWARE
         </p>
-        
+
         {error ? (
           <div className="bg-red-500/10 border border-red-500/30 rounded-3xl p-6 mb-6">
-            <p className="text-red-500 text-[11px] font-bold uppercase mb-2">⚠️ ERROR DE SISTEMA</p>
-            <p className="text-slate-400 text-[10px]">{error}</p>
+            <p className="text-red-500 text-[11px] font-bold uppercase mb-2">⚠️ ERROR</p>
+            <p className="text-slate-400 text-[10px] break-words">{error}</p>
           </div>
         ) : (
           <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-8">
-            {isScanning ? 'ESCANEANDO CÓDIGO QR...' : 'PREPARANDO CÁMARA...'}
+            {isScanning ? 'ESCANEANDO...' : 'PREPARANDO CÁMARA...'}
           </p>
         )}
-        
+
         {error && (
-          <button 
+          <button
             onClick={startScan}
             disabled={isScanning}
             className="bg-orange-500 disabled:bg-slate-800 px-8 py-4 rounded-2xl font-black uppercase text-[10px] tracking-wider hover:bg-orange-600 transition-all shadow-lg shadow-orange-500/20"

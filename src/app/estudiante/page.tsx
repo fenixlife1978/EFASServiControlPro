@@ -1,12 +1,16 @@
+
 'use client';
 import React, { useEffect, useState } from 'react';
 import { rtdb } from '@/firebase/config';
 import { ref, onValue, set, serverTimestamp, off } from 'firebase/database';
-import { registerPlugin } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
 import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
 import { ShieldAlert, QrCode, Loader2, BellRing, Tablet, Smartphone } from 'lucide-react';
 
-const DeviceControl = registerPlugin<any>('DeviceControl');
+// ✅ CORREGIDO: registerPlugin sin tipos genéricos problemáticos
+const DeviceControl = Capacitor.isNativePlatform() 
+  ? (require('@capacitor/core') as any).registerPlugin('DeviceControl')
+  : null;
 
 const APPS_PERMITIDAS = [
   { id: 1, nombre: 'Matemáticas', icon: '🧮' },
@@ -35,7 +39,6 @@ export default function EstudiantePage() {
     setIsEnrolled(true);
     const deviceRef = ref(rtdb, `dispositivos/${id}`);
 
-    // Suscripción en tiempo real vía RTDB (Latencia ultra baja)
     onValue(deviceRef, (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.val();
@@ -46,9 +49,12 @@ export default function EstudiantePage() {
           setActiveMessage(data.mensaje_alerta);
         }
         
-        // Ejecución de comando nativo de bloqueo
-        if (data.comando_bloqueo === true) {
-          try { DeviceControl.lockDevice(); } catch(e) { console.warn("Plugin nativo no disponible"); }
+        if (data.comando_bloqueo === true && DeviceControl) {
+          try { 
+            DeviceControl.lockDevice(); 
+          } catch(e) { 
+            console.warn("Plugin nativo no disponible"); 
+          }
         }
       }
       setLoading(false);
@@ -84,10 +90,8 @@ export default function EstudiantePage() {
       const data = JSON.parse(jsonString);
       if (data.action === 'link_device' || data.action === 'enroll') {
         setLoading(true);
-        // Generación de ID de hardware único
         const newDeviceId = `EDU-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
         
-        // Registro en RTDB
         await set(ref(rtdb, `dispositivos/${newDeviceId}`), {
           id: newDeviceId,
           InstitutoId: data.inst || data.InstitutoId,
@@ -164,7 +168,6 @@ export default function EstudiantePage() {
         ))}
       </div>
 
-      {/* MODAL DE ALERTA DE PROFESOR */}
       {activeMessage && (
         <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-xl z-50 flex items-center justify-center p-8">
           <div className="bg-white p-12 rounded-[4rem] text-center max-w-sm shadow-2xl border-b-[12px] border-orange-500">
@@ -182,7 +185,6 @@ export default function EstudiantePage() {
         </div>
       )}
 
-      {/* PANTALLA DE BLOQUEO TOTAL */}
       {isLocked && (
         <div className="fixed inset-0 bg-red-700 z-[100] flex flex-col items-center justify-center text-white p-12 animate-in fade-in duration-300">
           <div className="bg-white/10 p-8 rounded-full mb-8">

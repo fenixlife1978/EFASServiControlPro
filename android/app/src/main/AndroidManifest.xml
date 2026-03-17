@@ -12,9 +12,6 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="true" />
     
-    <!-- PERMISO PARA VPN -->
-    <uses-permission android:name="android.permission.BIND_VPN_SERVICE" />
-    
     <!-- PERMISO PARA ADMINISTRADOR DE DISPOSITIVO -->
     <uses-permission android:name="android.permission.MANAGE_DEVICE_ADMINS" />
     
@@ -51,18 +48,6 @@
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
             </intent-filter>
         </receiver>
-
-        <!-- SERVICIO VPN -->
-        <service
-            android:name=".ParentalControlVpnService"
-            android:permission="android.permission.BIND_VPN_SERVICE"
-            android:foregroundServiceType="systemExempted"
-            android:exported="true"
-            android:stopWithTask="false">
-            <intent-filter>
-                <action android:name="android.net.VpnService" />
-            </intent-filter>
-        </service>
 
         <!-- SERVICIO DE MONITOREO -->
         <service

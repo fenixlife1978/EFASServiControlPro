@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { db, auth, rtdb } from '@/firebase/config';
-import { ref, onValue, update, remove } from 'firebase/database'; // Añadidos update y remove
+import { ref, onValue, update, remove } from 'firebase/database';
 import { 
   collection, query, onSnapshot, where, addDoc, serverTimestamp, 
   doc, getDoc, updateDoc, deleteDoc, setDoc 
@@ -13,18 +13,10 @@ import {
   User, Unlock, RefreshCcw, ShieldCheck, Edit3
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
-import { toast } from 'sonner'; // Importación de Sonner
+import { toast } from 'sonner';
 import { GlobalControls } from '@/components/admin/config/GlobalControls';
 import { WebHistoryModal } from '@/components/admin/monitoring/WebHistoryModal';
 import { SecurityRules } from '@/components/admin/config/SecurityRules';
-
-// --- CONEXIÓN CON EL PLUGIN NATIVO ---
-import { registerPlugin } from '@capacitor/core';
-interface LiberarPlugin {
-  ejecutarLiberacion(): Promise<{ status: string }>;
-  ejecutarRebloqueo(): Promise<{ status: string }>;
-}
-const LiberarBtn = registerPlugin<LiberarPlugin>('LiberarPlugin');
 
 export default function InstitutionView() {
   const { institutionId, setInstitutionId } = useInstitution();
@@ -43,7 +35,7 @@ export default function InstitutionView() {
 
   const inputStyle = "w-full bg-slate-900 border border-slate-800 p-4 rounded-xl text-white font-bold text-xs uppercase outline-none focus:border-orange-500 transition-all";
 
-  // --- NUEVAS FUNCIONES DE GESTIÓN DE DISPOSITIVOS ---
+  // --- FUNCIONES DE GESTIÓN DE DISPOSITIVOS ---
   
   const handleUpdateDeviceName = async (deviceId: string, currentName: string) => {
     const newName = prompt("INGRESE EL NOMBRE DEL NUEVO ALUMNO ASIGNADO:", currentName);
@@ -51,13 +43,11 @@ export default function InstitutionView() {
 
     const toastId = toast.loading("Actualizando asignación...");
     try {
-      // 1. Actualizar en Firestore
       await updateDoc(doc(db, "dispositivos", deviceId), {
         alumno_asignado: newName.toUpperCase(),
         lastUpdated: serverTimestamp()
       });
 
-      // 2. Sincronizar con RTDB para cambios en vivo
       const deviceRef = ref(rtdb, `dispositivos/${deviceId}`);
       await update(deviceRef, { nombre: newName.toUpperCase() });
 
@@ -73,10 +63,8 @@ export default function InstitutionView() {
 
     const toastId = toast.loading("Eliminando registro del sistema...");
     try {
-      // Eliminar de Firestore
       await deleteDoc(doc(db, "dispositivos", deviceId));
       
-      // Eliminar de RTDB
       const deviceRef = ref(rtdb, `dispositivos/${deviceId}`);
       await remove(deviceRef);
 
@@ -140,14 +128,7 @@ export default function InstitutionView() {
     }
   }, [selectedAula, tablets, institutionId]);
 
-  // --- ACCIONES NATIVAS ---
-  const handleRebloquear = async () => {
-    try {
-      await LiberarBtn.ejecutarRebloqueo();
-      toast.success("SEGURIDAD RESTAURADA NATIVAMENTE");
-    } catch (e) { toast.error("Plugin nativo no detectado"); }
-  };
-
+  // --- ACCIONES ---
   const handleChangePin = async () => {
     const newPin = prompt("NUEVO PIN (4 dígitos):");
     if (newPin && /^\d{4}$/.test(newPin)) {
@@ -166,7 +147,7 @@ export default function InstitutionView() {
   const handleLiberarDispositivo = async () => {
     const pass = prompt("CLAVE MAESTRA:");
     if (pass === "EDU-ADMIN-2026") { 
-      try { await LiberarBtn.ejecutarLiberacion(); toast.warning("DISPOSITIVO LIBERADO"); } catch (e) { toast.error("Error Plugin"); }
+      toast.warning("FUNCIÓN DESHABILITADA - Contacte al administrador");
     }
   };
 
@@ -192,8 +173,11 @@ export default function InstitutionView() {
       const customAulaId = newAula.aulaId.toUpperCase().trim().replace(/\s+/g, '_');
       const aulaRef = doc(db, "institutions", institutionId, "Aulas", customAulaId);
       await setDoc(aulaRef, {
-        aulaId: customAulaId, seccion: newAula.seccion.toUpperCase().trim(),
-        InstitutoId: institutionId, status: 'active', updatedAt: serverTimestamp()
+        aulaId: customAulaId, 
+        seccion: newAula.seccion.toUpperCase().trim(),
+        InstitutoId: institutionId, 
+        status: 'active', 
+        updatedAt: serverTimestamp()
       });
       setShowModal(false);
       toast.success("Aula creada exitosamente");
@@ -247,8 +231,8 @@ export default function InstitutionView() {
             </div>
             <div className="bg-[#0f1117] p-8 rounded-[2.5rem] border border-slate-800 shadow-2xl">
               <h2 className="text-xl font-black italic uppercase text-white mb-6 flex items-center gap-3"><Zap className="text-yellow-500 w-5 h-5" /> Terminal Nativa</h2>
-              <button onClick={handleRebloquear} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl text-[10px] font-black uppercase italic transition-all flex items-center justify-center gap-2">
-                <RefreshCcw size={16} /> Re-Activar Bloqueo Alumno
+              <button onClick={handleLiberarDispositivo} className="w-full bg-slate-800 hover:bg-red-600 text-slate-400 hover:text-white py-5 rounded-2xl text-[11px] font-black uppercase italic transition-all flex items-center justify-center gap-3">
+                <Unlock size={18} /> Liberar Tablet
               </button>
             </div>
           </div>
@@ -335,7 +319,7 @@ export default function InstitutionView() {
                               </div>
                             </div>
 
-                            {/* BOTONES DE ACCIÓN (Aparecen con el Hover) */}
+                            {/* BOTONES DE ACCIÓN */}
                             <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button 
                                 onClick={() => handleUpdateDeviceName(alumno.id, alumno.alumno_asignado)}
@@ -379,7 +363,6 @@ export default function InstitutionView() {
                     </div>
                     <div className="bg-slate-900/40 p-8 rounded-[2.5rem] border border-slate-800 space-y-4">
                       <button onClick={handleChangePin} className="w-full bg-red-600/10 hover:bg-red-600 text-red-500 hover:text-white p-4 rounded-xl text-[10px] font-black uppercase italic border border-red-500/20 flex justify-between items-center transition-all">Cambiar PIN Maestro <ShieldCheck size={14} /></button>
-                      <button onClick={handleLiberarDispositivo} className="w-full bg-slate-800 hover:bg-red-600 text-slate-400 hover:text-white py-5 rounded-2xl text-[11px] font-black uppercase italic transition-all flex items-center justify-center gap-3"><Unlock size={18} /> Liberar Tablet</button>
                     </div>
                   </div>
                 </div>
