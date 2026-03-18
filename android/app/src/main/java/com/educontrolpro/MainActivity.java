@@ -22,6 +22,7 @@ import androidx.core.content.ContextCompat;
 
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.ServerValue; // <-- Importación añadida
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.FieldValue;
 
@@ -39,6 +40,7 @@ public class MainActivity extends BridgeActivity {
     private FirebaseDatabase realtimeDb;
     private DatabaseReference deviceRealtimeRef;
     private FirebaseFirestore firestore;
+    private String deviceDocId; // <-- Variable para almacenar el ID del dispositivo
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -62,35 +64,94 @@ public class MainActivity extends BridgeActivity {
 
         // Obtener referencia a RTDB si el dispositivo está vinculado
         SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
-        String deviceId = capPrefs.getString(KEY_DEVICE_ID, null);
-        if (deviceId != null) {
-            deviceRealtimeRef = realtimeDb.getReference("dispositivos").child(deviceId);
+        deviceDocId = capPrefs.getString(KEY_DEVICE_ID, null);
+        if (deviceDocId != null) {
+            deviceRealtimeRef = realtimeDb.getReference("dispositivos").child(deviceDocId);
         }
 
         logToRealtime("APP_START", "MainActivity iniciada");
     }
 
-    // Log a Realtime Database
+    // Log a Realtime Database (usa un nodo fijo si no hay deviceId)
     private void logToRealtime(String tipo, String mensaje) {
         try {
             SharedPreferences prefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
             String deviceId = prefs.getString(KEY_DEVICE_ID, null);
+            DatabaseReference logRef;
             if (deviceId != null) {
-                DatabaseReference logRef = realtimeDb
+                logRef = realtimeDb
                     .getReference("dispositivos")
                     .child(deviceId)
                     .child("app_logs")
                     .child(String.valueOf(System.currentTimeMillis()));
-
-                Map<String, Object> logEntry = new HashMap<>();
-                logEntry.put("tipo", tipo);
-                logEntry.put("mensaje", mensaje);
-                logEntry.put("timestamp", System.currentTimeMillis());
-                logRef.setValue(logEntry);
+            } else {
+                // Log global para depuración sin vinculación
+                logRef = realtimeDb.getReference("debug_logs_global").push();
             }
+
+            Map<String, Object> logEntry = new HashMap<>();
+            logEntry.put("tipo", tipo);
+            logEntry.put("mensaje", mensaje);
+            logEntry.put("timestamp", System.currentTimeMillis());
+            logRef.setValue(logEntry);
         } catch (Exception e) {
             Log.e(TAG, "Error en logToRealtime: " + e.getMessage());
         }
+    }
+
+    /**
+     * Método para vincular el dispositivo. Debe ser llamado desde el plugin o actividad
+     * que procesa el código QR.
+     * @param deviceId ID del dispositivo (ej. DEV-0001)
+     * @param institutoId ID de la institución
+     * @param aulaId ID del aula
+     * @param seccion Sección
+     * @param rol Rol (alumno, profesor, etc.)
+     */
+    public void vincularDispositivo(String deviceId, String institutoId, String aulaId, String seccion, String rol) {
+        SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
+        capPrefs.edit()
+                .putString(KEY_DEVICE_ID, deviceId)
+                .putString("InstitutoId", institutoId)
+                .putString("aulaId", aulaId)
+                .putString("seccion", seccion)
+                .putString("rol", rol)
+                .apply();
+
+        // Actualizar variable de instancia
+        this.deviceDocId = deviceId;
+
+        // 1. Escribir en Realtime Database (para presencia inmediata)
+        DatabaseReference rtRef = realtimeDb.getReference("dispositivos").child(deviceId);
+        Map<String, Object> rtData = new HashMap<>();
+        rtData.put("InstitutoId", institutoId);
+        rtData.put("aulaId", aulaId);
+        rtData.put("seccion", seccion);
+        rtData.put("rol", rol);
+        rtData.put("online", true);
+        rtData.put("ultimoHeartbeat", ServerValue.TIMESTAMP); // <-- Ahora ServerValue está importado
+        rtRef.setValue(rtData);
+
+        // 2. ¡IMPORTANTE! Escribir en Firestore para que la interfaz web lo vea
+        Map<String, Object> fsData = new HashMap<>();
+        fsData.put("InstitutoId", institutoId);
+        fsData.put("aulaId", aulaId);
+        fsData.put("seccion", seccion);
+        fsData.put("rol", rol);
+        fsData.put("alumno_asignado", rol.equalsIgnoreCase("alumno") ? "Sin asignar" : "");
+        fsData.put("online", false);
+        fsData.put("ultimoAcceso", FieldValue.serverTimestamp());
+        fsData.put("vinculado", true);
+
+        firestore.collection("dispositivos").document(deviceId)
+                .set(fsData)
+                .addOnSuccessListener(aVoid -> logToRealtime("VINCULACION", "Dispositivo creado en Firestore: " + deviceId))
+                .addOnFailureListener(e -> logToRealtime("VINCULACION_ERROR", e.getMessage()));
+
+        // Iniciar el MonitorService
+        reiniciarMonitorService();
+
+        Toast.makeText(this, "Dispositivo vinculado correctamente", Toast.LENGTH_LONG).show();
     }
 
     private void solicitarPermisosNecesarios() {
@@ -187,6 +248,12 @@ public class MainActivity extends BridgeActivity {
             if (deviceRealtimeRef != null) {
                 deviceRealtimeRef.child("liberado").setValue(true);
                 deviceRealtimeRef.child("fecha_liberacion").setValue(System.currentTimeMillis());
+            }
+
+            // Eliminar de Firestore usando el deviceId almacenado en la variable de instancia
+            if (deviceDocId != null) {
+                firestore.collection("dispositivos").document(deviceDocId).delete()
+                    .addOnFailureListener(e -> Log.e(TAG, "Error al eliminar de Firestore", e));
             }
 
             finishAffinity();

