@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "framework": "nextjs",
+  "installCommand": "npm install --force",
+  "redirects": [
+    {
+      "source": "/descargar",
+      "destination": "https://drive.google.com/file/d/1bbYNzh5ojklIsv4YqBBBqimd1shUeoBo/view?usp=sharing",
+      "permanent": false
+    }
+  ]
+}

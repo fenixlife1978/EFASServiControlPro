@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">EDUControlPro</string>
+    <string name="title_activity_main">EDUControlPro</string>
+    <string name="package_name">com.educontrolpro</string>
+    <string name="custom_url_scheme">com.educontrolpro</string>
+    <string name="accessibility_description">Este servicio permite monitorear y filtrar búsquedas en navegadores para garantizar un entorno educativo seguro.</string>
+</resources>
