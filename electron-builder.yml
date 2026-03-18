@@ -1,0 +1,9 @@
+productName: EDUControlPro
+appId: com.educontrolpro
+directories:
+  output: dist
+win:
+  target: nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
