@@ -3,7 +3,7 @@ import { CapacitorConfig } from '@capacitor/cli';
 const config: CapacitorConfig = {
   appId: 'com.educontrolpro',
   appName: 'EDUControlPro',
-  webDir: 'public', // <-- Cambiado temporalmente
+  webDir: 'out',
   server: {
     androidScheme: 'https',
     errorPath: 'index.html'
