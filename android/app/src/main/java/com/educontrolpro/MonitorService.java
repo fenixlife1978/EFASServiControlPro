@@ -113,7 +113,10 @@ public class MonitorService extends AccessibilityService {
             }
         }
 
-        if (type == AccessibilityEvent.TYPE_VIEW_CLICKED && esNavegador(packageName)) {
+        // Disparar la validación tanto al hacer clic como al presionar Enter
+        if ((type == AccessibilityEvent.TYPE_VIEW_CLICKED || 
+             type == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) 
+             && esNavegador(packageName)) {
             procesarBusqueda();
         }
     }
@@ -193,7 +196,8 @@ public class MonitorService extends AccessibilityService {
         AccessibilityServiceInfo info = new AccessibilityServiceInfo();
         info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED |
                           AccessibilityEvent.TYPE_VIEW_CLICKED |
-                          AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED;
+                          AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED |
+                          AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED;  // Añadido para Enter
         info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
         info.flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
         info.notificationTimeout = 100;
