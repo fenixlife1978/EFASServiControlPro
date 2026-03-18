@@ -2,18 +2,32 @@
 import React, { useEffect, useState } from 'react';
 import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
 import { db, rtdb } from '@/firebase/config';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, set, update as rtdbUpdate } from 'firebase/database';
 import { Device } from '@capacitor/device';
 import { Preferences } from '@capacitor/preferences';
 import { Toast } from '@capacitor/toast';
 import { Capacitor } from '@capacitor/core';
-import { FirestorePermissionError, RTDBPermissionError } from '@/firebase/errors';
-import { errorEmitter } from '@/firebase/error-emitter';
 
 export default function ScannerVincular() {
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Función para escribir logs en RTDB (nodo global para depuración)
+  const logToFirebase = async (tipo: string, detalle: string) => {
+    try {
+      const logRef = ref(rtdb, 'debug_logs_global');
+      const newLogRef = ref(rtdb, `debug_logs_global/${Date.now()}`);
+      await set(newLogRef, {
+        tipo,
+        detalle,
+        timestamp: Date.now(),
+        origen: 'ScannerVincular'
+      });
+    } catch (e) {
+      console.error('Error al escribir log:', e);
+    }
+  };
 
   const startScan = async () => {
     if (Capacitor.getPlatform() !== 'android') {
@@ -26,6 +40,7 @@ export default function ScannerVincular() {
     try {
       setIsScanning(true);
       setError(null);
+      await logToFirebase('VINCULACION', 'Iniciando escaneo');
 
       const status = await BarcodeScanner.checkPermissions();
       if (status.camera !== 'granted') {
@@ -35,6 +50,7 @@ export default function ScannerVincular() {
       const { barcodes } = await BarcodeScanner.scan();
       if (barcodes.length === 0) {
         setError('No se detectó ningún código QR');
+        await logToFirebase('VINCULACION_ERROR', 'No se detectó QR');
         setIsScanning(false);
         return;
       }
@@ -45,6 +61,7 @@ export default function ScannerVincular() {
         data = JSON.parse(rawData);
       } catch (e) {
         setError('Formato de QR inválido');
+        await logToFirebase('VINCULACION_ERROR', 'Formato JSON inválido');
         setIsScanning(false);
         return;
       }
@@ -54,10 +71,14 @@ export default function ScannerVincular() {
 
       if (!deviceId) {
         setError('El QR no contiene deviceId');
+        await logToFirebase('VINCULACION_ERROR', 'QR sin deviceId');
         setIsScanning(false);
         return;
       }
 
+      await logToFirebase('VINCULACION', `Datos QR: deviceId=${deviceId}, instId=${instId}, rol=${data.rol}`);
+
+      // Guardar en Preferences
       await Preferences.set({ key: 'deviceId', value: String(deviceId) });
       await Preferences.set({ key: 'InstitutoId', value: String(instId) });
       await Preferences.set({ key: 'aulaId', value: String(data.aulaId || '') });
@@ -67,11 +88,13 @@ export default function ScannerVincular() {
       const info = await Device.getInfo();
       const idHardware = await Device.getId();
 
-      // --- FIRESTORE ---
+      // --- FIRESTORE: Crear documento en 'dispositivos' con todos los campos necesarios ---
       const deviceRef = doc(db, 'dispositivos', deviceId);
       try {
         console.log('📝 Escribiendo en Firestore:', deviceId);
-        await setDoc(deviceRef, {
+        await logToFirebase('FIRESTORE', 'Iniciando escritura');
+
+        const firestoreData: any = {
           vinculado: true,
           status: 'active',
           rol: data.rol || 'alumno',
@@ -83,16 +106,30 @@ export default function ScannerVincular() {
             marca: info.manufacturer,
             uuid: idHardware.identifier,
           },
-          createdAt: new Date().toISOString()
-        }, { merge: true });
+          createdAt: serverTimestamp(),
+          // Campos necesarios para la interfaz web:
+          online: false, // Inicialmente offline
+          ultimoAcceso: serverTimestamp(),
+        };
+
+        // Si el rol es 'alumno', añadir alumno_asignado vacío (la interfaz lo espera)
+        if (data.rol === 'alumno') {
+          firestoreData.alumno_asignado = 'Sin asignar';
+        } else {
+          firestoreData.alumno_asignado = ''; // Para profesores, directores, etc.
+        }
+
+        await setDoc(deviceRef, firestoreData, { merge: true });
         console.log('✅ Firestore OK');
+        await logToFirebase('FIRESTORE', 'Escritura exitosa');
       } catch (e: any) {
         console.error('❌ Error en Firestore:', e);
+        await logToFirebase('FIRESTORE_ERROR', `Código: ${e.code} - ${e.message}`);
         setError(`Error Firestore: ${e.code} - ${e.message}`);
-        throw e; // Detenemos el proceso para que el error se muestre
+        throw e;
       }
 
-      // --- REALTIME DATABASE ---
+      // --- REALTIME DATABASE: Datos de presencia inmediata ---
       const rtdbDeviceRef = ref(rtdb, `dispositivos/${deviceId}`);
       try {
         await set(rtdbDeviceRef, {
@@ -105,16 +142,19 @@ export default function ScannerVincular() {
           aulaId: data.aulaId || '',
           seccion: data.seccion || '',
         });
+        await logToFirebase('RTDB', 'Escritura exitosa en dispositivos');
       } catch (e: any) {
         console.error('❌ Error en RTDB:', e);
-        setError(`Error RTDB: ${e.message || e.code}`);
+        await logToFirebase('RTDB_ERROR', e.message);
+        setError(`Error RTDB: ${e.message}`);
         throw e;
       }
 
+      // Opcional: escribir en control_sedes (si se usa)
       if (instId) {
         const rtdbControlRef = ref(rtdb, `control_sedes/${instId}/dispositivos/${deviceId}`);
         try {
-          await rtdbUpdate(rtdbControlRef, {
+          await set(rtdbControlRef, {
             connected: true,
             locked: false,
             lastSeen: Date.now(),
@@ -126,11 +166,15 @@ export default function ScannerVincular() {
       }
 
       await Toast.show({ text: '✅ Tablet vinculada correctamente' });
+      await logToFirebase('VINCULACION', 'Proceso completado con éxito');
+
+      // Redirigir a la página principal después de un breve retraso
       setTimeout(() => {
         window.location.href = '/';
       }, 1500);
     } catch (e: any) {
       console.error('🔥 Error crítico:', e);
+      await logToFirebase('VINCULACION_ERROR_CRITICO', e.message);
       setError(e.message || 'Error al vincular');
     } finally {
       setIsScanning(false);
