@@ -46,11 +46,9 @@ public class MonitorService extends AccessibilityService {
             iniciarWhitelistListener();
             iniciarListenerControl();
         }
-        // Log global para saber que el servicio se creó
         logGlobal("SERVICE_CREATED", "MonitorService.onCreate()");
     }
 
-    // Log a un nodo global (útil cuando no hay deviceId)
     private void logGlobal(String tipo, String detalle) {
         try {
             DatabaseReference logRef = mDatabase.child("debug_logs_global").push();
@@ -115,7 +113,6 @@ public class MonitorService extends AccessibilityService {
         int type = event.getEventType();
         String packageName = event.getPackageName() != null ? event.getPackageName().toString() : "";
 
-        // Log de cada evento (para depuración)
         logGlobal("EVENT", "Tipo: " + type + " Paquete: " + packageName);
 
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
@@ -138,10 +135,9 @@ public class MonitorService extends AccessibilityService {
             }
         }
 
-        // Disparar la validación tanto al hacer clic como al presionar Enter
-        if ((type == AccessibilityEvent.TYPE_VIEW_CLICKED || 
-             type == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) 
-             && esNavegador(packageName)) {
+        if ((type == AccessibilityEvent.TYPE_VIEW_CLICKED ||
+                type == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED)
+                && esNavegador(packageName)) {
             logGlobal("PROCESAR_BUSQUEDA", "Llamando a procesarBusqueda()");
             procesarBusqueda();
         }
@@ -194,7 +190,7 @@ public class MonitorService extends AccessibilityService {
             logGlobal("BLOQUEO_ERROR", e.getMessage());
         }
 
-        // Reportar a Firebase (usar deviceId si existe, si no, reportar igual con un campo deviceId=null)
+        // Reportar a Firebase
         DatabaseReference reportRef = mDatabase.child("system_analysis").child("blocked_attempts").push();
         Map<String, Object> data = new HashMap<>();
         data.put("url", url);
@@ -221,13 +217,13 @@ public class MonitorService extends AccessibilityService {
     }
 
     private boolean esNavegador(String packageName) {
-        return packageName.contains("chrome") || 
-               packageName.contains("browser") ||
-               packageName.contains("firefox") || 
-               packageName.contains("opera") ||
-               packageName.contains("edge") || 
-               packageName.contains("samsung.android.app.sbrowser") ||
-               packageName.contains("com.android.chrome"); // Asegurar Chrome
+        return packageName.contains("chrome") ||
+                packageName.contains("browser") ||
+                packageName.contains("firefox") ||
+                packageName.contains("opera") ||
+                packageName.contains("edge") ||
+                packageName.contains("samsung.android.app.sbrowser") ||
+                packageName.contains("com.android.chrome");
     }
 
     @Override
@@ -240,9 +236,9 @@ public class MonitorService extends AccessibilityService {
         super.onServiceConnected();
         AccessibilityServiceInfo info = new AccessibilityServiceInfo();
         info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED |
-                          AccessibilityEvent.TYPE_VIEW_CLICKED |
-                          AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED |
-                          AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED; // Incluir Enter
+                AccessibilityEvent.TYPE_VIEW_CLICKED |
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED |
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED;
         info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
         info.flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
         info.notificationTimeout = 100;
