@@ -1,15 +1,19 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { db } from '@/firebase/config';
-import { collection, query, where, orderBy, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { db, rtdb } from '@/firebase/config';
+import { 
+  collection, query, where, getDocs, writeBatch, doc, onSnapshot 
+} from 'firebase/firestore';
+import { ref, onValue, remove } from 'firebase/database';
 import { 
   ShieldAlert, Globe, Monitor, Trash2, Clock, CheckCircle, MessageSquare, History, 
-  Search, Calendar, Download, Share2, Zap, AlertTriangle 
+  Search, Calendar, Download, Zap, AlertTriangle, Eraser, Loader2 
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { useToast } from '@/hooks/use-toast';
 
 interface IncidentsTableProps {
   institutionId: string;
@@ -20,284 +24,199 @@ interface IncidentsTableProps {
 export function IncidentsTable({ institutionId, onViewHistory, onSendMessage }: IncidentsTableProps) {
   const [incidents, setIncidents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isCleaning, setIsCleaning] = useState(false);
+  const { toast } = useToast();
   
-  // Estados para filtros
   const [searchTerm, setSearchTerm] = useState('');
   const [fechaInicio, setFechaInicio] = useState('');
   const [fechaFin, setFechaFin] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [exportando, setExportando] = useState(false);
 
+  // 1. Escucha Unificada
   useEffect(() => {
     if (!institutionId) return;
 
-    const q = query(
-      collection(db, "alertas"),
-      where("InstitutoId", "==", institutionId),
-      orderBy("timestamp", "desc")
-    );
+    const rtdbRef = ref(rtdb, 'system_analysis/blocked_attempts');
+    const unsubscribeRTDB = onValue(rtdbRef, (snapshot) => {
+      const data = snapshot.val();
+      const rtdbItems = data ? Object.entries(data).map(([id, value]: [string, any]) => ({
+        id,
+        ...value,
+        source: 'rtdb',
+        timestamp: value.timestamp ? new Date(value.timestamp) : new Date()
+      })).filter(item => item.InstitutoId === institutionId || !item.InstitutoId) : [];
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        timestamp: doc.data().timestamp?.toDate?.() || doc.data().timestamp
-      }));
-      setIncidents(data);
-      setLoading(false);
-    }, (error) => {
-      console.error("Error EDUControlPro Alerts:", error);
-      setLoading(false);
+      const q = query(
+        collection(db, "alertas"),
+        where("InstitutoId", "==", institutionId)
+      );
+
+      const unsubscribeFS = onSnapshot(q, (fsSnapshot) => {
+        const fsItems = fsSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          source: 'firestore',
+          timestamp: doc.data().timestamp?.toDate?.() || doc.data().timestamp
+        }));
+
+        const combined = [...rtdbItems, ...fsItems].sort((a, b) => 
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        );
+        
+        setIncidents(combined);
+        setLoading(false);
+      });
+
+      return () => unsubscribeFS();
     });
 
-    return () => unsubscribe();
+    return () => unsubscribeRTDB();
   }, [institutionId]);
 
-  // Filtrado optimizado con useMemo
+  // --- FUNCIÓN: LIMPIEZA TOTAL ---
+  const clearAllIncidents = async () => {
+    if (!confirm("⚠️ ¿BORRAR TODO? Esta acción limpiará la pantalla y eliminará todos los registros de hoy de la base de datos.")) return;
+    
+    setIsCleaning(true);
+    try {
+      await remove(ref(rtdb, 'system_analysis/blocked_attempts'));
+      const q = query(collection(db, "alertas"), where("InstitutoId", "==", institutionId));
+      const snapshot = await getDocs(q);
+      const batch = writeBatch(db);
+      snapshot.docs.forEach((doc) => { batch.delete(doc.ref); });
+      await batch.commit();
+
+      toast({
+        title: "SISTEMA DEPURADO",
+        description: "Se han eliminado todos los registros de la sesión actual.",
+      });
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error en limpieza"
+      });
+    } finally {
+      setIsCleaning(false);
+    }
+  };
+
   const filteredIncidents = useMemo(() => {
     let filtradas = incidents;
-
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       filtradas = filtradas.filter(inc => 
-        (inc.estudianteNombre?.toLowerCase().includes(term)) ||
         (inc.alumno_asignado?.toLowerCase().includes(term)) ||
+        (inc.deviceId?.toLowerCase().includes(term)) ||
         (inc.aulaId?.toLowerCase().includes(term))
       );
     }
-
-    if (fechaInicio) {
-      const inicio = new Date(fechaInicio);
-      inicio.setHours(0, 0, 0, 0);
-      filtradas = filtradas.filter(inc => new Date(inc.timestamp) >= inicio);
-    }
-
-    if (fechaFin) {
-      const fin = new Date(fechaFin);
-      fin.setHours(23, 59, 59, 999);
-      filtradas = filtradas.filter(inc => new Date(inc.timestamp) <= fin);
-    }
-
     return filtradas;
-  }, [incidents, searchTerm, fechaInicio, fechaFin]);
-
-  // Resumen Estadístico (Valor agregado)
-  const stats = useMemo(() => {
-    const pendientes = incidents.filter(i => i.status !== 'visto').length;
-    const hoy = incidents.filter(inc => {
-      const d = new Date(inc.timestamp);
-      const now = new Date();
-      return d.getDate() === now.getDate() && d.getMonth() === now.getMonth();
-    }).length;
-    return { pendientes, hoy };
-  }, [incidents]);
-
-  const markAsResolved = async (id: string) => {
-    try {
-      await updateDoc(doc(db, "alertas", id), {
-        status: 'visto',
-        resolvedAt: new Date()
-      });
-    } catch (error) {
-      console.error("Error updating status:", error);
-    }
-  };
-
-  const deleteIncident = async (id: string) => {
-    if (!confirm("¿Desea eliminar permanentemente este registro del sistema?")) return;
-    try {
-      await deleteDoc(doc(db, "alertas", id));
-    } catch (error) {
-      console.error("Error deleting incident:", error);
-    }
-  };
-
-  const generatePDF = () => {
-    if (filteredIncidents.length === 0) return;
-    setExportando(true);
-    const docPdf = new jsPDF();
-    
-    docPdf.setFillColor(15, 17, 23);
-    docPdf.rect(0, 0, 210, 25, 'F');
-    docPdf.setTextColor(255, 255, 255);
-    docPdf.setFontSize(16);
-    docPdf.text('REPORTE CRÍTICO DE INCIDENCIAS', 14, 15);
-    
-    const tableRows = filteredIncidents.map(inc => [
-      inc.estudianteNombre || inc.alumno_asignado || 'N/A',
-      inc.aulaId || '-',
-      new Date(inc.timestamp).toLocaleString(),
-      inc.descripcion || inc.urlIntentada || 'Bloqueo Genérico',
-      inc.tipo || 'SISTEMA'
-    ]);
-
-    autoTable(docPdf, {
-      head: [['Alumno', 'Aula', 'Fecha/Hora', 'Detalle', 'Categoría']],
-      body: tableRows,
-      startY: 35,
-      headStyles: { fillColor: [249, 115, 22] },
-      styles: { fontSize: 7 }
-    });
-
-    docPdf.save(`EFAS_Incidencias_${new Date().getTime()}.pdf`);
-    setExportando(false);
-  };
+  }, [incidents, searchTerm]);
 
   if (loading) return (
     <div className="bg-[#0f1117] border border-white/5 rounded-[2.5rem] p-16 text-center shadow-2xl">
-      <div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full mx-auto mb-6"></div>
-      <p className="text-orange-500 font-black text-[11px] uppercase tracking-[0.3em] italic">Sincronizando con Centinela...</p>
+      <Loader2 className="animate-spin w-8 h-8 text-orange-500 mx-auto mb-6" />
+      <p className="text-orange-500 font-black text-[11px] uppercase tracking-[0.3em] italic">Sincronizando Centinela...</p>
     </div>
   );
 
   return (
     <div className="bg-[#0f1117] border border-white/5 rounded-[2.5rem] overflow-hidden shadow-2xl flex flex-col">
       
-      {/* Header Corporativo con Stats */}
+      {/* Header */}
       <div className="p-8 border-b border-white/5 bg-gradient-to-br from-slate-900/50 to-transparent flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div>
           <h2 className="text-xl font-black italic text-white uppercase flex items-center gap-3">
             <ShieldAlert className="text-orange-500 w-6 h-6 animate-pulse" /> Registro de <span className="text-orange-500 underline">Infracciones</span>
           </h2>
-          <div className="flex items-center gap-4 mt-2">
-            <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-              <Zap size={12} className="text-orange-500" /> {incidents.length} Eventos totales
-            </div>
-            {stats.pendientes > 0 && (
-              <div className="flex items-center gap-1.5 text-[10px] font-black text-red-500 uppercase tracking-widest bg-red-500/10 px-2 py-0.5 rounded-full border border-red-500/20">
-                <AlertTriangle size={12} /> {stats.pendientes} Pendientes
-              </div>
-            )}
-          </div>
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">
+            Sede Protegida • {incidents.length} Eventos
+          </p>
         </div>
 
         <div className="flex items-center gap-3">
+            <Button 
+                onClick={clearAllIncidents}
+                disabled={isCleaning || incidents.length === 0}
+                variant="ghost"
+                className="bg-red-500/10 border border-red-500/20 text-red-500 hover:bg-red-500 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-tighter px-4"
+            >
+                {isCleaning ? <Loader2 className="animate-spin mr-2" size={14}/> : <Eraser size={14} className="mr-2" />}
+                Limpiar Pantalla
+            </Button>
+
             <Button 
                 onClick={() => setShowFilters(!showFilters)} 
                 variant="outline"
                 className="bg-slate-900 border-white/10 text-slate-400 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-tighter"
             >
-                <Calendar size={14} className="mr-2" /> {showFilters ? 'Cerrar Filtros' : 'Filtrar Datos'}
+                <Search size={14} className="mr-2" /> {showFilters ? 'Cerrar' : 'Buscar'}
             </Button>
-            <Button onClick={generatePDF} disabled={exportando} className="bg-orange-500 hover:bg-orange-600 rounded-xl text-[10px] font-black uppercase shadow-lg shadow-orange-500/20">
-                <Download size={14} className="mr-2" /> {exportando ? 'Exportando...' : 'PDF'}
+            
+            <Button onClick={() => {}} className="bg-orange-500 hover:bg-orange-600 rounded-xl text-[10px] font-black uppercase">
+                <Download size={14} />
             </Button>
         </div>
       </div>
-
-      {/* Panel de Filtros Animado */}
-      {showFilters && (
-        <div className="p-6 bg-slate-900/30 border-b border-white/5 grid grid-cols-1 sm:grid-cols-3 gap-4 animate-in slide-in-from-top duration-300">
-          <div className="relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
-            <input
-              type="text"
-              placeholder="BUSCAR ALUMNO O AULA..."
-              className="w-full bg-slate-950 border border-white/5 rounded-2xl py-3 pl-12 pr-4 text-white text-[10px] font-bold uppercase outline-none focus:border-orange-500 transition-all"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-          <input type="date" className="bg-slate-950 border border-white/5 rounded-2xl py-3 px-4 text-white text-xs uppercase" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} />
-          <input type="date" className="bg-slate-950 border border-white/5 rounded-2xl py-3 px-4 text-white text-xs uppercase" value={fechaFin} onChange={(e) => setFechaFin(e.target.value)} />
-        </div>
-      )}
 
       {/* Lista de Registros */}
       <div className="divide-y divide-white/5 max-h-[500px] overflow-y-auto custom-scrollbar bg-slate-950/20">
         {filteredIncidents.length === 0 ? (
           <div className="p-20 text-center flex flex-col items-center">
-            <div className="w-16 h-16 bg-slate-900 rounded-full flex items-center justify-center mb-4 border border-white/5">
-                <ShieldAlert className="w-8 h-8 text-slate-700" />
-            </div>
-            <p className="text-slate-600 font-black uppercase text-[10px] tracking-[0.2em]">
-              Zona Segura: No se detectan anomalías
-            </p>
+            <CheckCircle className="w-12 h-12 text-slate-800 mb-4" />
+            <p className="text-slate-600 font-black uppercase text-[10px] tracking-[0.2em]">Monitor en Blanco: Sin incidencias</p>
           </div>
         ) : (
           filteredIncidents.map((inc: any) => (
-            <div 
-              key={inc.id} 
-              className={`p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-all hover:bg-white/[0.02] ${
-                inc.status === 'visto' ? 'opacity-40 grayscale' : 'border-l-4 border-l-orange-500 bg-orange-500/[0.02]'
-              }`}
-            >
-              <div className="flex items-center gap-5 flex-1">
-                <div className={`p-4 rounded-2xl shadow-inner ${
-                  inc.status === 'visto' ? 'bg-slate-900' : 'bg-orange-500/10 border border-orange-500/20'
-                }`}>
-                  {inc.tipo?.includes('URL') || inc.url ? (
-                    <Globe className={`w-5 h-5 ${inc.status === 'visto' ? 'text-slate-500' : 'text-orange-500'}`} />
-                  ) : (
-                    <Monitor className={`w-5 h-5 ${inc.status === 'visto' ? 'text-slate-500' : 'text-orange-500'}`} />
-                  )}
-                </div>
-                
-                <div className="flex-1 overflow-hidden">
-                  <div className="flex items-center gap-3">
-                    <p className="text-white font-black text-sm uppercase italic tracking-tighter">
-                      {inc.estudianteNombre || inc.alumno_asignado || 'AGENTE DESCONOCIDO'}
-                    </p>
-                    <span className="text-[9px] bg-slate-900 px-2 py-0.5 rounded-lg border border-white/5 text-slate-500 font-mono">
-                      {inc.deviceId?.substring(0, 12)}...
-                    </span>
+            <div key={inc.id} className="p-6 flex items-center justify-between hover:bg-white/[0.02] transition-all">
+               <div className="flex items-center gap-4 w-full">
+                  <div className="p-3 bg-orange-500/10 rounded-xl text-orange-500 shrink-0">
+                    {inc.url ? <Globe size={20}/> : <Monitor size={20}/>}
                   </div>
-                  
-                  <div className="flex items-center gap-2 mt-1.5 mb-2">
-                    <span className="text-[8px] font-black text-orange-500/70 uppercase">Aula: {inc.aulaId || 'EXTERN'}</span>
-                    <span className="text-slate-700">•</span>
-                    <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest italic">
-                        {inc.timestamp ? new Date(inc.timestamp).toLocaleString() : 'JUSTO AHORA'}
-                    </span>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full">
+                    {/* CAMPO 1: ALUMNO ASIGNADO */}
+                    <div>
+                      <p className="text-[8px] text-slate-500 font-black uppercase tracking-tighter">Alumno</p>
+                      <p className="text-xs font-black text-white uppercase italic truncate">
+                        {inc.alumno_asignado || inc.estudianteNombre || 'SIN NOMBRE'}
+                      </p>
+                    </div>
+
+                    {/* CAMPO 2: AULA Y SECCION */}
+                    <div>
+                      <p className="text-[8px] text-slate-500 font-black uppercase tracking-tighter">Ubicación</p>
+                      <p className="text-xs font-black text-white uppercase italic">
+                        {inc.aulaId || 'N/A'} - {inc.seccion || 'S/S'}
+                      </p>
+                    </div>
+
+                    {/* CAMPO 3: ID DISPOSITIVO */}
+                    <div>
+                      <p className="text-[8px] text-slate-500 font-black uppercase tracking-tighter">ID Equipo</p>
+                      <p className="text-[10px] font-mono text-slate-400 truncate">
+                        {inc.deviceId?.substring(0, 15) || 'NO_ID'}
+                      </p>
+                    </div>
+
+                    {/* CAMPO 4: HORA E INFRACCION */}
+                    <div className="text-right">
+                      <p className="text-[8px] text-orange-500 font-black uppercase tracking-tighter">
+                        {new Date(inc.timestamp).toLocaleTimeString()}
+                      </p>
+                      <p className="text-[9px] text-red-500 font-bold truncate italic">
+                        {inc.url || inc.descripcion || 'BLOQUEO'}
+                      </p>
+                    </div>
                   </div>
-
-                  <p className="text-slate-400 text-xs font-bold leading-relaxed truncate max-w-md">
-                    {inc.descripcion || inc.urlIntentada || inc.url || 'INTENTO DE VIOLACIÓN DE PROTOCOLO'}
-                  </p>
-                </div>
-              </div>
-              
-              <div className="flex items-center gap-2 w-full sm:w-auto justify-end bg-slate-950/50 p-2 sm:bg-transparent rounded-xl">
-                {onViewHistory && (
-                  <Button onClick={() => onViewHistory(inc.deviceId, inc.estudianteNombre || inc.alumno_asignado)} variant="ghost" size="icon" className="text-slate-500 hover:text-blue-500 hover:bg-blue-500/10 rounded-xl" title="Historial">
-                    <History size={18} />
-                  </Button>
-                )}
-                {onSendMessage && (
-                  <Button onClick={() => onSendMessage(inc.deviceId, inc.estudianteNombre || inc.alumno_asignado)} variant="ghost" size="icon" className="text-slate-500 hover:text-green-500 hover:bg-green-500/10 rounded-xl" title="Notificar">
-                    <MessageSquare size={18} />
-                  </Button>
-                )}
-                
-                <div className="h-6 w-[1px] bg-white/5 mx-1 hidden sm:block" />
-
-                {inc.status !== 'visto' && (
-                  <Button 
-                    onClick={() => markAsResolved(inc.id)}
-                    className="bg-orange-500/10 text-orange-500 hover:bg-orange-500 hover:text-white text-[10px] font-black rounded-xl h-9 px-4 border border-orange-500/20 transition-all"
-                  >
-                    <CheckCircle className="w-3 h-3 mr-2" /> VISTO
-                  </Button>
-                )}
-                
-                <Button 
-                  onClick={() => deleteIncident(inc.id)}
-                  variant="ghost" 
-                  size="icon" 
-                  className="text-slate-700 hover:text-red-500 hover:bg-red-500/10 rounded-xl"
-                >
-                  <Trash2 size={18} />
-                </Button>
-              </div>
+               </div>
             </div>
           ))
         )}
       </div>
 
-      <div className="p-4 bg-slate-950/50 border-t border-white/5 flex justify-center">
-            <p className="text-[9px] font-black text-slate-700 uppercase tracking-[0.3em] italic">
-                EFAS ServiControl v2.4 • Sistema de Control Parental Educativo
-            </p>
+      <div className="p-4 bg-slate-950/50 border-t border-white/5 text-center">
+            <p className="text-[8px] font-black text-slate-700 uppercase tracking-[0.3em] italic">EFAS ServiControl v2.4</p>
       </div>
     </div>
   );

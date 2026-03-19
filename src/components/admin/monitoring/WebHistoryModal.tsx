@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useEffect, useState, useMemo } from 'react';
-import { db } from '@/firebase/config';
-import { collection, query, where, orderBy, limit, onSnapshot, deleteDoc, getDocs, doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { X, Globe, Clock, ExternalLink, ShieldAlert, Download, Calendar, Search, Trash2, Zap, Shield } from 'lucide-react';
+import { db, rtdb } from '@/firebase/config'; // Importamos rtdb
+import { collection, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { ref, set, serverTimestamp as rtdbTimestamp } from 'firebase/database'; // Importaciones de RTDB
+import { X, Globe, Clock, ExternalLink, ShieldAlert, Download, Calendar, Search, Shield } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -16,7 +17,7 @@ interface WebHistory {
 interface WebHistoryModalProps {
   isOpen: boolean;
   onClose: () => void;
-  deviceId: string;          // Cambiado de tabletId a deviceId
+  deviceId: string;
   alumnoNombre: string;
 }
 
@@ -79,23 +80,35 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre }: Web
     return result;
   }, [history, fechaInicio, fechaFin]);
 
-  // FUNCIÓN CRÍTICA: Bloqueo de Dominio Directo
+  // FUNCIÓN CORREGIDA: Bloqueo vía Realtime Database para optimizar cuotas
   const handleBlockDomain = async (rawUrl: string) => {
     try {
       setBlockingUrl(rawUrl);
-      // Extraer dominio (ej: youtube.com)
-      const domain = new URL(rawUrl).hostname.replace('www.', '');
       
-      const blockRef = doc(db, 'blocked_domains', domain);
-      await setDoc(blockRef, {
+      // Extraer dominio de forma segura
+      let domain = "";
+      try {
+        const urlObj = new URL(rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`);
+        domain = urlObj.hostname.replace('www.', '').toLowerCase();
+      } catch (e) {
+        domain = rawUrl.split('/')[0].replace('www.', '').toLowerCase();
+      }
+
+      if (!domain) throw new Error("URL Inválida");
+
+      // RTDB no permite puntos en las llaves, los reemplazamos por guiones bajos para el ID del nodo
+      const rtdbKey = domain.replace(/\./g, '_');
+      const blockRef = ref(rtdb, `configuracion_global/blacklist/${rtdbKey}`);
+
+      await set(blockRef, {
         domain: domain,
         addedBy: 'Admin_Centinela',
-        timestamp: serverTimestamp(),
+        timestamp: rtdbTimestamp(),
         reason: `Bloqueado desde historial de ${alumnoNombre}`,
         active: true
       });
 
-      alert(`Dominio ${domain} ha sido añadido a la Lista Negra Global.`);
+      alert(`Dominio ${domain} añadido a la Lista Negra Global (RTDB).`);
     } catch (err) {
       console.error("Error al bloquear:", err);
       alert("No se pudo procesar el bloqueo del dominio.");
@@ -195,7 +208,6 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre }: Web
                     </div>
                   </div>
                   
-                  {/* ACCIONES: Bloqueo y Link */}
                   <div className="flex items-center gap-2">
                     <button 
                       onClick={() => handleBlockDomain(item.url)}

@@ -1,138 +1,170 @@
-package com.educontrolpro.services;
+package com.educontrolpro;
 
-import android.accessibilityservice.AccessibilityService;
-import android.accessibilityservice.AccessibilityServiceInfo;
+import android.Manifest;
+import android.app.admin.DevicePolicyManager;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
-import android.view.accessibility.AccessibilityEvent;
-import android.view.accessibility.AccessibilityNodeInfo;
-import java.util.Arrays;
-import java.util.List;
+import android.util.Log;
+import android.widget.Toast;
 
-public class MonitorService extends AccessibilityService {
+import com.getcapacitor.BridgeActivity;
+import com.capacitorjs.plugins.device.DevicePlugin;
 
-    // --- CONFIGURACIÓN DE BLOQUEO ---
-    private final List<String> blacklistedWords = Arrays.asList(
-        "porno", "juegos", "casino", "armas", "gore", "sexo", "xxx", "hentai", "dating", "apuestas"
-    );
+// IMPORTACIONES PARA PERMISOS
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+
+// HÍBRIDO: Realtime DB + Firestore
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.firestore.FieldValue;
+
+import java.util.Map;
+import java.util.HashMap;
+
+// IMPORTACIÓN DEL SERVICIO
+import com.educontrolpro.services.MonitorService;
+
+public class MainActivity extends BridgeActivity {
+    private static final int DEVICE_ADMIN_REQUEST = 101;
+    private static final String CAPACITOR_PREFS = "CapacitorStorage";
+    private static final String ADMIN_PREFS = "AdminPrefs";
+    private static final String KEY_UNLOCKED = "is_unlocked";
+    private static final String KEY_DEVICE_ID = "deviceId";
+    private static final String TAG = "MainActivity";
     
-    private final List<String> forbiddenApps = Arrays.asList(
-        "com.android.settings", "com.android.vending", "com.google.android.gms",
-        "com.facebook.katana", "com.facebook.orca", "com.instagram.android",
-        "com.zhiliaoapp.musically", "com.snapchat.android", "com.twitter.android",
-        "org.telegram.messenger", "org.thunderdog.challegram", "com.whatsapp",
-        "com.reddit.frontpage", "com.discord", "org.thoughtcrime.securesms",
-        "com.viber.voip", "com.skype.raider", "com.netflix.mediaclient",
-        "com.google.android.youtube", "com.bumble.app", "com.tinder"
-    );
-
-    private final List<String> browserPackages = Arrays.asList(
-        "com.android.chrome", "org.mozilla.firefox", "com.opera.browser", 
-        "com.microsoft.emmx", "com.sec.android.app.sbrowser"
-    );
-
-    // IDs de barras y botones de "Ir/Buscar" en navegadores
-    private final List<String> searchActionIds = Arrays.asList(
-        "com.android.chrome:id/url_bar",
-        "com.android.chrome:id/line_1", // Sugerencias de búsqueda
-        "org.mozilla.firefox:id/mozac_browser_toolbar_url_view",
-        "com.opera.browser:id/url_field"
-    );
+    private FirebaseDatabase realtimeDb;
+    private DatabaseReference deviceRealtimeRef;
+    private FirebaseFirestore firestore;
 
     @Override
-    public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (event.getPackageName() == null) return;
-        String packageName = event.getPackageName().toString().toLowerCase();
+    public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        
+        // 1. Inicializar Firebase
+        realtimeDb = FirebaseDatabase.getInstance();
+        firestore = FirebaseFirestore.getInstance();
+        
+        // 2. Registrar Plugins de Capacitor (Solo los esenciales)
+        registerPlugin(DevicePlugin.class);
 
-        // 1. BLOQUEO PERIMETRAL (Ajustes, Tiendas, Redes, Mensajería)
-        if (shouldBlockApp(packageName)) {
-            performGlobalAction(GLOBAL_ACTION_HOME);
-            return;
-        }
+        // 3. Configuración de Seguridad y Estado
+        solicitarPermisosBasicos();
+        checkSecurityPrivileges();
+        checkVinculacionYEstado();
 
-        // 2. FILTRADO DE NAVEGACIÓN (Solo al ejecutar acción: Click o cambio de ventana)
-        if (browserPackages.contains(packageName)) {
-            int eventType = event.getEventType();
-            if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED || 
-                eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+        logToRealtime("APP_START", "MainActivity iniciada correctamente");
+    }
+
+    // --- LÓGICA DE LOGS SISTEMA ---
+    private void logToRealtime(String tipo, String mensaje) {
+        try {
+            SharedPreferences prefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
+            String deviceId = prefs.getString(KEY_DEVICE_ID, null);
+            if (deviceId != null) {
+                DatabaseReference logRef = realtimeDb.getReference("dispositivos")
+                    .child(deviceId).child("system_logs").child(String.valueOf(System.currentTimeMillis()));
                 
-                validateAndCleanSearch(packageName);
+                Map<String, Object> logEntry = new HashMap<>();
+                logEntry.put("tipo", tipo);
+                logEntry.put("mensaje", mensaje);
+                logEntry.put("timestamp", System.currentTimeMillis());
+                logRef.setValue(logEntry);
             }
+        } catch (Exception e) {
+            Log.e(TAG, "Error log: " + e.getMessage());
         }
     }
 
-    private void validateAndCleanSearch(String currentPackage) {
-        AccessibilityNodeInfo rootNode = getRootInActiveWindow();
-        if (rootNode == null) return;
-
-        // Verificar que estamos analizando la ventana correcta
-        if (rootNode.getPackageName() == null || !rootNode.getPackageName().toString().equals(currentPackage)) {
-            return;
+    // --- PERMISOS ---
+    private void solicitarPermisosBasicos() {
+        String[] permisos = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) ?
+            new String[]{Manifest.permission.CAMERA, Manifest.permission.POST_NOTIFICATIONS} :
+            new String[]{Manifest.permission.CAMERA};
+        
+        boolean necesitaSolicitud = false;
+        for (String p : permisos) {
+            if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) {
+                necesitaSolicitud = true; 
+                break;
+            }
         }
+        if (necesitaSolicitud) ActivityCompat.requestPermissions(this, permisos, 1001);
+    }
 
-        for (String viewId : searchActionIds) {
-            List<AccessibilityNodeInfo> nodes = rootNode.findAccessibilityNodeInfosByViewId(viewId);
-            
-            if (nodes != null && !nodes.isEmpty()) {
-                AccessibilityNodeInfo searchNode = nodes.get(0);
-                if (searchNode == null) continue;
+    // --- ACCIONES DE SEGURIDAD ---
+    public void reactivarSeguridad() {
+        getSharedPreferences(ADMIN_PREFS, MODE_PRIVATE).edit().putBoolean(KEY_UNLOCKED, false).apply();
+        reiniciarMonitorService();
+        Toast.makeText(this, "Protección EFAS Reactivada", Toast.LENGTH_SHORT).show();
+    }
 
-                CharSequence rawText = searchNode.getText();
-                String searchText = (rawText != null) ? rawText.toString().toLowerCase().trim() : "";
-
-                // Si la búsqueda contiene contenido prohibido
-                if (isForbiddenContent(searchText)) {
-                    
-                    // A. LIMPIEZA INMEDIATA
-                    Bundle arguments = new Bundle();
-                    arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "");
-                    searchNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments);
-                    
-                    // B. EXPULSIÓN AL HOME
-                    performGlobalAction(GLOBAL_ACTION_HOME);
-                    break; // Salir del bucle tras la expulsión
+    public void liberarDispositivoTotal() {
+        DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
+        ComponentName admin = new ComponentName(this, AdminReceiver.class);
+        try {
+            if (dpm.isDeviceOwnerApp(getPackageName())) {
+                dpm.setUninstallBlocked(admin, getPackageName(), false);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    dpm.clearDeviceOwnerApp(getPackageName());
                 }
+                stopService(new Intent(this, MonitorService.class));
+                logToRealtime("LIBERACION", "Dispositivo liberado");
+                
+                getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE).edit().clear().apply();
+                finishAffinity();
             }
+        } catch (Exception e) {
+            logToRealtime("LIBERACION_ERROR", e.getMessage());
         }
     }
 
-    private boolean shouldBlockApp(String packageName) {
-        // Bloqueo por coincidencia de paquete
-        for (String app : forbiddenApps) {
-            if (packageName.startsWith(app)) return true;
+    private void reiniciarMonitorService() {
+        Intent intent = new Intent(this, MonitorService.class);
+        stopService(intent);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent);
+        } else {
+            startService(intent);
         }
-        // Bloqueo por palabra clave en el nombre del paquete (juegos/adultos)
-        List<String> keywords = Arrays.asList("casino", "poker", "adult", "porn", "sex", "freefire", "bet");
-        for (String keyword : keywords) {
-            if (packageName.contains(keyword)) return true;
-        }
-        return false;
     }
 
-    private boolean isForbiddenContent(String text) {
-        if (text == null || text.isEmpty()) return false;
-        for (String word : blacklistedWords) {
-            if (text.contains(word)) return true;
+    private void checkSecurityPrivileges() {
+        DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
+        ComponentName admin = new ComponentName(this, AdminReceiver.class);
+        
+        if (!dpm.isDeviceOwnerApp(getPackageName()) && !dpm.isAdminActive(admin)) {
+            Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
+            intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin); // Corregido: EXTRA_DEVICE_ADMIN
+            intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Protección requerida.");
+            startActivity(intent);
         }
-        return false;
+    }
+
+    private void checkVinculacionYEstado() {
+        SharedPreferences cap = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
+        String dId = cap.getString(KEY_DEVICE_ID, null);
+        if (dId != null) {
+            deviceRealtimeRef = realtimeDb.getReference("dispositivos").child(dId);
+            reiniciarMonitorService();
+        }
     }
 
     @Override
-    public void onServiceConnected() {
-        super.onServiceConnected();
-        AccessibilityServiceInfo info = new AccessibilityServiceInfo();
-        
-        // Configuramos los eventos de escucha
-        info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED |
-                         AccessibilityEvent.TYPE_VIEW_CLICKED;
-        
-        info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
-        info.notificationTimeout = 50; 
-        info.flags = AccessibilityServiceInfo.DEFAULT | 
-                     AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS |
-                     AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
-        
-        setServiceInfo(info);
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (intent != null && intent.getAction() != null) {
+            if (intent.getAction().equals("ACTION_LIBERAR_TAB")) {
+                liberarDispositivoTotal();
+            } else if (intent.getAction().equals("ACTION_REBLOQUEAR_TAB")) {
+                reactivarSeguridad();
+            }
+        }
     }
-
-    @Override public void onInterrupt() {}
 }

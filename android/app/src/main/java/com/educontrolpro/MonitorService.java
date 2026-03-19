@@ -9,10 +9,16 @@ import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 
+import androidx.annotation.NonNull;
+
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ServerValue;
+import com.google.firebase.database.ValueEventListener;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -25,18 +31,24 @@ public class MonitorService extends AccessibilityService {
     private static final String KEY_DEVICE_ID = "deviceId";
 
     private DatabaseReference mDatabase;
+    private DatabaseReference blacklistRef;
     private String cachedDeviceId;
 
-    // --- CONFIGURACIÓN DE BLOQUEO ---
+    // --- LISTA NEGRA DINÁMICA (Sincronizada con Dashboard) ---
+    private final List<String> dynamicBlacklist = new ArrayList<>();
+
+    // --- PALABRAS CLAVE PROHIBIDAS (Filtro de Contenido) ---
     private final List<String> blacklistedWords = Arrays.asList(
         "porno", "juegos", "casino", "armas", "gore", "sexo", "xxx", "hentai", "dating", "apuestas"
     );
     
+    // --- NAVEGADORES SOPORTADOS ---
     private final List<String> browserPackages = Arrays.asList(
         "com.android.chrome", "org.mozilla.firefox", "com.opera.browser", 
         "com.microsoft.emmx", "com.sec.android.app.sbrowser"
     );
 
+    // --- IDs DE VISTAS PARA CAPTURAR URLs ---
     private final List<String> searchActionIds = Arrays.asList(
         "com.android.chrome:id/url_bar",
         "com.android.chrome:id/line_1",
@@ -47,13 +59,19 @@ public class MonitorService extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
-        // Inicializar referencia a Firebase
-        mDatabase = FirebaseDatabase.getInstance().getReference("system_analysis/blocked_attempts");
         
-        // Cargar DeviceID desde las preferencias de Capacitor
+        // Inicializar Firebase (Solo Realtime Database para optimizar cuotas)
+        mDatabase = FirebaseDatabase.getInstance().getReference("system_analysis/blocked_attempts");
+        blacklistRef = FirebaseDatabase.getInstance().getReference("configuracion_global/blacklist");
+
+        // Cargar DeviceID desde preferencias de Capacitor
         SharedPreferences prefs = getSharedPreferences(CAPACITOR_PREFS, Context.MODE_PRIVATE);
         cachedDeviceId = prefs.getString(KEY_DEVICE_ID, "unknown_device");
 
+        // Iniciar Sincronización de Lista Negra
+        startBlacklistSync();
+
+        // Configuración estricta de Accesibilidad
         AccessibilityServiceInfo info = new AccessibilityServiceInfo();
         info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED | AccessibilityEvent.TYPE_VIEW_CLICKED;
         info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
@@ -62,6 +80,29 @@ public class MonitorService extends AccessibilityService {
                      AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS |
                      AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
         setServiceInfo(info);
+        
+        Log.d(TAG, "MonitorService Conectado - Modo Sin VPN");
+    }
+
+    private void startBlacklistSync() {
+        blacklistRef.addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                dynamicBlacklist.clear();
+                for (DataSnapshot domainSnapshot : snapshot.getChildren()) {
+                    String domain = domainSnapshot.child("domain").getValue(String.class);
+                    if (domain != null) {
+                        dynamicBlacklist.add(domain.toLowerCase());
+                    }
+                }
+                Log.d(TAG, "Lista Negra EDUControlPro Actualizada: " + dynamicBlacklist.size() + " sitios");
+            }
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError error) {
+                Log.e(TAG, "Error en Sincronización RTDB");
+            }
+        });
     }
 
     @Override
@@ -69,16 +110,17 @@ public class MonitorService extends AccessibilityService {
         if (event.getPackageName() == null) return;
         String packageName = event.getPackageName().toString().toLowerCase();
 
+        // Filtrar solo eventos de navegadores para no sobrecargar el CPU
         if (browserPackages.contains(packageName)) {
             int eventType = event.getEventType();
             if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED || 
                 eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-                validateAndCleanSearch(packageName);
+                validateAndProtectNavigation();
             }
         }
     }
 
-    private void validateAndCleanSearch(String currentPackage) {
+    private void validateAndProtectNavigation() {
         AccessibilityNodeInfo rootNode = getRootInActiveWindow();
         if (rootNode == null) return;
 
@@ -89,42 +131,51 @@ public class MonitorService extends AccessibilityService {
                 CharSequence rawText = searchNode.getText();
                 String searchText = (rawText != null) ? rawText.toString().toLowerCase().trim() : "";
 
-                if (isForbiddenContent(searchText)) {
-                    // 1. ENVIAR LOG A FIREBASE (Antes de limpiar y salir)
-                    sendReportToFirebase(searchText);
-
-                    // 2. LIMPIEZA Y BLOQUEO
-                    Bundle arguments = new Bundle();
-                    arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "");
-                    searchNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments);
+                if (isForbidden(searchText)) {
+                    // Acción de Bloqueo: Reportar y Cerrar
+                    sendSecurityReport(searchText);
+                    
+                    // Limpiar el texto de la barra (Capa de Seguridad Estudiantil)
+                    Bundle args = new Bundle();
+                    args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "");
+                    searchNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
+                    
+                    // Expulsar al usuario de la navegación prohibida
                     performGlobalAction(GLOBAL_ACTION_HOME);
+                    Log.w(TAG, "Bloqueo Centinela ejecutado para: " + searchText);
                     break;
                 }
+                searchNode.recycle();
             }
         }
+        rootNode.recycle();
     }
 
-    private void sendReportToFirebase(String forbiddenUrl) {
+    private void sendSecurityReport(String url) {
         if (mDatabase == null) return;
 
-        // Estructura que espera tu Dashboard en Next.js
-        Map<String, Object> report = new HashMap<>();
-        report.put("deviceId", cachedDeviceId);
-        report.put("url", forbiddenUrl);
-        report.put("timestamp", ServerValue.TIMESTAMP); // Timestamp del servidor para precisión
-        report.put("status", "blocked");
+        Map<String, Object> log = new HashMap<>();
+        log.put("deviceId", cachedDeviceId);
+        log.put("url", url);
+        log.put("timestamp", ServerValue.TIMESTAMP);
+        log.put("status", "blocked");
 
-        // Generar un ID único para el log y subirlo
-        mDatabase.push().setValue(report)
-            .addOnSuccessListener(aVoid -> Log.d(TAG, "Log enviado: " + forbiddenUrl))
-            .addOnFailureListener(e -> Log.e(TAG, "Error al enviar log: " + e.getMessage()));
+        mDatabase.push().setValue(log);
     }
 
-    private boolean isForbiddenContent(String text) {
+    private boolean isForbidden(String text) {
         if (text == null || text.isEmpty()) return false;
+
+        // Comprobación contra palabras estáticas
         for (String word : blacklistedWords) {
             if (text.contains(word)) return true;
         }
+
+        // Comprobación contra dominios dinámicos (Dashboard)
+        for (String domain : dynamicBlacklist) {
+            if (text.contains(domain)) return true;
+        }
+
         return false;
     }
 

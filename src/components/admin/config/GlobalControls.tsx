@@ -20,6 +20,7 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
   const [dispositivos, setDispositivos] = useState<any[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string>('todos');
   const [techModeStatus, setTechModeStatus] = useState<boolean>(false);
+  const [shieldModeStatus, setShieldModeStatus] = useState<boolean>(false); // Nuevo estado
   const [cleaningLogs, setCleaningLogs] = useState(false);
   const { toast } = useToast();
 
@@ -50,53 +51,48 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
     });
   }, [institutionId]);
 
-  // 3. Sync de estado del Switch (Visualización)
+  // 3. Sync de estado de los Switches (Visualización)
   useEffect(() => {
     if (selectedDevice === 'todos') {
       setTechModeStatus(config.allowAccessGlobal || false);
+      setShieldModeStatus(config.shieldModeGlobal || false);
     } else {
       const dev = dispositivos.find(d => d.id === selectedDevice);
       setTechModeStatus(dev?.admin_mode_enable || false);
+      setShieldModeStatus(dev?.shield_mode_enable || false);
     }
-  }, [selectedDevice, dispositivos, config.allowAccessGlobal]);
+  }, [selectedDevice, dispositivos, config]);
 
   // 4. Lógica de Control (Dual Write: RTDB + Firestore)
-  const toggleTechMode = async (enable: boolean) => {
+  const toggleControl = async (type: 'tech' | 'shield', enable: boolean) => {
+    const rtdbKey = type === 'tech' ? 'admin_mode_enable' : 'shield_mode_enable';
+    const fsGlobalKey = type === 'tech' ? 'allowAccessGlobal' : 'shieldModeGlobal';
+    const label = type === 'tech' ? 'MODO TÉCNICO' : 'MODO BLINDADO';
+
     try {
       if (selectedDevice === 'todos') {
         // Acciones Globales
-        await updateDoc(doc(db, 'institutions', institutionId), { allowAccessGlobal: enable });
+        await updateDoc(doc(db, 'institutions', institutionId), { [fsGlobalKey]: enable });
         await update(ref(rtdb, `config/instituciones/${institutionId}`), { 
-          techModeGlobal: enable, 
+          [`${type}ModeGlobal`]: enable, 
           updatedAt: Date.now() 
         });
-        toast({ title: "MODO TÉCNICO GLOBAL ACTUALIZADO" });
+        toast({ title: `${label} GLOBAL ACTUALIZADO` });
       } else {
-        // --- ACCIÓN INDIVIDUAL ESTANDARIZADA ---
-        
-        // A. Actualizar RTDB (Respuesta inmediata de la tablet)
+        // Acción Individual
         await update(ref(rtdb, `dispositivos/${selectedDevice}`), { 
-          admin_mode_enable: enable,
+          [rtdbKey]: enable,
           last_command_ts: Date.now()
         });
 
-        // B. Actualizar/Crear en Firestore (Estandarizado a deviceId)
         const firestoreRef = doc(db, 'dispositivos', selectedDevice);
-        const docSnap = await getDoc(firestoreRef);
-
-        const dataPayload = {
-          deviceId: selectedDevice, // NORMALIZADO
+        await setDoc(firestoreRef, {
+          deviceId: selectedDevice,
           InstitutoId: institutionId,
-          admin_mode_enable: enable,
+          [rtdbKey]: enable,
           updatedAt: serverTimestamp(),
           syncSource: 'dashboard_master'
-        };
-
-        if (!docSnap.exists()) {
-          await setDoc(firestoreRef, { ...dataPayload, createdAt: serverTimestamp() });
-        } else {
-          await updateDoc(firestoreRef, dataPayload);
-        }
+        }, { merge: true });
 
         toast({ title: `EQUIPO ${selectedDevice} ACTUALIZADO` });
       }
@@ -144,15 +140,15 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
       <div className="grid grid-cols-1 gap-4">
         <ControlSwitch 
           active={techModeStatus} 
-          onToggle={toggleTechMode} 
+          onToggle={(v: boolean) => toggleControl('tech', v)} 
           icon={<UserCog className="w-5 h-5" />} 
           title="ANULACIÓN TÉCNICA" 
           desc="LIBERAR SEGURIDAD (SYNC: RTDB/FS)" 
           color="orange" 
         />
         <ControlSwitch 
-          active={config.shieldMode} 
-          onToggle={(v: boolean) => updateDoc(doc(db, 'institutions', institutionId), { shieldMode: v })} 
+          active={shieldModeStatus} 
+          onToggle={(v: boolean) => toggleControl('shield', v)} 
           icon={<ShieldAlert className="w-5 h-5" />} 
           title="MODO BLINDADO" 
           desc="RESTRICCIÓN TOTAL DE DISPOSITIVO" 
@@ -170,7 +166,6 @@ export function GlobalControls({ institutionId }: { institutionId: string }) {
   );
 }
 
-// Subcomponente reutilizable
 function ControlSwitch({ active, onToggle, icon, title, desc, color }: any) {
   const colors: any = { 
     orange: "data-[state=checked]:bg-orange-500", 
@@ -180,7 +175,7 @@ function ControlSwitch({ active, onToggle, icon, title, desc, color }: any) {
   return (
     <div className="flex items-center justify-between p-6 bg-white/[0.01] rounded-[2.5rem] border border-white/5 hover:bg-white/[0.03] transition-all group">
       <div className="flex gap-5 items-center">
-        <div className={`p-4 rounded-2xl transition-all duration-500 ${active ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'bg-slate-900 text-slate-700'}`}>
+        <div className={`p-4 rounded-2xl transition-all duration-500 ${active ? (color === 'orange' ? 'bg-orange-500 shadow-orange-500/20' : 'bg-blue-600 shadow-blue-500/20') + ' text-white shadow-lg' : 'bg-slate-900 text-slate-700'}`}>
           {icon}
         </div>
         <div>
