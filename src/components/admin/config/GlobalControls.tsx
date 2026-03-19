@@ -1,329 +1,194 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { db, rtdb } from '@/firebase/config'; // Importamos rtdb
-import { collection, doc, onSnapshot, updateDoc, setDoc, query, where, getDocs, getDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
-import { ref, update, set } from 'firebase/database'; // Métodos de RTDB
-import { Power, ShieldAlert, GlobeLock, Zap, Loader2, Lock, RotateCcw, List, Wifi, UserCog, Trash2 } from 'lucide-react';
+import { db, rtdb } from '@/firebase/config';
+import { 
+  doc, onSnapshot, updateDoc, setDoc, getDoc, serverTimestamp 
+} from 'firebase/firestore';
+import { ref, onValue, update } from 'firebase/database';
+import { 
+  ShieldAlert, Zap, Loader2, RotateCcw, 
+  UserCog, Trash2, ChevronDown, Smartphone 
+} from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 
-interface Dispositivo {
-  id: string;
-  alumno_asignado?: string;
-  vpn_activa?: boolean;
-  admin_mode_enable?: boolean;
-  [key: string]: any;
-}
-
-interface InstitucionConfig {
-  blockAllBrowsing: boolean;
-  useBlacklist: boolean;
-  useWhitelist: boolean;
-  shieldMode: boolean;
-  cortarNavegacion: boolean;
-  pinBloqueo: string;
-  maintenanceMode: boolean;
-  vpn_enabled: boolean;
-  vpn_status: string;
-  allowAccessGlobal?: boolean;
-  blacklist?: string[];
-}
-
 export function GlobalControls({ institutionId }: { institutionId: string }) {
-  const [config, setConfig] = useState<InstitucionConfig>({
-    blockAllBrowsing: false,
-    useBlacklist: false,
-    useWhitelist: false,
-    shieldMode: false,
-    cortarNavegacion: false,
-    pinBloqueo: '',
-    maintenanceMode: false,
-    vpn_enabled: false,
-    vpn_status: 'off',
-    allowAccessGlobal: false
-  });
+  const [config, setConfig] = useState<any>({});
   const [loading, setLoading] = useState(true);
-  const [dispositivos, setDispositivos] = useState<Dispositivo[]>([]);
+  const [dispositivos, setDispositivos] = useState<any[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string>('todos');
   const [techModeStatus, setTechModeStatus] = useState<boolean>(false);
-  const [syncing, setSyncing] = useState(false);
   const [cleaningLogs, setCleaningLogs] = useState(false);
   const { toast } = useToast();
 
-  // 1. Cargar Configuración de la Institución
+  // 1. Cargar Configuración de la Sede (Firestore)
   useEffect(() => {
-    const instRef = doc(db, 'institutions', institutionId);
-    const unsubscribe = onSnapshot(instRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        setConfig(prev => ({ ...prev, ...data }));
-      }
+    if (!institutionId) return;
+    const unsub = onSnapshot(doc(db, 'institutions', institutionId), (snap) => {
+      if (snap.exists()) setConfig(snap.data());
       setLoading(false);
     });
-    return () => unsubscribe();
+    return () => unsub();
   }, [institutionId]);
 
-  // 2. Cargar Lista de Dispositivos
+  // 2. Escucha en RTDB (Origen de la verdad para tablets activas)
   useEffect(() => {
-    const q = query(collection(db, 'dispositivos'), where('InstitutoId', '==', institutionId));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const dispositivosData = snapshot.docs.map(d => ({ 
-        id: d.id, 
-        ...d.data() 
-      } as Dispositivo));
-      setDispositivos(dispositivosData);
+    if (!institutionId) return;
+    const dbRef = ref(rtdb, 'dispositivos');
+    return onValue(dbRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const lista = Object.entries(data)
+          .map(([id, info]: [string, any]) => ({ id, ...info }))
+          .filter(d => d.InstitutoId === institutionId);
+        setDispositivos(lista);
+      } else {
+        setDispositivos([]);
+      }
     });
-    return () => unsubscribe();
   }, [institutionId]);
 
-  // 3. Listener para el switch técnico
+  // 3. Sync de estado del Switch (Visualización)
   useEffect(() => {
     if (selectedDevice === 'todos') {
       setTechModeStatus(config.allowAccessGlobal || false);
-      return;
+    } else {
+      const dev = dispositivos.find(d => d.id === selectedDevice);
+      setTechModeStatus(dev?.admin_mode_enable || false);
     }
+  }, [selectedDevice, dispositivos, config.allowAccessGlobal]);
 
-    const devRef = doc(db, 'dispositivos', selectedDevice);
-    const unsub = onSnapshot(devRef, (snap) => {
-      if (snap.exists()) {
-        setTechModeStatus(snap.data().admin_mode_enable || false);
-      } else {
-        setTechModeStatus(false);
-      }
-    });
-    return () => unsub();
-  }, [selectedDevice, config.allowAccessGlobal]);
-
-  // 4. Cambiar Modo Técnico (Firestore + RTDB Sync)
+  // 4. Lógica de Control (Dual Write: RTDB + Firestore)
   const toggleTechMode = async (enable: boolean) => {
     try {
       if (selectedDevice === 'todos') {
-        // Firestore update
+        // Acciones Globales
         await updateDoc(doc(db, 'institutions', institutionId), { allowAccessGlobal: enable });
-        
-        const q = query(collection(db, 'dispositivos'), where('InstitutoId', '==', institutionId));
-        const snap = await getDocs(q);
-        const promises = snap.docs.map(d => 
-          updateDoc(d.ref, { admin_mode_enable: enable })
-        );
-        await Promise.all(promises);
-
-        // RTDB Sync para despliegue instantáneo
-        await update(ref(rtdb, `config/instituciones/${institutionId}`), {
-          techModeGlobal: enable,
-          lastUpdate: new Date().toISOString()
+        await update(ref(rtdb, `config/instituciones/${institutionId}`), { 
+          techModeGlobal: enable, 
+          updatedAt: Date.now() 
         });
-        
-        toast({ title: enable ? "✅ MODO TÉCNICO GLOBAL" : "🔒 BLOQUEO GLOBAL" });
+        toast({ title: "MODO TÉCNICO GLOBAL ACTUALIZADO" });
       } else {
-        await updateDoc(doc(db, 'dispositivos', selectedDevice), { 
+        // --- ACCIÓN INDIVIDUAL ESTANDARIZADA ---
+        
+        // A. Actualizar RTDB (Respuesta inmediata de la tablet)
+        await update(ref(rtdb, `dispositivos/${selectedDevice}`), { 
           admin_mode_enable: enable,
-          updatedAt: serverTimestamp() 
+          last_command_ts: Date.now()
         });
 
-        // RTDB Sync para el dispositivo específico si es necesario
-        await update(ref(rtdb, `dispositivos/${selectedDevice}`), {
-          admin_mode_enable: enable
-        });
-        
-        toast({ title: enable ? "✅ DISPOSITIVO LIBERADO" : "🔒 DISPOSITIVO PROTEGIDO" });
-      }
-    } catch (error) {
-      toast({ variant: "destructive", title: "❌ Error" });
-    }
-  };
+        // B. Actualizar/Crear en Firestore (Estandarizado a deviceId)
+        const firestoreRef = doc(db, 'dispositivos', selectedDevice);
+        const docSnap = await getDoc(firestoreRef);
 
-  // 5. Sincronizar Lista Negra
-  const syncBlacklist = async () => {
-    if (syncing) return;
-    setSyncing(true);
-    toast({ title: "🔄 Sincronizando..." });
+        const dataPayload = {
+          deviceId: selectedDevice, // NORMALIZADO
+          InstitutoId: institutionId,
+          admin_mode_enable: enable,
+          updatedAt: serverTimestamp(),
+          syncSource: 'dashboard_master'
+        };
 
-    try {
-      const instRef = doc(db, 'institutions', institutionId);
-      const instSnap = await getDoc(instRef);
-      if (!instSnap.exists()) throw new Error("Institución no encontrada");
-      
-      const instData = instSnap.data();
-      const blacklist = instData.blacklist || [];
-
-      if (selectedDevice === 'todos') {
-        const q = query(collection(db, 'dispositivos'), where('InstitutoId', '==', institutionId));
-        const snap = await getDocs(q);
-        
-        for (const docSnap of snap.docs) {
-          await updateDoc(docSnap.ref, { 
-            blacklistApps: blacklist,
-            lastSecurityUpdate: serverTimestamp(),
-            useBlacklist: instData.useBlacklist || false
-          });
+        if (!docSnap.exists()) {
+          await setDoc(firestoreRef, { ...dataPayload, createdAt: serverTimestamp() });
+        } else {
+          await updateDoc(firestoreRef, dataPayload);
         }
 
-        // Propagar reglas a RTDB para intercepción inmediata
-        await update(ref(rtdb, `config/instituciones/${institutionId}/rules`), {
-          blacklist: blacklist,
-          updatedAt: new Date().toISOString()
-        });
-
-        toast({ title: "✅ Sincronización completada" });
-      } else {
-        await updateDoc(doc(db, 'dispositivos', selectedDevice), { 
-          blacklistApps: blacklist,
-          lastSecurityUpdate: serverTimestamp(),
-          useBlacklist: instData.useBlacklist || false
-        });
-        toast({ title: "✅ Dispositivo actualizado" });
+        toast({ title: `EQUIPO ${selectedDevice} ACTUALIZADO` });
       }
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "❌ Error", description: error.message });
-    } finally {
-      setSyncing(false);
+    } catch (e) {
+      toast({ variant: "destructive", title: "Error en la sincronización" });
     }
   };
 
-  // 6. Limpiar logs de VPN (Lógica Original Intacta)
-  const limpiarLogsVPN = async () => {
-    if (cleaningLogs) return;
-    setCleaningLogs(true);
-    toast({ title: "🧹 Limpiando logs..." });
-
-    try {
-      if (selectedDevice === 'todos') {
-        const q = query(collection(db, 'dispositivos'), where('InstitutoId', '==', institutionId));
-        const snapshot = await getDocs(q);
-        let totalEliminados = 0;
-        for (const docSnapshot of snapshot.docs) {
-          const logsRef = collection(db, 'dispositivos', docSnapshot.id, 'vpn_logs');
-          const logsSnapshot = await getDocs(logsRef);
-          if (!logsSnapshot.empty) {
-            const batch = writeBatch(db);
-            logsSnapshot.docs.forEach(logDoc => batch.delete(logDoc.ref));
-            await batch.commit();
-            totalEliminados += logsSnapshot.size;
-          }
-        }
-        toast({ title: "✅ Logs eliminados", description: `${totalEliminados} documentos eliminados` });
-      } else {
-        const logsRef = collection(db, 'dispositivos', selectedDevice, 'vpn_logs');
-        const logsSnapshot = await getDocs(logsRef);
-        if (!logsSnapshot.empty) {
-          const batch = writeBatch(db);
-          logsSnapshot.docs.forEach(logDoc => batch.delete(logDoc.ref));
-          await batch.commit();
-          toast({ title: "✅ Logs eliminados", description: `${logsSnapshot.size} documentos eliminados` });
-        }
-      }
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "❌ Error", description: error.message });
-    } finally {
-      setCleaningLogs(false);
-    }
-  };
-
-  const toggleSetting = async (key: string, value: boolean) => {
-    try {
-      const instRef = doc(db, 'institutions', institutionId);
-      await updateDoc(instRef, { [key]: value });
-
-      // Sincronización RTDB para flags críticos
-      await update(ref(rtdb, `config/instituciones/${institutionId}`), {
-        [key]: value,
-        lastUpdate: new Date().toISOString()
-      });
-
-      if (['shieldMode', 'cortarNavegacion', 'useWhitelist', 'useBlacklist'].includes(key)) {
-        const q = query(collection(db, 'dispositivos'), where('InstitutoId', '==', institutionId));
-        const snapshot = await getDocs(q);
-        const updates = snapshot.docs.map(docSnap => updateDoc(docSnap.ref, { [key]: value }));
-        await Promise.all(updates);
-      }
-      toast({ title: "✅ Configuración sincronizada" });
-    } catch (error) {
-      toast({ variant: "destructive", title: "❌ Error" });
-    }
-  };
-
-  if (loading) return <Loader2 className="w-6 h-6 animate-spin text-orange-500 mx-auto" />;
+  if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-orange-500" /></div>;
 
   return (
-    <div className="bg-[#11141d] border border-white/5 rounded-3xl p-8 shadow-xl space-y-8">
-      <div className="flex items-center gap-3">
-        <Zap className="text-orange-500 w-6 h-6" />
-        <h2 className="text-xl font-black italic uppercase text-white tracking-tighter">Controles Maestros</h2>
+    <div className="bg-[#0f1117] border border-white/5 rounded-[3rem] p-10 space-y-10 shadow-2xl">
+      {/* Header */}
+      <div className="flex items-center gap-4">
+        <div className="bg-orange-500/10 p-4 rounded-2xl shadow-inner">
+          <Zap className="text-orange-500 w-6 h-6 fill-orange-500" />
+        </div>
+        <div>
+          <h2 className="text-2xl font-black italic uppercase text-white tracking-tighter leading-none">Global Controls</h2>
+          <p className="text-[9px] text-slate-600 font-black uppercase tracking-[0.3em] mt-2 italic">Sede: {institutionId}</p>
+        </div>
       </div>
 
-      {/* SELECTOR */}
-      <div className="space-y-2">
-        <label className="text-[10px] font-black uppercase text-orange-500 ml-2 italic">Jurisdicción de Control:</label>
-        <select 
-          className="w-full bg-[#1a1d26] border border-slate-800 p-4 rounded-xl focus:border-orange-500 outline-none font-bold text-slate-200 text-[10px] uppercase transition-all"
-          value={selectedDevice}
-          onChange={(e) => setSelectedDevice(e.target.value)}
-        >
-          <option value="todos">⚡ TODA LA RED INSTITUCIONAL</option>
-          {dispositivos.map(d => (
-            <option key={d.id} value={d.id}>{d.alumno_asignado || 'SIN ASIGNAR'} - {d.id}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* BOTONES DE ACCIÓN RÁPIDA */}
+      {/* Selector de Dispositivos */}
       <div className="space-y-4">
-        {/* MODO TÉCNICO */}
-        <div className="flex items-center justify-between p-5 bg-orange-500/5 rounded-2xl border border-orange-500/20">
-          <div className="flex gap-4 items-center">
-            <div className={`p-3 rounded-xl ${techModeStatus ? 'bg-orange-500 text-white' : 'bg-slate-800 text-slate-500'}`}>
-              <UserCog className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-sm font-black text-white uppercase italic">Acceso Técnico</p>
-              <p className="text-[9px] text-slate-500 font-bold uppercase">Anula restricciones temporalmente</p>
-            </div>
-          </div>
-          <Switch checked={techModeStatus} onCheckedChange={toggleTechMode} />
-        </div>
-
-        {/* FILTRO CENTINELA */}
-        <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
-          <div className="flex gap-4 items-center">
-            <div className={`p-3 rounded-xl ${config.useBlacklist ? 'bg-emerald-500/20 text-emerald-500' : 'bg-red-500/20 text-red-500'}`}>
-              <Power className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-sm font-black text-white uppercase italic">Filtro Centinela</p>
-              <p className="text-[9px] text-slate-500 font-bold uppercase">Bloqueo de sitios y búsquedas</p>
-            </div>
-          </div>
-          <Switch checked={config.useBlacklist} onCheckedChange={(val) => toggleSetting('useBlacklist', val)} />
-        </div>
-
-        {/* MODO BLINDADO */}
-        <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
-          <div className="flex gap-4 items-center">
-            <div className={`p-3 rounded-xl ${config.shieldMode ? 'bg-blue-500/20 text-blue-500' : 'bg-slate-800 text-slate-500'}`}>
-              <ShieldAlert className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-sm font-black text-white uppercase italic">Modo Blindado</p>
-              <p className="text-[9px] text-slate-500 font-bold uppercase">Restricción extrema de aplicaciones</p>
-            </div>
-          </div>
-          <Switch checked={config.shieldMode} onCheckedChange={(val) => toggleSetting('shieldMode', val)} />
+        <label className="text-[10px] font-black uppercase text-orange-500 italic tracking-widest flex items-center gap-2 px-2">
+          <Smartphone className="w-3 h-3" /> Alcance del Comando:
+        </label>
+        <div className="relative">
+          <select 
+            className="w-full bg-[#1c212c] border-2 border-white/5 rounded-2xl p-5 text-white font-black text-xs uppercase italic outline-none focus:border-orange-500 transition-all appearance-none cursor-pointer"
+            value={selectedDevice}
+            onChange={(e) => setSelectedDevice(e.target.value)}
+          >
+            <option value="todos">⚡ TODA LA SEDE ({dispositivos.length} EQUIPOS)</option>
+            {dispositivos.map(d => (
+              <option key={d.id} value={d.id}>📱 {d.id} — {d.alumno_asignado || 'IDENTIFICANDO...'}</option>
+            ))}
+          </select>
+          <ChevronDown className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
         </div>
       </div>
 
-      {/* MANTENIMIENTO */}
-      <div className="pt-6 border-t border-slate-800 space-y-4">
-        <Button onClick={syncBlacklist} disabled={syncing} className="w-full h-12 bg-slate-800 hover:bg-orange-600 font-black text-[10px] uppercase gap-2">
-          {syncing ? <Loader2 className="animate-spin h-4 w-4" /> : <RotateCcw size={14} />}
-          Sincronizar Reglas de Red
-        </Button>
-        <Button onClick={limpiarLogsVPN} disabled={cleaningLogs} className="w-full h-12 bg-red-600/10 hover:bg-red-600 text-red-500 hover:text-white font-black text-[9px] uppercase gap-2 border border-red-500/20">
-          <Trash2 size={14} /> Limpiar Historial VPN
+      {/* Switches de Control */}
+      <div className="grid grid-cols-1 gap-4">
+        <ControlSwitch 
+          active={techModeStatus} 
+          onToggle={toggleTechMode} 
+          icon={<UserCog className="w-5 h-5" />} 
+          title="ANULACIÓN TÉCNICA" 
+          desc="LIBERAR SEGURIDAD (SYNC: RTDB/FS)" 
+          color="orange" 
+        />
+        <ControlSwitch 
+          active={config.shieldMode} 
+          onToggle={(v: boolean) => updateDoc(doc(db, 'institutions', institutionId), { shieldMode: v })} 
+          icon={<ShieldAlert className="w-5 h-5" />} 
+          title="MODO BLINDADO" 
+          desc="RESTRICCIÓN TOTAL DE DISPOSITIVO" 
+          color="blue" 
+        />
+      </div>
+
+      {/* Botones de Mantenimiento */}
+      <div className="pt-6 border-t border-white/5 flex flex-col gap-4">
+        <Button className="h-16 bg-white text-black hover:bg-orange-600 hover:text-white font-black text-xs uppercase italic rounded-2xl transition-all shadow-xl gap-3">
+          <RotateCcw size={18} /> Sincronizar Políticas de Red
         </Button>
       </div>
+    </div>
+  );
+}
+
+// Subcomponente reutilizable
+function ControlSwitch({ active, onToggle, icon, title, desc, color }: any) {
+  const colors: any = { 
+    orange: "data-[state=checked]:bg-orange-500", 
+    blue: "data-[state=checked]:bg-blue-600" 
+  };
+  
+  return (
+    <div className="flex items-center justify-between p-6 bg-white/[0.01] rounded-[2.5rem] border border-white/5 hover:bg-white/[0.03] transition-all group">
+      <div className="flex gap-5 items-center">
+        <div className={`p-4 rounded-2xl transition-all duration-500 ${active ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'bg-slate-900 text-slate-700'}`}>
+          {icon}
+        </div>
+        <div>
+          <p className="text-xs font-black text-white uppercase italic tracking-tighter leading-none">{title}</p>
+          <p className="text-[8px] text-slate-600 font-bold uppercase tracking-tight mt-1">{desc}</p>
+        </div>
+      </div>
+      <Switch checked={active} onCheckedChange={onToggle} className={colors[color]} />
     </div>
   );
 }

@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '@/firebase/config';
 import { 
   collection, query, where, orderBy, onSnapshot, 
-  Timestamp, updateDoc, doc, deleteDoc, writeBatch 
+  Timestamp, doc, writeBatch 
 } from 'firebase/firestore';
 import { 
   ShieldAlert, Clock, X, Search, Calendar, Download, Trash2, CheckCircle, Filter
@@ -14,7 +14,7 @@ import autoTable from 'jspdf-autotable';
 
 interface Alerta {
   id: string;
-  InstitutoId: string;
+  InstitutoId: string; // Confirmado con I mayúscula
   aulaId?: string | null;
   estudianteNombre?: string;
   alumno_asignado?: string;
@@ -23,21 +23,20 @@ interface Alerta {
   urlIntentada?: string;
   timestamp?: any;
   tipo?: string;
-  status?: string; // 'nuevo', 'visto'
+  status?: string; 
   deviceId?: string;
 }
 
 interface AlertFeedProps {
   aulaId?: string;
-  institutoId: string;
+  institutoId: string; // Esta es la prop que viene del padre
 }
 
 export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
   const [alertas, setAlertas] = useState<Alerta[]>([]);
-  const [filteredAlertas, setFilteredAlertas] = useState<Alerta[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Filtros
+  // Estados de Filtros
   const [tempSearchTerm, setTempSearchTerm] = useState('');
   const [tempFechaInicio, setTempFechaInicio] = useState<string>('');
   const [tempFechaFin, setTempFechaFin] = useState<string>('');
@@ -49,13 +48,13 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
   const [showFilters, setShowFilters] = useState(false);
   const [exportando, setExportando] = useState(false);
 
-  // 1. ESCUCHA EN TIEMPO REAL
+  // 1. ESCUCHA EN TIEMPO REAL - CORREGIDO CAMPO "InstitutoId"
   useEffect(() => {
     if (!institutoId) return;
 
     const q = query(
       collection(db, "alertas"),
-      where("InstitutoId", "==", institutoId),
+      where("InstitutoId", "==", institutoId), // Mapeo exacto a Firestore
       orderBy("timestamp", "desc")
     );
 
@@ -63,8 +62,17 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
       const data = snapshot.docs.map(doc => {
         const d = doc.data();
         let ts = d.timestamp;
-        if (ts instanceof Timestamp) ts = ts.toDate();
-        else if (typeof ts === 'string') ts = new Date(ts);
+        
+        // Manejo robusto de fechas de Firebase
+        if (ts instanceof Timestamp) {
+          ts = ts.toDate();
+        } else if (ts?.seconds) {
+          ts = new Date(ts.seconds * 1000);
+        } else if (typeof ts === 'string') {
+          ts = new Date(ts);
+        } else {
+          ts = new Date();
+        }
         
         return { id: doc.id, ...d, timestamp: ts };
       }) as Alerta[];
@@ -79,8 +87,8 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
     return () => unsubscribe();
   }, [institutoId]);
 
-  // 2. LÓGICA DE FILTRADO
-  useEffect(() => {
+  // 2. LÓGICA DE FILTRADO (Se mantiene intacta)
+  const filteredAlertas = useMemo(() => {
     let filtradas = [...alertas];
 
     if (aulaId) {
@@ -106,7 +114,7 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
       filtradas = filtradas.filter(a => a.timestamp <= fin);
     }
 
-    setFilteredAlertas(filtradas);
+    return filtradas;
   }, [alertas, appliedSearchTerm, appliedFechaInicio, appliedFechaFin, aulaId]);
 
   const handleBuscar = () => {
@@ -115,7 +123,7 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
     setAppliedFechaFin(tempFechaFin);
   };
 
-  // 3. OPERACIONES MASIVAS OPTIMIZADAS (BATCH)
+  // 3. OPERACIONES MASIVAS (BATCH)
   const handleMarcarVistas = async () => {
     const targets = filteredAlertas.filter(a => a.status !== 'visto');
     if (targets.length === 0) return;

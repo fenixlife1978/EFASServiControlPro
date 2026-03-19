@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 import { getDatabase } from "firebase/database"; 
@@ -11,15 +11,20 @@ const firebaseConfig = {
   storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  // IMPORTANTE: Se añade databaseURL para evitar errores de conexión en RTDB
   databaseURL: `https://${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID}-default-rtdb.firebaseio.com`
 };
 
 // Inicialización Singleton segura
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
+// --- INICIALIZACIÓN ROBUSTA DE FIRESTORE (CORRECCIÓN) ---
+// Usamos initializeFirestore en lugar de getFirestore para asegurar que el cache y 
+// la persistencia funcionen correctamente en entornos móviles/web.
+const firestore = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+});
+
 const auth = getAuth(app);
-const firestore = getFirestore(app);
 const storage = getStorage(app);
 const realtimeDb = getDatabase(app); 
 
@@ -28,7 +33,7 @@ export type DbMode = 'cloud' | 'local' | 'hybrid';
 
 // ====================================================
 // FUNCIONES DE CONFIGURACIÓN Y PERSISTENCIA LOCAL
-// ====================================
+// ====================================================
 
 /**
  * Obtiene el modo de base de datos actual desde el almacenamiento local.

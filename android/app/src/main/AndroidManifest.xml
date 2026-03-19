@@ -3,25 +3,20 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.educontrolpro">
 
-    <!-- PERMISOS DE RED -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     
-    <!-- PERMISO PARA CÁMARA (para escaneo QR) -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="true" />
     
-    <!-- PERMISO PARA ADMINISTRADOR DE DISPOSITIVO -->
     <uses-permission android:name="android.permission.MANAGE_DEVICE_ADMINS" />
     
-    <!-- PERMISOS DE NOTIFICACIONES Y SERVICIOS -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     
-    <!-- PERMISO PARA ACCESIBILIDAD -->
-    <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:allowBackup="false"
@@ -34,7 +29,18 @@
         android:directBootAware="true"
         tools:targetApi="34">
 
-        <!-- RECEPTOR DE ADMINISTRADOR DE DISPOSITIVO -->
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:directBootAware="true">
+            <intent-filter android:priority="999">
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
         <receiver
             android:name=".AdminReceiver"
             android:permission="android.permission.BIND_DEVICE_ADMIN"
@@ -47,11 +53,10 @@
             </intent-filter>
         </receiver>
 
-        <!-- SERVICIO DE MONITOREO (ACCESIBILIDAD) -->
         <service
-            android:name=".MonitorService"
+            android:name=".services.MonitorService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:label="Servicio de Monitoreo EDUControlPro"
+            android:label="Guardián EDUControlPro"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
@@ -61,7 +66,6 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- ACTIVIDAD PRINCIPAL -->
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"

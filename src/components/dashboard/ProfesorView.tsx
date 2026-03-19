@@ -13,9 +13,10 @@ import {
   History, User, RefreshCw, AlertTriangle, Search, Lock, Unlock, Globe, ShieldAlert, ZapOff
 } from 'lucide-react';
 import { WebHistoryModal } from '@/components/admin/monitoring/WebHistoryModal';
-import { AlertFeed } from '@/components/dashboard/AlertFeed';
+import { AlertFeed } from '@/components/dashboard/IncidentsTable';
 import { toast } from 'sonner';
 
+// --- INTERFAZ DE DATOS ---
 interface Dispositivo {
   id: string;
   alumno_asignado?: string;
@@ -25,11 +26,13 @@ interface Dispositivo {
   current_url?: string;
   ultimaUrl?: string;
   cortarNavegacion?: boolean;
+  blockAllBrowsing?: boolean; // Añadido para consistencia con handleBlindaje
   shieldMode?: boolean;
   online?: boolean;
   ultimoAcceso?: any;
   InstitutoId?: string;
   rol?: string;
+  lastUpdated?: any;
 }
 
 export default function ProfesorView() {
@@ -56,11 +59,13 @@ export default function ProfesorView() {
 
     const unsubAuth = onAuthStateChanged(auth, async (user) => {
       if (user?.email) {
+        // Query para obtener datos del profesor en Firestore
         const qProf = query(collection(db, "usuarios"), where("email", "==", user.email.toLowerCase()));
         
         const unsubProf = onSnapshot(qProf, (snap) => {
           if (!snap.empty) {
             const data = snap.docs[0].data();
+            // Limpieza de strings para evitar errores de comparación
             const seccionLimpia = (data.seccion || '').toString().replace(/["']/g, '').replace('SECCION ', '').trim();
             
             setDatosProfesor({
@@ -70,7 +75,7 @@ export default function ProfesorView() {
               seccion: seccionLimpia
             });
 
-            // ESCUCHA RTDB: Filtrado por Sede + Aula + Sección
+            // ESCUCHA RTDB: Sincronización en tiempo real de los dispositivos
             const dispositivosRef = ref(rtdb, `dispositivos`);
             const unsubRTDB = onValue(dispositivosRef, (snapshot) => {
               const dataRTDB = snapshot.val();
@@ -94,6 +99,7 @@ export default function ProfesorView() {
           }
         });
 
+        // Obtener nombre de la institución
         const instRef = doc(db, "institutions", workingInstitutoId);
         getDoc(instRef).then(s => s.exists() && setNombreSede(s.data().nombre));
 
@@ -104,7 +110,7 @@ export default function ProfesorView() {
     return () => unsubAuth();
   }, [workingInstitutoId]);
 
-  // 3. Acción de Blindaje Masivo (Solo Aula del Profesor)
+  // 3. Acción de Blindaje Masivo
   const handleBlindajeAula = async (bloquear: boolean) => {
     if (alumnos.length === 0) return;
     
@@ -178,7 +184,6 @@ export default function ProfesorView() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
-          {/* BOTÓN DE BLINDAJE CON CONTADOR DINÁMICO */}
           <button
             onClick={() => handleBlindajeAula(!todosBloqueados)}
             disabled={isBlindando || totalAlumnos === 0}
@@ -274,7 +279,6 @@ export default function ProfesorView() {
         )}
       </div>
 
-      {/* COMPONENTES EXTRAS */}
       <AlertFeed aulaId={datosProfesor.aulaId} institutoId={workingInstitutoId} />
       
       <WebHistoryModal 

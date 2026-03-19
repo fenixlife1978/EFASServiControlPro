@@ -1,326 +1,138 @@
-package com.educontrolpro;
+package com.educontrolpro.services;
 
-import android.Manifest;
-import android.app.admin.DevicePolicyManager;
-import android.content.ComponentName;
-import android.content.Context;
-import android.content.Intent;
-import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
-import android.os.Build;
+import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.AccessibilityServiceInfo;
 import android.os.Bundle;
-import android.util.Log;
-import android.widget.Toast;
+import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityNodeInfo;
+import java.util.Arrays;
+import java.util.List;
 
-import com.getcapacitor.BridgeActivity;
-import com.capacitorjs.plugins.device.DevicePlugin;
+public class MonitorService extends AccessibilityService {
 
-import androidx.activity.result.ActivityResultLauncher;
-import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.core.app.ActivityCompat;
-import androidx.core.content.ContextCompat;
+    // --- CONFIGURACIÓN DE BLOQUEO ---
+    private final List<String> blacklistedWords = Arrays.asList(
+        "porno", "juegos", "casino", "armas", "gore", "sexo", "xxx", "hentai", "dating", "apuestas"
+    );
+    
+    private final List<String> forbiddenApps = Arrays.asList(
+        "com.android.settings", "com.android.vending", "com.google.android.gms",
+        "com.facebook.katana", "com.facebook.orca", "com.instagram.android",
+        "com.zhiliaoapp.musically", "com.snapchat.android", "com.twitter.android",
+        "org.telegram.messenger", "org.thunderdog.challegram", "com.whatsapp",
+        "com.reddit.frontpage", "com.discord", "org.thoughtcrime.securesms",
+        "com.viber.voip", "com.skype.raider", "com.netflix.mediaclient",
+        "com.google.android.youtube", "com.bumble.app", "com.tinder"
+    );
 
-import com.google.firebase.database.FirebaseDatabase;
-import com.google.firebase.database.DatabaseReference;
-import com.google.firebase.database.ServerValue; // <-- Importación añadida
-import com.google.firebase.firestore.FirebaseFirestore;
-import com.google.firebase.firestore.FieldValue;
+    private final List<String> browserPackages = Arrays.asList(
+        "com.android.chrome", "org.mozilla.firefox", "com.opera.browser", 
+        "com.microsoft.emmx", "com.sec.android.app.sbrowser"
+    );
 
-import java.util.Map;
-import java.util.HashMap;
-
-public class MainActivity extends BridgeActivity {
-    private static final int DEVICE_ADMIN_REQUEST = 101;
-    private static final String CAPACITOR_PREFS = "CapacitorStorage";
-    private static final String ADMIN_PREFS = "AdminPrefs";
-    private static final String KEY_UNLOCKED = "is_unlocked";
-    private static final String KEY_DEVICE_ID = "deviceId";
-    private static final String TAG = "MainActivity";
-
-    private FirebaseDatabase realtimeDb;
-    private DatabaseReference deviceRealtimeRef;
-    private FirebaseFirestore firestore;
-    private String deviceDocId; // <-- Variable para almacenar el ID del dispositivo
-
-    @Override
-    public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-
-        // Inicializar Firebase
-        realtimeDb = FirebaseDatabase.getInstance();
-        firestore = FirebaseFirestore.getInstance();
-
-        // Registrar plugin de Device (necesario para Capacitor)
-        registerPlugin(DevicePlugin.class);
-
-        // Solicitar permisos necesarios
-        solicitarPermisosNecesarios();
-
-        // Lógica de seguridad (admin de dispositivo)
-        checkSecurityPrivileges();
-
-        // Verificar vinculación y estado
-        checkVinculacionYEstado();
-
-        // Obtener referencia a RTDB si el dispositivo está vinculado
-        SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
-        deviceDocId = capPrefs.getString(KEY_DEVICE_ID, null);
-        if (deviceDocId != null) {
-            deviceRealtimeRef = realtimeDb.getReference("dispositivos").child(deviceDocId);
-        }
-
-        logToRealtime("APP_START", "MainActivity iniciada");
-    }
-
-    // Log a Realtime Database (usa un nodo fijo si no hay deviceId)
-    private void logToRealtime(String tipo, String mensaje) {
-        try {
-            SharedPreferences prefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
-            String deviceId = prefs.getString(KEY_DEVICE_ID, null);
-            DatabaseReference logRef;
-            if (deviceId != null) {
-                logRef = realtimeDb
-                    .getReference("dispositivos")
-                    .child(deviceId)
-                    .child("app_logs")
-                    .child(String.valueOf(System.currentTimeMillis()));
-            } else {
-                // Log global para depuración sin vinculación
-                logRef = realtimeDb.getReference("debug_logs_global").push();
-            }
-
-            Map<String, Object> logEntry = new HashMap<>();
-            logEntry.put("tipo", tipo);
-            logEntry.put("mensaje", mensaje);
-            logEntry.put("timestamp", System.currentTimeMillis());
-            logRef.setValue(logEntry);
-        } catch (Exception e) {
-            Log.e(TAG, "Error en logToRealtime: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Método para vincular el dispositivo. Debe ser llamado desde el plugin o actividad
-     * que procesa el código QR.
-     * @param deviceId ID del dispositivo (ej. DEV-0001)
-     * @param institutoId ID de la institución
-     * @param aulaId ID del aula
-     * @param seccion Sección
-     * @param rol Rol (alumno, profesor, etc.)
-     */
-    public void vincularDispositivo(String deviceId, String institutoId, String aulaId, String seccion, String rol) {
-        SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
-        capPrefs.edit()
-                .putString(KEY_DEVICE_ID, deviceId)
-                .putString("InstitutoId", institutoId)
-                .putString("aulaId", aulaId)
-                .putString("seccion", seccion)
-                .putString("rol", rol)
-                .apply();
-
-        // Actualizar variable de instancia
-        this.deviceDocId = deviceId;
-
-        // 1. Escribir en Realtime Database (para presencia inmediata)
-        DatabaseReference rtRef = realtimeDb.getReference("dispositivos").child(deviceId);
-        Map<String, Object> rtData = new HashMap<>();
-        rtData.put("InstitutoId", institutoId);
-        rtData.put("aulaId", aulaId);
-        rtData.put("seccion", seccion);
-        rtData.put("rol", rol);
-        rtData.put("online", true);
-        rtData.put("ultimoHeartbeat", ServerValue.TIMESTAMP); // <-- Ahora ServerValue está importado
-        rtRef.setValue(rtData);
-
-        // 2. ¡IMPORTANTE! Escribir en Firestore para que la interfaz web lo vea
-        Map<String, Object> fsData = new HashMap<>();
-        fsData.put("InstitutoId", institutoId);
-        fsData.put("aulaId", aulaId);
-        fsData.put("seccion", seccion);
-        fsData.put("rol", rol);
-        fsData.put("alumno_asignado", rol.equalsIgnoreCase("alumno") ? "Sin asignar" : "");
-        fsData.put("online", false);
-        fsData.put("ultimoAcceso", FieldValue.serverTimestamp());
-        fsData.put("vinculado", true);
-
-        firestore.collection("dispositivos").document(deviceId)
-                .set(fsData)
-                .addOnSuccessListener(aVoid -> logToRealtime("VINCULACION", "Dispositivo creado en Firestore: " + deviceId))
-                .addOnFailureListener(e -> logToRealtime("VINCULACION_ERROR", e.getMessage()));
-
-        // Iniciar el MonitorService
-        reiniciarMonitorService();
-
-        Toast.makeText(this, "Dispositivo vinculado correctamente", Toast.LENGTH_LONG).show();
-    }
-
-    private void solicitarPermisosNecesarios() {
-        String[] permisos;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permisos = new String[]{
-                Manifest.permission.CAMERA,
-                Manifest.permission.POST_NOTIFICATIONS
-            };
-        } else {
-            permisos = new String[]{
-                Manifest.permission.CAMERA
-            };
-        }
-
-        boolean necesitaSolicitud = false;
-        for (String permiso : permisos) {
-            if (ContextCompat.checkSelfPermission(this, permiso) != PackageManager.PERMISSION_GRANTED) {
-                necesitaSolicitud = true;
-                break;
-            }
-        }
-
-        if (necesitaSolicitud) {
-            ActivityCompat.requestPermissions(this, permisos, 1001);
-        }
-    }
+    // IDs de barras y botones de "Ir/Buscar" en navegadores
+    private final List<String> searchActionIds = Arrays.asList(
+        "com.android.chrome:id/url_bar",
+        "com.android.chrome:id/line_1", // Sugerencias de búsqueda
+        "org.mozilla.firefox:id/mozac_browser_toolbar_url_view",
+        "com.opera.browser:id/url_field"
+    );
 
     @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == 1001) {
-            for (int i = 0; i < permissions.length; i++) {
-                if (grantResults[i] == PackageManager.PERMISSION_GRANTED) {
-                    Log.d(TAG, "Permiso concedido: " + permissions[i]);
-                    logToRealtime("PERMISO_CONCEDIDO", permissions[i]);
-                } else {
-                    Log.d(TAG, "Permiso denegado: " + permissions[i]);
-                    logToRealtime("PERMISO_DENEGADO", permissions[i]);
-                    if (permissions[i].equals(Manifest.permission.CAMERA)) {
-                        Toast.makeText(this, "Se necesita permiso de cámara", Toast.LENGTH_LONG).show();
-                    }
+    public void onAccessibilityEvent(AccessibilityEvent event) {
+        if (event.getPackageName() == null) return;
+        String packageName = event.getPackageName().toString().toLowerCase();
+
+        // 1. BLOQUEO PERIMETRAL (Ajustes, Tiendas, Redes, Mensajería)
+        if (shouldBlockApp(packageName)) {
+            performGlobalAction(GLOBAL_ACTION_HOME);
+            return;
+        }
+
+        // 2. FILTRADO DE NAVEGACIÓN (Solo al ejecutar acción: Click o cambio de ventana)
+        if (browserPackages.contains(packageName)) {
+            int eventType = event.getEventType();
+            if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED || 
+                eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                
+                validateAndCleanSearch(packageName);
+            }
+        }
+    }
+
+    private void validateAndCleanSearch(String currentPackage) {
+        AccessibilityNodeInfo rootNode = getRootInActiveWindow();
+        if (rootNode == null) return;
+
+        // Verificar que estamos analizando la ventana correcta
+        if (rootNode.getPackageName() == null || !rootNode.getPackageName().toString().equals(currentPackage)) {
+            return;
+        }
+
+        for (String viewId : searchActionIds) {
+            List<AccessibilityNodeInfo> nodes = rootNode.findAccessibilityNodeInfosByViewId(viewId);
+            
+            if (nodes != null && !nodes.isEmpty()) {
+                AccessibilityNodeInfo searchNode = nodes.get(0);
+                if (searchNode == null) continue;
+
+                CharSequence rawText = searchNode.getText();
+                String searchText = (rawText != null) ? rawText.toString().toLowerCase().trim() : "";
+
+                // Si la búsqueda contiene contenido prohibido
+                if (isForbiddenContent(searchText)) {
+                    
+                    // A. LIMPIEZA INMEDIATA
+                    Bundle arguments = new Bundle();
+                    arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "");
+                    searchNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments);
+                    
+                    // B. EXPULSIÓN AL HOME
+                    performGlobalAction(GLOBAL_ACTION_HOME);
+                    break; // Salir del bucle tras la expulsión
                 }
             }
         }
     }
 
-    // Reactivar bloqueo (después de modo técnico)
-    public void reactivarSeguridad() {
-        SharedPreferences prefs = getSharedPreferences(ADMIN_PREFS, MODE_PRIVATE);
-        prefs.edit().putBoolean(KEY_UNLOCKED, false).apply();
-
-        SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
-        String deviceId = capPrefs.getString(KEY_DEVICE_ID, null);
-
-        if (deviceId != null && deviceRealtimeRef != null) {
-            deviceRealtimeRef.child("admin_mode_enable").setValue(false)
-                .addOnFailureListener(e -> Log.e(TAG, "Error RTDB: " + e.getMessage()));
+    private boolean shouldBlockApp(String packageName) {
+        // Bloqueo por coincidencia de paquete
+        for (String app : forbiddenApps) {
+            if (packageName.startsWith(app)) return true;
         }
-
-        Map<String, Object> backup = new HashMap<>();
-        backup.put("tipo", "REBLOQUEO");
-        backup.put("timestamp", FieldValue.serverTimestamp());
-        firestore.collection("eventos_seguridad").add(backup);
-
-        Toast.makeText(this, "Seguridad activada", Toast.LENGTH_LONG).show();
-        reiniciarMonitorService();
+        // Bloqueo por palabra clave en el nombre del paquete (juegos/adultos)
+        List<String> keywords = Arrays.asList("casino", "poker", "adult", "porn", "sex", "freefire", "bet");
+        for (String keyword : keywords) {
+            if (packageName.contains(keyword)) return true;
+        }
+        return false;
     }
 
-    // Liberar dispositivo (remover admin y desinstalar)
-    public void liberarDispositivoTotal() {
-        DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
-        ComponentName adminComponent = new ComponentName(this, AdminReceiver.class);
-
-        try {
-            if (dpm.isDeviceOwnerApp(getPackageName())) {
-                dpm.setUninstallBlocked(adminComponent, getPackageName(), false);
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    dpm.clearDeviceOwnerApp(getPackageName());
-                }
-            } else if (dpm.isAdminActive(adminComponent)) {
-                dpm.removeActiveAdmin(adminComponent);
-            }
-
-            stopService(new Intent(this, MonitorService.class));
-            Log.d(TAG, "DISPOSITIVO LIBERADO");
-            logToRealtime("LIBERACION", "Dispositivo liberado completamente");
-            Toast.makeText(this, "Dispositivo Liberado", Toast.LENGTH_LONG).show();
-
-            SharedPreferences.Editor editor = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE).edit();
-            editor.clear();
-            editor.apply();
-
-            if (deviceRealtimeRef != null) {
-                deviceRealtimeRef.child("liberado").setValue(true);
-                deviceRealtimeRef.child("fecha_liberacion").setValue(System.currentTimeMillis());
-            }
-
-            // Eliminar de Firestore usando el deviceId almacenado en la variable de instancia
-            if (deviceDocId != null) {
-                firestore.collection("dispositivos").document(deviceDocId).delete()
-                    .addOnFailureListener(e -> Log.e(TAG, "Error al eliminar de Firestore", e));
-            }
-
-            finishAffinity();
-        } catch (Exception e) {
-            Log.e(TAG, "Error al liberar: " + e.getMessage());
-            logToRealtime("LIBERACION_ERROR", e.getMessage());
+    private boolean isForbiddenContent(String text) {
+        if (text == null || text.isEmpty()) return false;
+        for (String word : blacklistedWords) {
+            if (text.contains(word)) return true;
         }
-    }
-
-    private void reiniciarMonitorService() {
-        stopService(new Intent(this, MonitorService.class));
-        Intent serviceIntent = new Intent(this, MonitorService.class);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent);
-        } else {
-            startService(serviceIntent);
-        }
+        return false;
     }
 
     @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        if (intent != null) {
-            String action = intent.getAction();
-            if ("ACTION_LIBERAR_TAB".equals(action)) {
-                liberarDispositivoTotal();
-            } else if ("ACTION_REBLOQUEAR_TAB".equals(action)) {
-                reactivarSeguridad();
-            }
-        }
+    public void onServiceConnected() {
+        super.onServiceConnected();
+        AccessibilityServiceInfo info = new AccessibilityServiceInfo();
+        
+        // Configuramos los eventos de escucha
+        info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED |
+                         AccessibilityEvent.TYPE_VIEW_CLICKED;
+        
+        info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
+        info.notificationTimeout = 50; 
+        info.flags = AccessibilityServiceInfo.DEFAULT | 
+                     AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS |
+                     AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
+        
+        setServiceInfo(info);
     }
 
-    private void checkSecurityPrivileges() {
-        DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
-        ComponentName adminComponent = new ComponentName(this, AdminReceiver.class);
-
-        if (dpm.isDeviceOwnerApp(getPackageName())) {
-            try {
-                dpm.setUninstallBlocked(adminComponent, getPackageName(), true);
-                Log.d(TAG, "Modo DEVICE OWNER activo");
-            } catch (Exception e) {
-                Log.e(TAG, "Error en Device Owner: " + e.getMessage());
-            }
-        } else if (!dpm.isAdminActive(adminComponent)) {
-            Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
-            intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent);
-            intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Protección obligatoria");
-            startActivityForResult(intent, DEVICE_ADMIN_REQUEST);
-        }
-    }
-
-    private void checkVinculacionYEstado() {
-        SharedPreferences capPrefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
-        String deviceId = capPrefs.getString(KEY_DEVICE_ID, null);
-        String institutoId = capPrefs.getString("InstitutoId", null);
-
-        if (deviceId == null || institutoId == null) {
-            Log.d(TAG, "Dispositivo NO vinculado");
-        } else {
-            Log.d(TAG, "Vinculado a: " + institutoId + " - " + deviceId);
-            reiniciarMonitorService();
-        }
-    }
-
-    @Override
-    public void onDestroy() {
-        logToRealtime("APP_DESTROY", "MainActivity destruida");
-        super.onDestroy();
-    }
+    @Override public void onInterrupt() {}
 }

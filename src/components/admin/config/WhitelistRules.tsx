@@ -3,21 +3,30 @@
 import React, { useState, useEffect } from 'react';
 import { rtdb } from '@/firebase/config';
 import { ref, onValue, push, remove } from 'firebase/database';
-import { Globe, Plus, X, ShieldCheck } from 'lucide-react';
+import { ShieldCheck, Plus, X, Loader2, Globe } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useToast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 
+/**
+ * COMPONENTE: WhitelistRules
+ * ESTADO: Global (Independiente de la Sede)
+ * RUTA RTDB: global/whitelist
+ */
 export function WhitelistRules() {
   const [sites, setSites] = useState<{ id: string; url: string }[]>([]);
   const [newUrl, setNewUrl] = useState('');
-  const { toast } = useToast();
+  const [loading, setLoading] = useState(true);
+
+  // Estilo de input consistente con tu UI de InstitutionView
+  const inputStyle = "flex-1 bg-slate-900 border border-slate-800 p-4 rounded-xl text-white font-bold text-xs uppercase outline-none focus:border-orange-500 transition-all";
 
   useEffect(() => {
+    // Apuntamos directamente a la raíz global
     const whitelistRef = ref(rtdb, 'global/whitelist');
+    
     const unsubscribe = onValue(whitelistRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
-        // Convertir el objeto de Firebase (con claves como -Nxxx) a un array
         const sitesArray = Object.keys(data).map(key => ({
           id: key,
           url: data[key]
@@ -26,75 +35,121 @@ export function WhitelistRules() {
       } else {
         setSites([]);
       }
+      setLoading(false);
     });
+
     return () => unsubscribe();
   }, []);
 
   const addUrl = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUrl.trim()) return;
-    const cleanUrl = newUrl.toLowerCase().trim();
+    
+    // Limpieza básica de la URL
+    const cleanUrl = newUrl.toLowerCase().trim()
+      .replace(/^(https?:\/\/)/, '')
+      .replace(/\/$/, '');
 
     try {
-      const whitelistRef = ref(rtdb, 'global/whitelist');
-      await push(whitelistRef, cleanUrl);
+      await push(ref(rtdb, 'global/whitelist'), cleanUrl);
       setNewUrl('');
-      toast({ title: "Lista Blanca actualizada", description: "Sitio permitido añadido." });
+      toast.success("DOMINIO AÑADIDO A LA LISTA MAESTRA");
     } catch (error) {
-      toast({ variant: "destructive", title: "Error al añadir sitio" });
+      console.error(error);
+      toast.error("ERROR AL GUARDAR EN NUBE");
     }
   };
 
   const removeUrl = async (id: string) => {
     try {
       await remove(ref(rtdb, `global/whitelist/${id}`));
+      toast.success("REGLA ELIMINADA");
     } catch (error) {
-      toast({ variant: "destructive", title: "Error al eliminar sitio" });
+      toast.error("ERROR AL ELIMINAR");
     }
   };
 
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 bg-[#0f1117] rounded-[2.5rem] border border-slate-800">
+        <Loader2 className="w-8 h-8 animate-spin text-orange-500 mb-4" />
+        <span className="text-[10px] font-black uppercase italic text-slate-500">Sincronizando Whitelist...</span>
+      </div>
+    );
+  }
+
   return (
-    <div className="bg-[#11141d] border border-white/5 rounded-3xl p-8 shadow-xl">
-      <div className="flex items-center gap-3 mb-8">
-        <ShieldCheck className="text-emerald-500 w-6 h-6" />
-        <h2 className="text-xl font-black italic uppercase text-white tracking-tighter">
-          Lista Blanca <span className="text-emerald-500">(Sitios Permitidos)</span>
-        </h2>
+    <div className="bg-[#0f1117] border border-slate-800 rounded-[3rem] p-10 shadow-2xl animate-in fade-in duration-500">
+      {/* Header del Componente */}
+      <div className="flex items-center justify-between mb-10">
+        <div className="flex items-center gap-4">
+          <div className="bg-emerald-500/10 p-3 rounded-2xl">
+            <ShieldCheck className="text-emerald-500 w-6 h-6" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-black italic uppercase text-white tracking-tighter">
+              Navegación <span className="text-emerald-500 font-light text-xl">Permitida</span>
+            </h2>
+            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1">Filtro de Seguridad Global / Whitelist</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 bg-slate-900/50 px-4 py-2 rounded-full border border-slate-800">
+          <Globe className="w-3 h-3 text-emerald-500" />
+          <span className="text-[8px] font-black text-slate-400 uppercase italic">Estado: Maestro</span>
+        </div>
       </div>
 
-      <form onSubmit={addUrl} className="flex gap-2 mb-6">
-        <div className="relative flex-1">
-          <Globe className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-          <input 
-            value={newUrl}
-            onChange={(e) => setNewUrl(e.target.value)}
-            className="w-full bg-[#1c212c] rounded-2xl py-4 pl-12 pr-4 text-[10px] font-bold uppercase text-white border border-white/5 focus:border-emerald-500 outline-none transition-all"
-            placeholder="EJ: WIKIPEDIA.ORG"
-          />
-        </div>
-        <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700 rounded-2xl px-6 h-auto">
-          <Plus className="w-5 h-5" />
+      {/* Formulario de Adición */}
+      <form onSubmit={addUrl} className="flex gap-4 mb-10">
+        <input 
+          value={newUrl}
+          onChange={(e) => setNewUrl(e.target.value)}
+          className={inputStyle}
+          placeholder="DOMINIO O PALABRA CLAVE (EJ: GOOGLE.COM)"
+        />
+        <Button 
+          type="submit" 
+          className="bg-emerald-600 hover:bg-emerald-500 text-white font-black h-auto px-8 rounded-xl text-[10px] uppercase italic transition-all shadow-lg shadow-emerald-600/20"
+        >
+          <Plus className="w-5 h-5 mr-2" /> Añadir
         </Button>
       </form>
 
-      <div className="space-y-2 max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">
+      {/* Lista de Dominios */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[400px] overflow-y-auto pr-4 custom-scrollbar">
         {sites.length === 0 ? (
-          <p className="text-[9px] text-slate-600 font-black uppercase text-center py-8 italic tracking-widest">
-            No hay reglas de excepción
-          </p>
+          <div className="col-span-2 py-16 text-center border border-dashed border-slate-800 rounded-[2rem]">
+            <p className="text-slate-600 font-black uppercase italic text-xs">No hay dominios autorizados todavía</p>
+          </div>
         ) : (
           sites.map((site) => (
-            <div key={site.id} className="flex items-center justify-between bg-emerald-500/5 p-4 rounded-2xl border border-emerald-500/10 group hover:border-emerald-500/30 transition-all">
-              <span className="text-[10px] font-black text-emerald-200 uppercase italic tracking-wider">{site.url}</span>
+            <div 
+              key={site.id} 
+              className="flex items-center justify-between bg-slate-900/40 p-5 rounded-2xl border border-slate-800 group hover:border-emerald-500/30 transition-all"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
+                <span className="text-xs font-black text-slate-200 uppercase italic tracking-tight">
+                  {site.url}
+                </span>
+              </div>
               <button 
                 onClick={() => removeUrl(site.id)} 
-                className="text-slate-600 hover:text-red-500 p-1 transition-colors"
+                className="p-2 text-slate-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                title="Eliminar regla"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
           ))
         )}
+      </div>
+
+      <div className="mt-8 pt-6 border-t border-slate-800/50">
+        <p className="text-[8px] text-slate-600 font-bold uppercase italic text-center leading-relaxed">
+          Cualquier cambio en esta lista afectará en tiempo real a todas las unidades <br />
+          vinculadas al sistema EFAS ServiControlPro.
+        </p>
       </div>
     </div>
   );

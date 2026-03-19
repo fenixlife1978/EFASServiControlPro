@@ -1,13 +1,13 @@
-"use client"
+"use client";
 
 import { useState, useEffect } from 'react';
-import { db, rtdb } from '@/firebase/config'; // Asegúrate de tener exportado rtdb (getDatabase)
+import { db, rtdb } from '@/firebase/config';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { ref, onValue } from 'firebase/database';
+import { ref, onValue, off } from 'firebase/database';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { MoreHorizontal, User, Edit, Trash2, AlertTriangle } from 'lucide-react';
+import { MoreHorizontal, User, Edit, Trash2, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card } from '../ui/card';
 import { InfractionLogModal } from './InfractionLogModal';
@@ -29,10 +29,9 @@ interface Alumno {
 export function StudentsTable({ institutionId, classroomId }: StudentsTableProps) {
     const [students, setStudents] = useState<Alumno[]>([]);
     const [loading, setLoading] = useState(true);
-    const [editingStudent, setEditingStudent] = useState<Alumno | null>(null);
     const [viewingLogsFor, setViewingLogsFor] = useState<{ deviceId: string; alumnoNombre: string } | null>(null);
     
-    // Almacenamos las infracciones de RTDB para que sea instantáneo
+    // Estado híbrido para infracciones en tiempo real
     const [infraccionesRealtime, setInfraccionesRealtime] = useState<Record<string, number>>({});
 
     // 1. ESCUCHA DE ALUMNOS (Firestore)
@@ -67,19 +66,20 @@ export function StudentsTable({ institutionId, classroomId }: StudentsTableProps
         return () => unsubscribe();
     }, [institutionId, classroomId]);
 
-    // 2. ESCUCHA DE INFRACCIONES (Realtime Database - Híbrido)
-    // Escuchamos la rama de "incidencias_count" o similar en RTDB para cada alumno
+    // 2. ESCUCHA DE INFRACCIONES (Realtime Database - Sistema Centinela)
     useEffect(() => {
         if (students.length === 0) return;
 
-        const unsubscribesRTDB: (() => void)[] = [];
+        // Guardamos las referencias para poder limpiar los listeners correctamente
+        const activeRefs: { path: string; ref: any }[] = [];
 
         students.forEach((student) => {
             const deviceId = student.deviceId;
-            // Asumiendo que en RTDB tienes una ruta: /monitoring/{deviceId}/today_incidents
-            const incidentRef = ref(rtdb, `monitoring/${deviceId}/today_incidents`);
+            // Ruta optimizada en RTDB para conteos diarios
+            const incidentPath = `monitoring/${deviceId}/today_incidents`;
+            const incidentRef = ref(rtdb, incidentPath);
             
-            const unsub = onValue(incidentRef, (snapshot) => {
+            onValue(incidentRef, (snapshot) => {
                 const count = snapshot.val() || 0;
                 setInfraccionesRealtime(prev => ({
                     ...prev,
@@ -87,10 +87,13 @@ export function StudentsTable({ institutionId, classroomId }: StudentsTableProps
                 }));
             });
 
-            unsubscribesRTDB.push(unsub);
+            activeRefs.push({ path: incidentPath, ref: incidentRef });
         });
 
-        return () => unsubscribesRTDB.forEach(u => u());
+        // Limpieza: quitamos todos los listeners al desmontar o cambiar estudiantes
+        return () => {
+            activeRefs.forEach(item => off(item.ref));
+        };
     }, [students]);
 
     return (
@@ -102,27 +105,27 @@ export function StudentsTable({ institutionId, classroomId }: StudentsTableProps
                 alumnoNombre={viewingLogsFor?.alumnoNombre || ''}
             />
             
-            <Card className="bg-[#0f1117] border border-slate-800 overflow-hidden rounded-[1.5rem] shadow-2xl">
+            <Card className="bg-[#0f1117] border border-white/5 overflow-hidden rounded-[2rem] shadow-2xl">
                 <div className="overflow-x-auto">
                     <Table>
-                        <TableHeader className="bg-slate-900/40">
-                            <TableRow className="border-b border-slate-800 hover:bg-transparent">
-                                <TableHead className="text-slate-500 font-black text-[10px] uppercase tracking-tighter py-5">Nº EQUIPO</TableHead>
-                                <TableHead className="text-slate-500 font-black text-[10px] uppercase tracking-tighter">ALUMNO / ESTUDIANTE</TableHead>
-                                <TableHead className="text-slate-500 font-black text-[10px] uppercase tracking-tighter">IDENTIFICADOR MAC</TableHead>
-                                <TableHead className="text-left text-slate-500 font-black text-[10px] uppercase tracking-tighter">ESTADO INCIDENCIAS</TableHead>
-                                <TableHead className="w-[50px]"></TableHead>
+                        <TableHeader className="bg-white/[0.02]">
+                            <TableRow className="border-b border-white/5 hover:bg-transparent">
+                                <TableHead className="text-slate-500 font-black text-[10px] uppercase tracking-widest py-6 pl-8">Nº EQUIPO</TableHead>
+                                <TableHead className="text-slate-500 font-black text-[10px] uppercase tracking-widest">Estudiante</TableHead>
+                                <TableHead className="text-slate-500 font-black text-[10px] uppercase tracking-widest">ID Dispositivo</TableHead>
+                                <TableHead className="text-left text-slate-500 font-black text-[10px] uppercase tracking-widest">Estatus Centinela</TableHead>
+                                <TableHead className="w-[80px] pr-8"></TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {loading ? (
                                 [...Array(5)].map((_, i) => (
-                                    <TableRow key={i} className="border-b border-slate-800/50">
-                                        <TableCell><Skeleton className="h-4 w-8 bg-slate-800" /></TableCell>
-                                        <TableCell><Skeleton className="h-4 w-48 bg-slate-800" /></TableCell>
-                                        <TableCell><Skeleton className="h-4 w-32 bg-slate-800" /></TableCell>
-                                        <TableCell><Skeleton className="h-8 w-24 rounded-full bg-slate-800" /></TableCell>
-                                        <TableCell><Skeleton className="h-8 w-8 rounded-full bg-slate-800" /></TableCell>
+                                    <TableRow key={i} className="border-b border-white/5">
+                                        <TableCell className="pl-8"><Skeleton className="h-4 w-8 bg-white/5" /></TableCell>
+                                        <TableCell><Skeleton className="h-4 w-48 bg-white/5" /></TableCell>
+                                        <TableCell><Skeleton className="h-4 w-32 bg-white/5" /></TableCell>
+                                        <TableCell><Skeleton className="h-7 w-24 rounded-full bg-white/5" /></TableCell>
+                                        <TableCell className="pr-8"><Skeleton className="h-8 w-8 rounded-full bg-white/5" /></TableCell>
                                     </TableRow>
                                 ))
                             ) : (
@@ -130,15 +133,15 @@ export function StudentsTable({ institutionId, classroomId }: StudentsTableProps
                                     const count = infraccionesRealtime[student.deviceId] || 0;
                                     
                                     return (
-                                        <TableRow key={student.id} className="hover:bg-white/[0.02] transition-colors border-b border-slate-800/50">
-                                            <TableCell className="font-mono font-black text-orange-500">
+                                        <TableRow key={student.id} className="hover:bg-white/[0.01] transition-colors border-b border-white/5 group">
+                                            <TableCell className="font-mono font-black text-orange-500 text-xs pl-8">
                                                 #{student.nro_equipo}
                                             </TableCell>
-                                            <TableCell className="font-bold text-slate-200">
+                                            <TableCell className="font-bold text-slate-200 text-sm">
                                                 {student.nombre_alumno}
                                             </TableCell>
-                                            <TableCell className="font-mono text-[11px] text-slate-500 uppercase">
-                                                {student.macAddress}
+                                            <TableCell className="font-mono text-[10px] text-slate-500 uppercase tracking-tight">
+                                                {student.deviceId.slice(0, 18)}...
                                             </TableCell>
                                             <TableCell>
                                                 <Button
@@ -147,30 +150,38 @@ export function StudentsTable({ institutionId, classroomId }: StudentsTableProps
                                                         deviceId: student.deviceId, 
                                                         alumnoNombre: student.nombre_alumno 
                                                     })}
-                                                    className={`h-7 px-4 rounded-full font-black text-[10px] uppercase transition-all ${
+                                                    className={`h-7 px-4 rounded-full font-black text-[9px] uppercase transition-all gap-2 ${
                                                         count > 0 
                                                         ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/20 animate-pulse' 
-                                                        : 'bg-emerald-500/5 text-emerald-500/40 cursor-default border border-emerald-500/10'
+                                                        : 'bg-emerald-500/5 text-emerald-500/40 hover:text-emerald-500 hover:bg-emerald-500/10 border border-emerald-500/10'
                                                     }`}
-                                                    disabled={count === 0}
                                                 >
-                                                    {count > 0 && <AlertTriangle className="w-3 h-3 mr-1.5" />}
-                                                    {count} {count === 1 ? 'Incidencia' : 'Incidencias'}
+                                                    {count > 0 ? (
+                                                        <>
+                                                            <AlertTriangle className="w-3 h-3" />
+                                                            {count} {count === 1 ? 'Alerta' : 'Alertas'}
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <ShieldCheck className="w-3 h-3" />
+                                                            Protegido
+                                                        </>
+                                                    )}
                                                 </Button>
                                             </TableCell>
-                                            <TableCell>
+                                            <TableCell className="pr-8">
                                                 <DropdownMenu>
                                                     <DropdownMenuTrigger asChild>
-                                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600 hover:text-white hover:bg-white/10">
+                                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600 hover:text-white hover:bg-white/10 rounded-xl">
                                                             <MoreHorizontal className="h-4 w-4" />
                                                         </Button>
                                                     </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end" className="bg-[#161922] border-slate-800 text-slate-300">
-                                                        <DropdownMenuItem onClick={() => setEditingStudent(student)} className="gap-2 focus:bg-orange-500/10 focus:text-orange-500 cursor-pointer font-bold text-xs">
-                                                            <Edit className="h-3.5 w-3.5" /> Reasignar Alumno
+                                                    <DropdownMenuContent align="end" className="bg-[#161922] border-white/5 text-slate-300 rounded-2xl p-2 shadow-2xl">
+                                                        <DropdownMenuItem className="gap-3 focus:bg-orange-500/10 focus:text-orange-500 cursor-pointer font-bold text-[10px] uppercase p-3 rounded-xl transition-colors">
+                                                            <Edit className="h-3.5 w-3.5" /> Reasignar Terminal
                                                         </DropdownMenuItem>
-                                                        <DropdownMenuItem className="gap-2 focus:bg-red-500/10 focus:text-red-500 cursor-pointer font-bold text-xs">
-                                                            <Trash2 className="h-3.5 w-3.5" /> Desvincular
+                                                        <DropdownMenuItem className="gap-3 focus:bg-red-500/10 focus:text-red-500 cursor-pointer font-bold text-[10px] uppercase p-3 rounded-xl transition-colors">
+                                                            <Trash2 className="h-3.5 w-3.5" /> Desvincular MDM
                                                         </DropdownMenuItem>
                                                     </DropdownMenuContent>
                                                 </DropdownMenu>
@@ -184,9 +195,11 @@ export function StudentsTable({ institutionId, classroomId }: StudentsTableProps
                 </div>
 
                 {!loading && students.length === 0 && (
-                    <div className="flex flex-col items-center justify-center py-20 opacity-40 italic">
-                        <User className="h-10 w-10 mb-4" />
-                        <p className="text-xs uppercase font-black tracking-widest">Aula sin dispositivos asignados</p>
+                    <div className="flex flex-col items-center justify-center py-24 bg-white/[0.01]">
+                        <div className="bg-slate-900/50 p-4 rounded-3xl mb-4 border border-white/5">
+                            <User className="h-8 w-8 text-slate-700" />
+                        </div>
+                        <p className="text-[10px] font-black text-slate-600 uppercase tracking-[0.3em] italic">Aula sin terminales activos</p>
                     </div>
                 )}
             </Card>

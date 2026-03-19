@@ -9,7 +9,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, UserCog, MonitorSmartphone } from 'lucide-react';
+import { Loader2, UserCog, MonitorSmartphone, ShieldCheck } from 'lucide-react';
 import { db } from '@/firebase/config';
 import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { Badge } from '../ui/badge';
@@ -33,17 +33,25 @@ export function EditStudentModal({ isOpen, onOpenChange, student, institutionId,
     
     const form = useForm<z.infer<typeof formSchema>>({
         resolver: zodResolver(formSchema),
+        defaultValues: {
+            nombre_alumno: '',
+        }
     });
     
     useEffect(() => {
-        if (student) {
-            form.reset({ nombre_alumno: student.nombre || student.nombre_alumno || '' });
+        if (student && isOpen) {
+            const currentName = student.nombre || student.nombre_alumno || '';
+            form.reset({ nombre_alumno: currentName });
             
             const buscarDeviceId = async () => {
                 if (!student.deviceId && student.id) {
-                    const deviceQuery = await getDoc(doc(db, "dispositivos", student.id));
-                    if (deviceQuery.exists()) {
-                        setDeviceId(student.id);
+                    try {
+                        const deviceDoc = await getDoc(doc(db, "dispositivos", student.id));
+                        if (deviceDoc.exists()) {
+                            setDeviceId(student.id);
+                        }
+                    } catch (e) {
+                        console.error("Error buscando hardware:", e);
                     }
                 } else {
                     setDeviceId(student.deviceId || null);
@@ -52,47 +60,52 @@ export function EditStudentModal({ isOpen, onOpenChange, student, institutionId,
             
             buscarDeviceId();
         }
-    }, [student, form]);
+    }, [student, isOpen, form]);
 
     async function onSubmit(values: z.infer<typeof formSchema>) {
-        if (!student || !student.id) {
-            toast({ variant: 'destructive', title: 'Error', description: 'No se pudo identificar al alumno.' });
+        if (!student?.id) {
+            toast({ variant: 'destructive', title: 'Error de Identidad', description: 'No se detectó el ID del alumno.' });
             return;
         }
 
         setIsSubmitting(true);
         
         try {
-            // 1. Actualizar en "usuarios" (Core del sistema)
+            const batchPromises = [];
+            const timestamp = new Date();
+
+            // 1. Actualización en Núcleo de Usuarios
             const userRef = doc(db, "usuarios", student.id);
-            await updateDoc(userRef, {
-                nombre: values.nombre_alumno,
-                nombre_alumno: values.nombre_alumno,
-                updatedAt: new Date()
-            });
+            batchPromises.push(updateDoc(userRef, {
+                nombre: values.nombre_alumno.toUpperCase(),
+                nombre_alumno: values.nombre_alumno.toUpperCase(),
+                updatedAt: timestamp
+            }));
             
-            // 2. Sincronizar con "dispositivos" si existe vinculación activa
+            // 2. Sincronización con Capa MDM (Hardware)
             if (deviceId) {
                 const deviceRef = doc(db, "dispositivos", deviceId);
-                await updateDoc(deviceRef, {
-                    alumno_asignado: values.nombre_alumno,
-                    lastUpdated: new Date()
-                });
+                batchPromises.push(updateDoc(deviceRef, {
+                    alumno_asignado: values.nombre_alumno.toUpperCase(),
+                    lastUpdated: timestamp
+                }));
             }
             
+            await Promise.all(batchPromises);
+
             toast({ 
-                title: 'PERFIL ACTUALIZADO', 
-                description: `EDUControlPro ha registrado a "${values.nombre_alumno}".` 
+                title: 'SINCRONIZACIÓN EXITOSA', 
+                description: `El perfil de "${values.nombre_alumno.toUpperCase()}" ha sido actualizado en la red.` 
             });
             
             onOpenChange(false);
             
         } catch (error) {
-            console.error("Error EDUControlPro Update:", error);
+            console.error("EDUControlPro Sync Error:", error);
             toast({ 
                 variant: 'destructive', 
-                title: 'ERROR DE SISTEMA', 
-                description: 'No se pudo completar la reasignación.' 
+                title: 'FALLO DE RED', 
+                description: 'No se pudieron sincronizar los cambios con el servidor.' 
             });
         } finally {
             setIsSubmitting(false);
@@ -103,87 +116,108 @@ export function EditStudentModal({ isOpen, onOpenChange, student, institutionId,
 
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-md bg-[#0f1117] border border-slate-800 rounded-[2rem] p-8 shadow-2xl">
-                <DialogHeader className="mb-4">
-                    <div className="flex items-center gap-3 mb-2">
-                        <div className="p-2 bg-orange-500 rounded-xl">
-                            <UserCog className="w-5 h-5 text-white" />
+            <DialogContent className="sm:max-w-md bg-[#0f1117] border border-white/5 rounded-[2.5rem] p-8 shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)] outline-none">
+                <DialogHeader className="mb-6">
+                    <div className="flex items-center gap-4 mb-3">
+                        <div className="p-3 bg-orange-500/10 rounded-2xl border border-orange-500/20">
+                            <UserCog className="w-6 h-6 text-orange-500" />
                         </div>
-                        <DialogTitle className="text-xl font-black text-white uppercase italic tracking-tighter">
-                            Editar <span className="text-orange-500">Estudiante</span>
-                        </DialogTitle>
+                        <div className="space-y-0.5">
+                            <DialogTitle className="text-xl font-black text-white uppercase italic tracking-tighter leading-none">
+                                Gestión de <span className="text-orange-500">Perfil</span>
+                            </DialogTitle>
+                            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-[0.2em]">Sincronización MDM Activa</p>
+                        </div>
                     </div>
                     <div className="flex gap-2">
-                         <Badge className="bg-slate-800 text-[9px] font-black uppercase tracking-widest border-none">
-                            EQ: {student.nro_equipo || 'S/N'}
+                         <Badge className="bg-slate-900 text-[9px] font-black uppercase tracking-widest border border-white/5 px-3 py-1">
+                            EQUIPO: {student.nro_equipo || 'S/N'}
                         </Badge>
-                        <Badge className="bg-orange-500/10 text-orange-500 text-[9px] font-black uppercase tracking-widest border-none">
-                            ID: {student.id?.slice(-6).toUpperCase()}
+                        <Badge className="bg-orange-500 text-white text-[9px] font-black uppercase tracking-widest border-none px-3 py-1">
+                            REF: {student.id?.slice(-6).toUpperCase()}
                         </Badge>
                     </div>
                 </DialogHeader>
 
-                <div className="space-y-6">
-                    {/* Información de Contexto */}
-                    <div className="grid grid-cols-2 gap-3 bg-slate-900/50 p-4 rounded-2xl border border-slate-800/50">
-                        <div className="space-y-1">
-                            <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Institución</p>
-                            <p className="text-[10px] font-bold text-slate-200 truncate uppercase italic">{institutionId}</p>
+                <div className="space-y-8">
+                    {/* Panel de Ubicación Operativa */}
+                    <div className="grid grid-cols-2 gap-4 bg-white/[0.02] p-5 rounded-3xl border border-white/5">
+                        <div className="space-y-1.5">
+                            <p className="text-[8px] font-black text-slate-600 uppercase tracking-widest flex items-center gap-1.5">
+                                <div className="w-1 h-1 bg-slate-600 rounded-full" /> Institución
+                            </p>
+                            <p className="text-[10px] font-bold text-slate-300 truncate uppercase italic leading-none">{institutionId}</p>
                         </div>
-                        <div className="space-y-1">
-                            <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Aula Asignada</p>
-                            <p className="text-[10px] font-bold text-slate-200 truncate uppercase italic">{classroomId}</p>
+                        <div className="space-y-1.5">
+                            <p className="text-[8px] font-black text-slate-600 uppercase tracking-widest flex items-center gap-1.5">
+                                <div className="w-1 h-1 bg-slate-600 rounded-full" /> Aula / Sección
+                            </p>
+                            <p className="text-[10px] font-bold text-slate-300 truncate uppercase italic leading-none">{classroomId}</p>
                         </div>
                     </div>
 
                     <Form {...form}>
-                        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+                        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
                             <FormField
                                 control={form.control}
                                 name="nombre_alumno"
                                 render={({ field }) => (
                                     <FormItem className="space-y-3">
-                                        <FormLabel className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-                                            Nombre Completo del Alumno
-                                        </FormLabel>
+                                        <div className="flex justify-between items-end px-1">
+                                            <FormLabel className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                                                Nombre del Estudiante
+                                            </FormLabel>
+                                            <Badge variant="outline" className="text-[8px] border-slate-800 text-slate-600 font-bold uppercase py-0 px-2 h-4">Requerido</Badge>
+                                        </div>
                                         <FormControl>
                                             <Input 
                                                 placeholder="EJ: MARCOS DÍAZ" 
                                                 {...field} 
-                                                className="bg-slate-950 border-slate-800 text-white rounded-xl h-12 font-bold focus:ring-orange-500/20 uppercase"
+                                                className="bg-slate-950/50 border-white/5 text-white rounded-2xl h-14 font-black focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500/50 transition-all uppercase px-5 placeholder:text-slate-800"
                                             />
                                         </FormControl>
-                                        <FormMessage className="text-[10px] font-bold text-red-500 uppercase" />
+                                        <FormMessage className="text-[9px] font-black text-red-500 uppercase tracking-tight italic" />
                                     </FormItem>
                                 )}
                             />
 
-                            {deviceId && (
-                                <div className="flex items-center gap-2 px-3 py-2 bg-green-500/5 border border-green-500/10 rounded-xl">
-                                    <MonitorSmartphone className="w-3 h-3 text-green-500" />
-                                    <span className="text-[9px] font-black text-green-500 uppercase tracking-tighter">
-                                        Hardware vinculado: {deviceId}
-                                    </span>
+                            {deviceId ? (
+                                <div className="flex items-center justify-between px-5 py-3 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl group transition-colors">
+                                    <div className="flex items-center gap-3">
+                                        <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                                        <div className="flex flex-col">
+                                            <span className="text-[9px] font-black text-emerald-500 uppercase tracking-tighter">Hardware Asegurado</span>
+                                            <span className="text-[8px] font-mono text-emerald-500/50">{deviceId}</span>
+                                        </div>
+                                    </div>
+                                    <MonitorSmartphone className="w-4 h-4 text-emerald-500/20 group-hover:text-emerald-500/40 transition-colors" />
+                                </div>
+                            ) : (
+                                <div className="px-5 py-3 bg-slate-900/50 border border-dashed border-slate-800 rounded-2xl">
+                                    <span className="text-[9px] font-black text-slate-600 uppercase italic">Sin terminal MDM vinculado</span>
                                 </div>
                             )}
                             
-                            <DialogFooter className="gap-3 sm:gap-0 pt-2">
+                            <DialogFooter className="gap-3 sm:gap-4 pt-4 border-t border-white/5">
                                 <Button 
                                     type="button" 
                                     variant="ghost" 
                                     onClick={() => onOpenChange(false)} 
                                     disabled={isSubmitting} 
-                                    className="flex-1 h-12 rounded-xl text-[10px] font-black uppercase text-slate-500 hover:bg-slate-800/50"
+                                    className="flex-1 h-14 rounded-2xl text-[10px] font-black uppercase text-slate-500 hover:bg-white/5 hover:text-white transition-all"
                                 >
-                                    Cerrar
+                                    Cancelar
                                 </Button>
                                 <Button 
                                     type="submit" 
                                     disabled={isSubmitting} 
-                                    className="flex-1 h-12 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-black uppercase shadow-lg shadow-orange-500/20 transition-all"
+                                    className="flex-1 h-14 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-black uppercase shadow-[0_10px_20px_-10px_rgba(249,115,22,0.5)] transition-all active:scale-95"
                                 >
-                                    {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                                    Sincronizar Cambios
+                                    {isSubmitting ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                        'Aplicar Cambios'
+                                    )}
                                 </Button>
                             </DialogFooter>
                         </form>
