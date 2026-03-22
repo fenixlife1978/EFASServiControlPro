@@ -27,20 +27,19 @@ public class BootReceiver extends BroadcastReceiver {
             if (deviceId != null) {
                 Log.d(TAG, "Dispositivo vinculado (" + deviceId + "). Verificando persistencia...");
                 
-                // NOTA IMPORTANTE: 
-                // El MonitorService (AccessibilityService) NO se inicia con startService.
-                // Android lo inicia automáticamente si el permiso está activo.
-                
                 // Si usas una VPN o un Servicio de Notificaciones persistente, 
                 // aquí es donde debes lanzarlos.
                 
-                /* Intent vpnIntent = new Intent(context, TuVpnService.class);
+                Intent vpnIntent = new Intent(context, com.educontrolpro.services.LocalVpnService.class);
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    context.startForegroundService(vpnIntent);
+                    try {
+                        context.startForegroundService(vpnIntent);
+                    } catch (Exception e) {
+                        context.startService(vpnIntent);
+                    }
                 } else {
                     context.startService(vpnIntent);
                 }
-                */
 
             } else {
                 Log.d(TAG, "Dispositivo no vinculado, omitiendo arranque de guardianes.");

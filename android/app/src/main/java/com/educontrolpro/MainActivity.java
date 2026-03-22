@@ -57,6 +57,7 @@ public class MainActivity extends BridgeActivity {
         // 3. Configuración de Seguridad y Estado
         solicitarPermisosBasicos();
         checkSecurityPrivileges();
+        iniciarEscudoVpn();
         checkVinculacionYEstado();
 
         logToRealtime("APP_START", "MainActivity iniciada correctamente");
@@ -165,6 +166,36 @@ public class MainActivity extends BridgeActivity {
             } else if (intent.getAction().equals("ACTION_REBLOQUEAR_TAB")) {
                 reactivarSeguridad();
             }
+        }
+    }
+
+    private void iniciarEscudoVpn() {
+        Intent vpnIntent = android.net.VpnService.prepare(this);
+        if (vpnIntent != null) {
+            startActivityForResult(vpnIntent, 102);
+        } else {
+            startLocalVpnService();
+        }
+    }
+
+    private void startLocalVpnService() {
+        Intent intent = new Intent(this, com.educontrolpro.services.LocalVpnService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                startForegroundService(intent);
+            } catch (Exception e) {
+                startService(intent);
+            }
+        } else {
+            startService(intent);
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == 102 && resultCode == RESULT_OK) {
+            startLocalVpnService();
         }
     }
 }

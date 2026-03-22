@@ -17,6 +17,7 @@ import { GlobalControls } from '@/components/admin/config/GlobalControls';
 import { WebHistoryModal } from '@/components/admin/monitoring/WebHistoryModal';
 import { SecurityAnalytics } from '@/components/admin/config/SecurityAnalytics'; 
 import { WhitelistRules } from '@/components/admin/config/WhitelistRules';
+import { BlacklistRules } from '@/components/admin/config/BlacklistRules';
 import { BlockedAttempts } from '@/components/admin/monitoring/BlockedAttempts';
 
 export default function InstitutionView() {
@@ -280,7 +281,17 @@ export default function InstitutionView() {
               )}
 
               {activeSection === 'security' && <SecurityAnalytics />}
-              {activeSection === 'lists' && <WhitelistRules />}
+              {activeSection === 'lists' && (
+                <div className="space-y-8 animate-in fade-in duration-500">
+                  <h2 className="text-4xl font-black italic uppercase text-white tracking-tighter">
+                    Reglas de <span className="text-orange-500 font-light">Filtrado Master</span>
+                  </h2>
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 items-start">
+                    <BlacklistRules />
+                    <WhitelistRules />
+                  </div>
+                </div>
+              )}
               {activeSection === 'blocked' && <BlockedAttempts />}
               {activeSection === 'settings' && (
                  <div className="space-y-10">

@@ -74,5 +74,21 @@ service cloud.firestore {
     match /pending_enrollments/{enrollmentId} {
         allow read, write: if isSignedIn();
     }
+    
+    //-------------------------------------------------------------------------
+    // EDUControlPro Android Tablet Rules
+    //-------------------------------------------------------------------------
+    
+    // Global configurations (Blacklist/Whitelist) should be readable by any device.
+    match /configuracion_global/{document=**} {
+      allow read: if true; // Las tablets necesitan poder leer esto sin login estricto
+      allow write: if isSuperAdmin();
+    }
+    
+    // System logs (Blocked attempts) should be writable by any device.
+    match /system_analysis_blocked_attempts/{logId} {
+      allow create: if true; // Las tablets reportan aquí
+      allow read, update, delete: if isSuperAdmin();
+    }
   }
 }

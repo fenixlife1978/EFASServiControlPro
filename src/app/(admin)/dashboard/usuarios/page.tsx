@@ -24,19 +24,26 @@ export default function RegistroPersonal() {
     setMensaje({ tipo: '', texto: '' });
 
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-
-      await setDoc(doc(db, "users", user.uid), {
-        uid: user.uid,
-        nombre: nombre,
-        email: email,
-        rol: isSuperAdmin ? rol : 'profesor',
-        InstitutoId: institutionId,
-        fechaRegistro: new Date().toISOString()
+      // Usar la ruta de API segura que creamos para no desloguear al admin
+      const res = await fetch('/api/admin/create-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          password,
+          nombre,
+          rol: isSuperAdmin ? rol : 'profesor',
+          institutionId
+        })
       });
 
-      setMensaje({ tipo: 'exito', texto: `¡Perfecto! El ${rol} ha sido registrado.` });
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Fallo en el servidor de creación");
+      }
+
+      setMensaje({ tipo: 'exito', texto: data.message });
       setEmail(''); setPassword(''); setNombre('');
     } catch (error: any) {
       setMensaje({ tipo: 'error', texto: "Error: " + error.message });

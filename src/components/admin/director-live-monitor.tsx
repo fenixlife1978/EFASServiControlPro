@@ -82,10 +82,20 @@ export function DirectorLiveMonitor() {
                   <p className="text-[11px] font-black text-slate-900 uppercase italic leading-none mb-1">
                     {session.alumno_asignado || 'DISPOSITIVO SIN NOMBRE'}
                   </p>
-                  <div className="flex items-center gap-2">
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-tighter bg-slate-100 px-1.5 py-0.5 rounded leading-none">
-                      ID: {session.id}
-                    </p>
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center gap-2">
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-tighter bg-slate-100 px-1.5 py-0.5 rounded leading-none">
+                        ID: {session.id}
+                      </p>
+                    </div>
+                    {session.current_url && (
+                      <div className="flex items-center gap-1.5 px-2 py-1 bg-blue-50/80 rounded-md border border-blue-100">
+                        <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-ping shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+                        <span className="text-[9px] font-bold text-blue-600 lowercase truncate max-w-[160px]" title={session.current_url}>
+                          {session.current_url}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
