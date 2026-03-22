@@ -1,49 +1,28 @@
 import { NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
 
+/**
+ * Portero de la API de creación de usuarios.
+ * Evita que el compilador de Next.js analice Firebase Admin durante el export de Android.
+ */
 export async function POST(req: Request) {
+  // 1. Bloqueo inmediato para el build de Android/Capacitor
+  if (process.env.IS_ANDROID_BUILD === 'true') {
+    return new Response(null, { status: 404 });
+  }
+
   try {
-    if (!adminAuth || !adminDb) {
-      return NextResponse.json({ error: "Servidor: Firebase Admin no ha sido inicializado. Verifica tus credenciales." }, { status: 500 });
-    }
-
-    const body = await req.json();
-    const { email, password, nombre, rol, institutionId } = body;
-
-    if (!email || !password || !nombre || !rol || !institutionId) {
-      return NextResponse.json({ error: "Faltan parámetros de registro (email, password, nombre, rol, sede)" }, { status: 400 });
-    }
-
-    // 1. Crear el usuario en Firebase Authentication SIN DESLOGUEAR al SuperAdmin/Director
-    const userRecord = await adminAuth.createUser({
-      email,
-      password,
-      displayName: nombre,
-    });
-
-    // 2. Configurar "Custom Claims" para proteger las reglas de Firestore nativamente
-    await adminAuth.setCustomUserClaims(userRecord.uid, {
-        institutionId: institutionId,
-        rol: rol
-    });
-
-    // 3. Crear automáticamente el documento del perfil en Firestore
-    await adminDb.collection('users').doc(userRecord.uid).set({
-      uid: userRecord.uid,
-      nombre: nombre,
-      email: email,
-      rol: rol,
-      InstitutoId: institutionId,
-      fechaRegistro: new Date().toISOString()
-    });
-
-    return NextResponse.json({ 
-      success: true, 
-      message: `El perfil de ${rol} y su acceso han sido creados correctamente en la base de datos.`
-    });
-
+    // 2. IMPORTANTE: Usamos @ts-ignore para que TypeScript no se detenga si no detecta
+    // el archivo 'action' durante el análisis estático inicial.
+    // @ts-ignore
+    const { handleCreateUser } = await import('./action');
+    
+    // Ejecutamos la lógica que reside en el cerebro (action.ts)
+    return handleCreateUser(req);
   } catch (error: any) {
-    console.error("API Error creando usuario:", error);
-    return NextResponse.json({ error: error.message || "Error interno creando el usuario" }, { status: 500 });
+    console.error("Error cargando el módulo de administración:", error);
+    return NextResponse.json(
+      { error: "El servicio de administración no está disponible en este momento." }, 
+      { status: 500 }
+    );
   }
 }

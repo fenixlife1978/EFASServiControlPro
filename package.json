@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:vercel": "next build",
+    "build:android": "rm -rf .next out && IS_ANDROID_BUILD=true next build && npx cap copy android",
     "start": "next start",
     "lint": "next lint"
   },
@@ -44,6 +46,7 @@
     "date-fns": "^3.6.0",
     "dotenv": "^16.5.0",
     "embla-carousel-react": "^8.6.0",
+    "firebase-admin": "^13.7.0",
     "genkit": "^1.20.0",
     "html2canvas": "^1.4.1",
     "html5-qrcode": "^2.3.8",

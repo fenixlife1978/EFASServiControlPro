@@ -8,5 +8,11 @@
       "destination": "https://drive.google.com/file/d/1bbYNzh5ojklIsv4YqBBBqimd1shUeoBo/view?usp=sharing",
       "permanent": false
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/cleanup",
+      "schedule": "0 0 * * *"
+    }
   ]
 }
