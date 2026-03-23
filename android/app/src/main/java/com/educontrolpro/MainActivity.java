@@ -7,32 +7,32 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.Toast;
 
-import com.getcapacitor.BridgeActivity;
-import com.capacitorjs.plugins.device.DevicePlugin;
-
-// IMPORTACIONES PARA PERMISOS
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
-// HÍBRIDO: Realtime DB + Firestore
-import com.google.firebase.database.FirebaseDatabase;
-import com.google.firebase.database.DatabaseReference;
-import com.google.firebase.firestore.FirebaseFirestore;
-import com.google.firebase.firestore.FieldValue;
-
-import java.util.Map;
-import java.util.HashMap;
-
-// IMPORTACIÓN DEL SERVICIO
+import com.getcapacitor.BridgeActivity;
+import com.capacitorjs.plugins.device.DevicePlugin;
+import com.educontrolpro.services.LocalVpnService;
 import com.educontrolpro.services.MonitorService;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.firestore.FirebaseFirestore;
 
-public class MainActivity extends BridgeActivity {
+import java.util.HashMap;
+import java.util.Map;
+
+public class MainActivity extends BridgeActivity implements LocalVpnService.VpnCallback {
+    
     private static final int DEVICE_ADMIN_REQUEST = 101;
+    private static final int VPN_REQUEST_CODE = 102;
     private static final String CAPACITOR_PREFS = "CapacitorStorage";
     private static final String ADMIN_PREFS = "AdminPrefs";
     private static final String KEY_UNLOCKED = "is_unlocked";
@@ -42,28 +42,88 @@ public class MainActivity extends BridgeActivity {
     private FirebaseDatabase realtimeDb;
     private DatabaseReference deviceRealtimeRef;
     private FirebaseFirestore firestore;
+    private WebView webView;
+    private boolean vpnPermissionGranted = false;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
-        // 1. Inicializar Firebase
+        // Inicializar Firebase
         realtimeDb = FirebaseDatabase.getInstance();
         firestore = FirebaseFirestore.getInstance();
         
-        // 2. Registrar Plugins de Capacitor (Solo los esenciales)
+        // Registrar Plugins de Capacitor
         registerPlugin(DevicePlugin.class);
-
-        // 3. Configuración de Seguridad y Estado
+        
+        // Configurar WebView Bridge para comunicación con VPN
+        setupWebViewBridge();
+        
+        // Configurar callback de VPN
+        LocalVpnService.setCallback(this);
+        
+        // Solicitar permisos y privilegios
         solicitarPermisosBasicos();
         checkSecurityPrivileges();
         iniciarEscudoVpn();
         checkVinculacionYEstado();
-
+        
         logToRealtime("APP_START", "MainActivity iniciada correctamente");
     }
-
-    // --- LÓGICA DE LOGS SISTEMA ---
+    
+    /**
+     * Configura el WebView y el bridge para comunicación con la Web App
+     */
+    private void setupWebViewBridge() {
+        // Buscar el WebView dentro de la actividad de Capacitor
+        // Capacitor maneja su propia vista, necesitamos inyectar el bridge
+        // Si usas una WebView propia, configúrala aquí
+        
+        // Ejemplo: si tienes un WebView en tu layout
+        // webView = findViewById(R.id.webview);
+        // if (webView != null) {
+        //     webView.getSettings().setJavaScriptEnabled(true);
+        //     webView.addJavascriptInterface(new WebAppInterface(), "EduControl");
+        //     webView.setWebViewClient(new WebViewClient() {
+        //         @Override
+        //         public void onPageFinished(WebView view, String url) {
+        //             super.onPageFinished(view, url);
+        //         }
+        //     });
+        // }
+        
+        // Nota: Como Capacitor maneja su propia WebView, 
+        // necesitarás inyectar el bridge desde el lado de JavaScript
+        // o usar la configuración de Capacitor para exponer métodos nativos.
+        
+        Log.d(TAG, "WebView Bridge configurado");
+    }
+    
+    /**
+     * Callback de la VPN cuando se bloquea un dominio
+     */
+    @Override
+    public void onBlockedDomain(String domain) {
+        Log.w(TAG, "VPN bloqueó dominio: " + domain);
+        
+        // Mostrar mensaje en WebView
+        runOnUiThread(() -> {
+            // Llamar a función JavaScript en la Web App
+            String jsCode = "javascript:if(typeof mostrarBloqueo === 'function') { mostrarBloqueo('" + domain.replace("'", "\\'") + "'); }";
+            
+            // Si tienes acceso al WebView de Capacitor
+            // bridge.getWebView().loadUrl(jsCode);
+            
+            // Alternativa: enviar evento a través de Capacitor
+            // NotifyPlugin.sendEvent("domain_blocked", domain);
+            
+            Toast.makeText(this, "Acceso bloqueado: " + domain, Toast.LENGTH_SHORT).show();
+        });
+        
+        logToRealtime("DOMAIN_BLOCKED", domain);
+    }
+    
+    // --- LÓGICA DE LOGS ---
     private void logToRealtime(String tipo, String mensaje) {
         try {
             SharedPreferences prefs = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
@@ -82,7 +142,7 @@ public class MainActivity extends BridgeActivity {
             Log.e(TAG, "Error log: " + e.getMessage());
         }
     }
-
+    
     // --- PERMISOS ---
     private void solicitarPermisosBasicos() {
         String[] permisos = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) ?
@@ -92,20 +152,22 @@ public class MainActivity extends BridgeActivity {
         boolean necesitaSolicitud = false;
         for (String p : permisos) {
             if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) {
-                necesitaSolicitud = true; 
+                necesitaSolicitud = true;
                 break;
             }
         }
-        if (necesitaSolicitud) ActivityCompat.requestPermissions(this, permisos, 1001);
+        if (necesitaSolicitud) {
+            ActivityCompat.requestPermissions(this, permisos, 1001);
+        }
     }
-
-    // --- ACCIONES DE SEGURIDAD ---
+    
+    // --- SEGURIDAD ---
     public void reactivarSeguridad() {
         getSharedPreferences(ADMIN_PREFS, MODE_PRIVATE).edit().putBoolean(KEY_UNLOCKED, false).apply();
         reiniciarMonitorService();
-        Toast.makeText(this, "Protección EFAS Reactivada", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "Protección Reactivada", Toast.LENGTH_SHORT).show();
     }
-
+    
     public void liberarDispositivoTotal() {
         DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
         ComponentName admin = new ComponentName(this, AdminReceiver.class);
@@ -116,6 +178,12 @@ public class MainActivity extends BridgeActivity {
                     dpm.clearDeviceOwnerApp(getPackageName());
                 }
                 stopService(new Intent(this, MonitorService.class));
+                
+                // Detener VPN
+                Intent vpnIntent = new Intent(this, LocalVpnService.class);
+                vpnIntent.setAction("STOP_VPN");
+                startService(vpnIntent);
+                
                 logToRealtime("LIBERACION", "Dispositivo liberado");
                 
                 getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE).edit().clear().apply();
@@ -125,7 +193,7 @@ public class MainActivity extends BridgeActivity {
             logToRealtime("LIBERACION_ERROR", e.getMessage());
         }
     }
-
+    
     private void reiniciarMonitorService() {
         Intent intent = new Intent(this, MonitorService.class);
         stopService(intent);
@@ -135,19 +203,19 @@ public class MainActivity extends BridgeActivity {
             startService(intent);
         }
     }
-
+    
     private void checkSecurityPrivileges() {
         DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
         ComponentName admin = new ComponentName(this, AdminReceiver.class);
         
         if (!dpm.isDeviceOwnerApp(getPackageName()) && !dpm.isAdminActive(admin)) {
             Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
-            intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin); // Corregido: EXTRA_DEVICE_ADMIN
-            intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Protección requerida.");
-            startActivity(intent);
+            intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin);
+            intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Protección requerida para el control parental.");
+            startActivityForResult(intent, DEVICE_ADMIN_REQUEST);
         }
     }
-
+    
     private void checkVinculacionYEstado() {
         SharedPreferences cap = getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE);
         String dId = cap.getString(KEY_DEVICE_ID, null);
@@ -156,7 +224,58 @@ public class MainActivity extends BridgeActivity {
             reiniciarMonitorService();
         }
     }
-
+    
+    /**
+     * Inicia la VPN solicitando permiso si es necesario
+     */
+    private void iniciarEscudoVpn() {
+        Intent vpnIntent = VpnService.prepare(this);
+        if (vpnIntent != null) {
+            // Solicitar permiso al usuario
+            startActivityForResult(vpnIntent, VPN_REQUEST_CODE);
+        } else {
+            // Permiso ya concedido
+            vpnPermissionGranted = true;
+            startLocalVpnService();
+        }
+    }
+    
+    private void startLocalVpnService() {
+        Intent intent = new Intent(this, LocalVpnService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                startForegroundService(intent);
+            } catch (Exception e) {
+                startService(intent);
+            }
+        } else {
+            startService(intent);
+        }
+        Log.d(TAG, "LocalVpnService iniciado");
+    }
+    
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        
+        if (requestCode == VPN_REQUEST_CODE) {
+            if (resultCode == RESULT_OK) {
+                vpnPermissionGranted = true;
+                startLocalVpnService();
+                logToRealtime("VPN", "Permiso concedido");
+            } else {
+                Log.e(TAG, "Permiso VPN denegado");
+                Toast.makeText(this, "Se requiere permiso VPN para el control parental", Toast.LENGTH_LONG).show();
+                // Intentar nuevamente después de unos segundos
+                new android.os.Handler().postDelayed(this::iniciarEscudoVpn, 3000);
+            }
+        }
+        
+        if (requestCode == DEVICE_ADMIN_REQUEST && resultCode == RESULT_OK) {
+            logToRealtime("ADMIN", "Device Admin activado");
+        }
+    }
+    
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
@@ -168,34 +287,11 @@ public class MainActivity extends BridgeActivity {
             }
         }
     }
-
-    private void iniciarEscudoVpn() {
-        Intent vpnIntent = android.net.VpnService.prepare(this);
-        if (vpnIntent != null) {
-            startActivityForResult(vpnIntent, 102);
-        } else {
-            startLocalVpnService();
-        }
-    }
-
-    private void startLocalVpnService() {
-        Intent intent = new Intent(this, com.educontrolpro.services.LocalVpnService.class);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            try {
-                startForegroundService(intent);
-            } catch (Exception e) {
-                startService(intent);
-            }
-        } else {
-            startService(intent);
-        }
-    }
-
+    
     @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == 102 && resultCode == RESULT_OK) {
-            startLocalVpnService();
-        }
+    public void onDestroy() {
+        super.onDestroy();
+        // Limpiar callback al destruir
+        LocalVpnService.setCallback(null);
     }
 }

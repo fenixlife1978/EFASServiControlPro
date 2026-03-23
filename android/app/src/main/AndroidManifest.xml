@@ -3,20 +3,32 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.educontrolpro">
 
+    <!-- Permisos de red -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     
+    <!-- Permisos de cámara -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="true" />
     
+    <!-- Permisos de administración del dispositivo -->
     <uses-permission android:name="android.permission.MANAGE_DEVICE_ADMINS" />
     
+    <!-- Permisos de notificaciones y arranque -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     
+    <!-- Permisos para VPN y servicios en primer plano -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    
+    <!-- Permiso para filtrar paquetes de red (VPN) -->
+    <uses-permission android:name="android.permission.PACKET_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    
+    <!-- Permiso para acceso a accesibilidad (MonitorService) -->
+    <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE" />
 
     <application
         android:allowBackup="false"
@@ -29,6 +41,7 @@
         android:directBootAware="true"
         tools:targetApi="34">
 
+        <!-- Receptor de arranque -->
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
@@ -41,6 +54,7 @@
             </intent-filter>
         </receiver>
 
+        <!-- Administrador de dispositivo -->
         <receiver
             android:name=".AdminReceiver"
             android:permission="android.permission.BIND_DEVICE_ADMIN"
@@ -53,6 +67,7 @@
             </intent-filter>
         </receiver>
 
+        <!-- Servicio de Accesibilidad - LECTURA DE URL y EXPULSIÓN DE APPS -->
         <service
             android:name=".services.MonitorService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
@@ -66,15 +81,18 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <!-- Servicio VPN - DNS Sinkhole para filtrado de tráfico -->
         <service
             android:name=".services.LocalVpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"
-            android:exported="true">
+            android:exported="true"
+            android:foregroundServiceType="dataSync">
             <intent-filter>
                 <action android:name="android.net.VpnService" />
             </intent-filter>
         </service>
 
+        <!-- Actividad principal -->
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
