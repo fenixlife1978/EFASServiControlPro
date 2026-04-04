@@ -74,6 +74,12 @@ public class MainActivity extends BridgeActivity
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
+        // ✅ IMPORTANTE: Inicializar mainHandler ANTES de cualquier mostrarToast
+        mainHandler = new Handler(Looper.getMainLooper());
+        
+        // ✅ También inicializar scheduler temprano
+        scheduler = Executors.newSingleThreadScheduledExecutor();
+        
         mostrarToast("🚀 Iniciando EDUControlPro...");
         
         // 🔥 Crash Handler - Captura errores no controlados
@@ -94,11 +100,13 @@ public class MainActivity extends BridgeActivity
                 }
             }
             
-            mainHandler.post(() -> {
-                Toast.makeText(MainActivity.this, 
-                    "⚠️ EduControlPro ha tenido un error. Se reiniciará automáticamente.", 
-                    Toast.LENGTH_LONG).show();
-            });
+            if (mainHandler != null) {
+                mainHandler.post(() -> {
+                    Toast.makeText(MainActivity.this, 
+                        "⚠️ EduControlPro ha tenido un error. Se reiniciará automáticamente.", 
+                        Toast.LENGTH_LONG).show();
+                });
+            }
             
             try {
                 Thread.sleep(2000);
@@ -110,9 +118,6 @@ public class MainActivity extends BridgeActivity
             android.os.Process.killProcess(android.os.Process.myPid());
             System.exit(1);
         });
-        
-        mainHandler = new Handler(Looper.getMainLooper());
-        scheduler = Executors.newSingleThreadScheduledExecutor();
         
         try {
             registerPlugin(DevicePlugin.class);
@@ -167,7 +172,12 @@ public class MainActivity extends BridgeActivity
     }
     
     private void mostrarToast(String mensaje) {
-        mainHandler.post(() -> Toast.makeText(this, mensaje, Toast.LENGTH_SHORT).show());
+        if (mainHandler != null) {
+            mainHandler.post(() -> Toast.makeText(this, mensaje, Toast.LENGTH_SHORT).show());
+        } else {
+            // Fallback por si mainHandler es null (no debería pasar ahora)
+            runOnUiThread(() -> Toast.makeText(this, mensaje, Toast.LENGTH_SHORT).show());
+        }
         Log.d("EDU_Status", mensaje);
     }
     
@@ -191,13 +201,15 @@ public class MainActivity extends BridgeActivity
     }
     
     private void iniciarWatchdogServicios() {
-        scheduler.scheduleAtFixedRate(() -> {
-            mainHandler.post(() -> {
-                if (deviceId != null && !deviceId.isEmpty()) {
-                    verificarYReiniciarMonitorService();
-                }
-            });
-        }, 30, 60, TimeUnit.SECONDS);
+        if (scheduler != null && !scheduler.isShutdown()) {
+            scheduler.scheduleAtFixedRate(() -> {
+                mainHandler.post(() -> {
+                    if (deviceId != null && !deviceId.isEmpty()) {
+                        verificarYReiniciarMonitorService();
+                    }
+                });
+            }, 30, 60, TimeUnit.SECONDS);
+        }
         mostrarLog("🔍 Watchdog de servicios iniciado (cada 60s)");
     }
     
@@ -305,14 +317,16 @@ public class MainActivity extends BridgeActivity
     }
     
     private void iniciarVerificacionPeriodicaDNS() {
-        scheduler.scheduleAtFixedRate(() -> {
-            mainHandler.post(() -> {
-                if (!isNextDNSActive()) {
-                    mostrarLog("⚠️ DNS no está configurado, forzando configuración...");
-                    configurarDNSPrivado();
-                }
-            });
-        }, 5, 30, TimeUnit.SECONDS);
+        if (scheduler != null && !scheduler.isShutdown()) {
+            scheduler.scheduleAtFixedRate(() -> {
+                mainHandler.post(() -> {
+                    if (!isNextDNSActive()) {
+                        mostrarLog("⚠️ DNS no está configurado, forzando configuración...");
+                        configurarDNSPrivado();
+                    }
+                });
+            }, 5, 30, TimeUnit.SECONDS);
+        }
         mostrarLog("⏰ Verificación periódica de DNS iniciada (cada 30s)");
     }
     
@@ -376,42 +390,28 @@ public class MainActivity extends BridgeActivity
         }
         
         final String dnsHostname = deviceIdForDNS + "-" + NEXTDNS_PROFILE_ID + "." + NEXTDNS_BASE_DOMAIN;
-        final String finalDeviceIdForDNS = deviceIdForDNS;
         mostrarToast("🌐 Configurando: " + dnsHostname);
         
-        if (Build.VERSION.SDK_INT >= 28) {
+        // ✅ MÉTODO CORREGIDO - Funciona en Android 14, 15 y versiones anteriores
+        if (Build.VERSION.SDK_INT >= 28) { // Android 9+
             try {
-                android.net.ConnectivityManager cm = (android.net.ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-                if (cm != null) {
-                    try {
-                        Class<?> cmClass = cm.getClass();
-                        java.lang.reflect.Method setPrivateDnsMode = cmClass.getMethod("setPrivateDnsMode", String.class);
-                        java.lang.reflect.Method setPrivateDnsHostname = cmClass.getMethod("setPrivateDnsHostname", String.class);
-                        java.lang.reflect.Method getPrivateDnsHostname = cmClass.getMethod("getPrivateDnsHostname");
-                        
-                        String currentDns = (String) getPrivateDnsHostname.invoke(cm);
-                        if (dnsHostname.equals(currentDns)) {
-                            mostrarToast("✅ DNS ya estaba configurado");
-                            actualizarEstadoNextDNS(true, dnsHostname);
-                            return;
-                        }
-                        
-                        setPrivateDnsMode.invoke(cm, "SPECIFIED");
-                        setPrivateDnsHostname.invoke(cm, dnsHostname);
-                        mostrarToast("✅ DNS Configurado: " + dnsHostname);
-                        mostrarLog("🔒 DNS Privado CONFIGURADO: " + dnsHostname);
-                        
-                        actualizarEstadoNextDNS(true, dnsHostname);
-                        
-                        mainHandler.post(() -> {
-                            Toast.makeText(this, "🔒 Filtro NextDNS activado para " + finalDeviceIdForDNS, Toast.LENGTH_LONG).show();
-                        });
-                    } catch (Exception e) {
-                        mostrarToast("❌ Error DNS: " + e.getMessage());
-                        mostrarLog("⚠️ Error configurando DNS: " + e.getMessage());
-                    }
+                // Método oficial usando Settings.Global (recomendado)
+                android.provider.Settings.Global.putString(getContentResolver(), 
+                    "private_dns_mode", "hostname");
+                android.provider.Settings.Global.putString(getContentResolver(), 
+                    "private_dns_specifier", dnsHostname);
+                
+                // Verificar que se aplicó correctamente
+                String currentMode = android.provider.Settings.Global.getString(getContentResolver(), "private_dns_mode");
+                String currentHost = android.provider.Settings.Global.getString(getContentResolver(), "private_dns_specifier");
+                
+                if ("hostname".equals(currentMode) && dnsHostname.equals(currentHost)) {
+                    mostrarToast("✅ DNS Configurado correctamente: " + dnsHostname);
+                    mostrarLog("🔒 DNS Privado CONFIGURADO: " + dnsHostname);
+                    actualizarEstadoNextDNS(true, dnsHostname);
                 } else {
-                    mostrarToast("❌ ConnectivityManager null");
+                    mostrarToast("⚠️ DNS configurado pero no se aplicó");
+                    mostrarLog("⚠️ DNS Mode: " + currentMode + ", Host: " + currentHost);
                 }
             } catch (Exception e) {
                 mostrarToast("❌ Error DNS: " + e.getMessage());
@@ -435,13 +435,10 @@ public class MainActivity extends BridgeActivity
     public boolean isNextDNSActive() {
         if (Build.VERSION.SDK_INT >= 28) {
             try {
-                android.net.ConnectivityManager cm = (android.net.ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-                if (cm != null) {
-                    Class<?> cmClass = cm.getClass();
-                    java.lang.reflect.Method getPrivateDnsHostname = cmClass.getMethod("getPrivateDnsHostname");
-                    String currentDns = (String) getPrivateDnsHostname.invoke(cm);
-                    return currentDns != null && currentDns.contains(NEXTDNS_PROFILE_ID);
-                }
+                String currentMode = android.provider.Settings.Global.getString(getContentResolver(), "private_dns_mode");
+                String currentHost = android.provider.Settings.Global.getString(getContentResolver(), "private_dns_specifier");
+                
+                return "hostname".equals(currentMode) && currentHost != null && currentHost.contains(NEXTDNS_PROFILE_ID);
             } catch (Exception e) {
                 mostrarLog("Error verificando DNS: " + e.getMessage());
             }

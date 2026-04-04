@@ -8,11 +8,9 @@ out/
 dist/
 build/
 
-# APK files (importante!)
-*.apk
-*.aab
-public/*.apk
-android/*.apk
+# APK files - PERMITIDOS PARA DESCARGA PÚBLICA
+# Eliminamos las restricciones de *.apk para que se suban al repositorio
+# y se desplieguen en la URL pública de la web.
 
 # Environment files
 .env.local
