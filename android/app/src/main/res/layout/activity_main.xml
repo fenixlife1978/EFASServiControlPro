@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="20dp"
+    android:background="#FFFFFF">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="EduControlPro"
+        android:textSize="28sp"
+        android:textColor="#000000"
+        android:textStyle="bold"
+        android:layout_marginBottom="10dp"/>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Protección y filtrado de contenidos"
+        android:textSize="14sp"
+        android:textColor="#666666"
+        android:layout_marginBottom="40dp"/>
+
+    <Button
+        android:id="@+id/btnEnableAdmin"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="ACTIVAR ADMINISTRADOR"
+        android:textSize="16sp"
+        android:padding="12dp"
+        android:layout_marginBottom="15dp"
+        android:backgroundTint="#2196F3"/>
+
+    <Button
+        android:id="@+id/btnEnableAccessibility"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="ACTIVAR ACCESIBILIDAD"
+        android:textSize="16sp"
+        android:padding="12dp"
+        android:backgroundTint="#4CAF50"/>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Ambos permisos son necesarios para el correcto funcionamiento"
+        android:textSize="12sp"
+        android:textColor="#999999"
+        android:layout_marginTop="30dp"
+        android:gravity="center"/>
+
+</LinearLayout>

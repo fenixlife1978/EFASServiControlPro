@@ -1,0 +1,9 @@
+{
+  "global": {
+    "blocked_lists": {
+      "blacklist": [],
+      "palabras_prohibidas": [],
+      "apps_prohibidas": []
+    }
+  }
+}

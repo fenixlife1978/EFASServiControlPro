@@ -1,0 +1,262 @@
+{
+  "entities": {
+    "Institution": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Institution",
+      "type": "object",
+      "description": "Represents an educational institution or tenant within the multi-tenant system.",
+      "properties": {
+        "nombre": {
+          "type": "string",
+          "description": "Name of the institution."
+        },
+        "direccion": {
+          "type": "string",
+          "description": "Physical address of the institution (optional)."
+        },
+        "logoUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL of the institution's logo (optional)."
+        },
+        "modoFiltro": {
+          "type": "string",
+          "enum": [
+            "Blacklist",
+            "Whitelist"
+          ],
+          "description": "The URL filtering mode for the institution."
+        },
+        "superAdminSuspended": {
+          "type": "boolean",
+          "description": "Indicates whether the institution is suspended by the super admin."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of when the institution was created."
+        }
+      },
+      "required": [
+        "nombre",
+        "modoFiltro",
+        "superAdminSuspended"
+      ]
+    },
+    "Classroom": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Classroom",
+      "type": "object",
+      "description": "Represents a classroom within an institution.",
+      "properties": {
+        "institutionId": {
+          "type": "string",
+          "description": "Denormalized reference to Institution for security rules."
+        },
+        "grado": {
+          "type": "string",
+          "description": "The grade level of the classroom, e.g., '1er Grado'."
+        },
+        "seccion": {
+          "type": "string",
+          "description": "The section identifier, e.g., 'A', 'B'."
+        },
+        "nombre_completo": {
+          "type": "string",
+          "description": "The full display name, e.g., '1er Grado - Sección A'."
+        },
+        "capacidad": {
+          "type": "number",
+          "description": "Student capacity of the classroom (optional)."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "published",
+            "draft"
+          ],
+          "description": "The publication status of the classroom."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of when the classroom was created."
+        }
+      },
+      "required": [
+        "institutionId",
+        "grado",
+        "seccion",
+        "nombre_completo",
+        "status"
+      ]
+    },
+    "Alumno": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Alumno",
+      "type": "object",
+      "description": "Represents a student assigned to a classroom.",
+      "properties": {
+        "institutionId": {
+          "type": "string",
+          "description": "Denormalized reference to Institution for security rules."
+        },
+        "classroomId": {
+          "type": "string",
+          "description": "Denormalized reference to Classroom for security rules."
+        },
+        "nombre_alumno": {
+          "type": "string",
+          "description": "Name of the student assigned to the device."
+        },
+        "nro_equipo": {
+          "type": "string",
+          "description": "The chronological device number within the classroom (e.g., '01', '02')."
+        },
+        "modelo": {
+          "type": "string",
+          "description": "The hardware model of the device."
+        },
+        "macAddress": {
+          "type": "string",
+          "description": "The MAC address of the device."
+        },
+        "logs_actividad": {
+          "type": "array",
+          "description": "Logs of student's web activity.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "date": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "duration": {
+                "type": "number",
+                "description": "Duration of activity in seconds."
+              }
+            },
+            "required": [
+              "url",
+              "date",
+              "duration"
+            ]
+          }
+        }
+      },
+      "required": [
+        "institutionId",
+        "classroomId",
+        "nombre_alumno",
+        "nro_equipo",
+        "modelo",
+        "macAddress"
+      ]
+    },
+    "User": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "User",
+      "type": "object",
+      "description": "Represents a user in the system, including administrators and super administrators.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "User's unique identifier (matches auth UID)."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User's email address."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User's display name."
+        },
+        "role": {
+          "type": "string",
+          "description": "User role, e.g., 'admin' or 'superAdmin'."
+        },
+        "institutionId": {
+          "type": "string",
+          "description": "The institution the user belongs to (if not a super admin)."
+        }
+      },
+      "required": [
+        "id",
+        "email",
+        "role"
+      ]
+    }
+  },
+  "auth": {
+    "providers": [
+      "password",
+      "anonymous"
+    ]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/institutions/{institutionId}",
+        "definition": {
+          "schema": {
+            "$ref": "#/backend/entities/Institution"
+          },
+          "description": "Top-level collection for all institutions."
+        }
+      },
+      {
+        "path": "/institutions/{institutionId}/Aulas/{classroomId}",
+        "definition": {
+          "schema": {
+            "$ref": "#/backend/entities/Classroom"
+          },
+          "description": "Subcollection for classrooms within an institution."
+        }
+      },
+      {
+        "path": "/institutions/{institutionId}/Aulas/{classroomId}/Alumnos/{deviceId}",
+        "definition": {
+          "schema": {
+            "$ref": "#/backend/entities/Alumno"
+          },
+          "description": "Subcollection for student devices within a classroom."
+        }
+      },
+      {
+        "path": "/users/{userId}",
+        "definition": {
+          "schema": {
+            "$ref": "#/backend/entities/User"
+          },
+          "description": "Stores public user profile information."
+        }
+      },
+      {
+        "path": "/pending_enrollments/{enrollmentId}",
+        "definition": {
+            "schema": {
+              "type": "object",
+              "title": "PendingEnrollment",
+              "properties": {
+                "classroomId": {"type": "string"},
+                "deviceInfo": {
+                  "type": "object",
+                  "properties": {
+                    "macAddress": {"type": "string"},
+                    "model": {"type": "string"}
+                  }
+                },
+                "timestamp": {"type": "string", "format": "date-time"}
+              }
+            },
+            "description": "Temporary collection for devices during the enrollment process."
+        }
+      }
+    ]
+  }
+}

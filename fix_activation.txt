@@ -1,0 +1,16 @@
+                            <button disabled={!selectedConfig.aulaId} onClick={async () => { 
+                              const nextId = await getNextDeviceId();
+                              // Creamos el documento con ID personalizado
+                              await setDoc(doc(db, "dispositivos", nextId), { 
+                                createdAt: serverTimestamp(), 
+                                vinculado: false, 
+                                InstitutoId: selectedConfig.instId, 
+                                aulaId: selectedConfig.aulaId, 
+                                rol: selectedConfig.rol, 
+                                status: 'pending_hardware' 
+                              });
+                              setLastDeviceId(nextId); // Guardamos para el QR
+                              setLastLinkedDevice(null);
+                              setSessionStartTime(new Date()); 
+                              setIsJornadaActive(true); 
+                            }} className="w-full bg-orange-500 disabled:bg-slate-800 text-white font-black py-5 rounded-2xl">Activar Estación</button>
