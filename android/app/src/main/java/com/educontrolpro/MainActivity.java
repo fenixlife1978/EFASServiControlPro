@@ -126,7 +126,8 @@ public class MainActivity extends BridgeActivity
             mostrarToast("❌ Error plugins: " + e.getMessage());
         }
         
-        verificarPermisoWriteSettings();
+        // Ya no verificamos permiso WRITE_SETTINGS porque no configuramos DNS automáticamente
+        // verificarPermisoWriteSettings();
         requestIgnoreBatteryOptimizations();
         cargarCacheLocal();
         
@@ -271,11 +272,11 @@ public class MainActivity extends BridgeActivity
                 startActivityForResult(intent, WRITE_SETTINGS_REQUEST);
             } else {
                 mostrarLog("✅ Permiso WRITE_SETTINGS ya concedido");
-                configurarDNSPrivado();
+                verificarDNSManual();
             }
         } else {
             mostrarLog("✅ Android < 6.0, no requiere permiso WRITE_SETTINGS");
-            configurarDNSPrivado();
+            verificarDNSManual();
         }
     }
     
@@ -320,10 +321,7 @@ public class MainActivity extends BridgeActivity
         if (scheduler != null && !scheduler.isShutdown()) {
             scheduler.scheduleAtFixedRate(() -> {
                 mainHandler.post(() -> {
-                    if (!isNextDNSActive()) {
-                        mostrarLog("⚠️ DNS no está configurado, forzando configuración...");
-                        configurarDNSPrivado();
-                    }
+                    verificarDNSManual();
                 });
             }, 5, 30, TimeUnit.SECONDS);
         }
@@ -356,8 +354,8 @@ public class MainActivity extends BridgeActivity
         mostrarLog("🔥 Firebase inicializado: " + deviceId);
         mostrarToast("✅ Firebase conectado");
         
-        mostrarToast("🔧 Configurando DNS...");
-        configurarDNSPrivado();
+        // Solo verificamos el DNS manual, no lo configuramos
+        verificarDNSManual();
         
         guardarVinculacionEnFirebase();
         configurarFiltroWeb();
@@ -366,68 +364,35 @@ public class MainActivity extends BridgeActivity
         
         iniciarMonitorService();
         
-        mostrarLog("✅ Dispositivo listo con NextDNS");
+        mostrarLog("✅ Dispositivo listo");
         mostrarToast("✅ Dispositivo listo");
     }
     
+    // NUEVA FUNCIÓN: Solo verifica el DNS manual, no lo escribe
+    private void verificarDNSManual() {
+        String currentHost = getCurrentDNSHostname();
+        boolean isActive = isNextDNSActive();
+        
+        if (isActive) {
+            mostrarLog("✅ DNS manual detectado: " + currentHost);
+        } else {
+            mostrarLog("⚠️ DNS manual NO detectado. Configúralo manualmente en: Ajustes → DNS Privado");
+        }
+        
+        actualizarEstadoNextDNS(isActive, currentHost);
+    }
+    
     private void configurarDNSPrivado() {
-        mostrarToast("🔧 Iniciando configuración DNS...");
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (!Settings.System.canWrite(this)) {
-                mostrarToast("❌ Sin permiso WRITE_SETTINGS");
-                mostrarLog("⚠️ Sin permiso WRITE_SETTINGS, no se puede configurar DNS");
-                return;
-            }
-        }
-        
-        String deviceIdForDNS = "dispositivo";
-        if (this.deviceId != null && !this.deviceId.isEmpty()) {
-            deviceIdForDNS = this.deviceId.replaceAll("[^a-zA-Z0-9-]", "");
-            mostrarToast("📱 DeviceID para DNS: " + deviceIdForDNS);
-        } else {
-            mostrarToast("⚠️ DeviceID no disponible");
-        }
-        
-        final String dnsHostname = deviceIdForDNS + "-" + NEXTDNS_PROFILE_ID + "." + NEXTDNS_BASE_DOMAIN;
-        mostrarToast("🌐 Configurando: " + dnsHostname);
-        
-        // ✅ MÉTODO CORREGIDO - Funciona en Android 14, 15 y versiones anteriores
-        if (Build.VERSION.SDK_INT >= 28) { // Android 9+
-            try {
-                // Método oficial usando Settings.Global (recomendado)
-                android.provider.Settings.Global.putString(getContentResolver(), 
-                    "private_dns_mode", "hostname");
-                android.provider.Settings.Global.putString(getContentResolver(), 
-                    "private_dns_specifier", dnsHostname);
-                
-                // Verificar que se aplicó correctamente
-                String currentMode = android.provider.Settings.Global.getString(getContentResolver(), "private_dns_mode");
-                String currentHost = android.provider.Settings.Global.getString(getContentResolver(), "private_dns_specifier");
-                
-                if ("hostname".equals(currentMode) && dnsHostname.equals(currentHost)) {
-                    mostrarToast("✅ DNS Configurado correctamente: " + dnsHostname);
-                    mostrarLog("🔒 DNS Privado CONFIGURADO: " + dnsHostname);
-                    actualizarEstadoNextDNS(true, dnsHostname);
-                } else {
-                    mostrarToast("⚠️ DNS configurado pero no se aplicó");
-                    mostrarLog("⚠️ DNS Mode: " + currentMode + ", Host: " + currentHost);
-                }
-            } catch (Exception e) {
-                mostrarToast("❌ Error DNS: " + e.getMessage());
-                mostrarLog("⚠️ Error configurando DNS: " + e.getMessage());
-            }
-        } else {
-            mostrarToast("⚠️ Android " + Build.VERSION.SDK_INT + " no soporta DNS Privado");
-        }
+        // Esta función ya no se usa para configurar, solo para compatibilidad
+        verificarDNSManual();
     }
     
     private void actualizarEstadoNextDNS(boolean activo, String hostname) {
         if (rtdb != null && deviceId != null) {
             Map<String, Object> updates = new HashMap<>();
             updates.put("nextdns_active", activo);
-            updates.put("nextdns_hostname", hostname);
-            updates.put("nextdns_last_configured", System.currentTimeMillis());
+            updates.put("nextdns_hostname", hostname != null ? hostname : "");
+            updates.put("nextdns_last_checked", System.currentTimeMillis());
             rtdb.child("status_dispositivos").child(deviceId).updateChildren(updates);
         }
     }
@@ -446,6 +411,17 @@ public class MainActivity extends BridgeActivity
         return false;
     }
     
+    private String getCurrentDNSHostname() {
+        if (Build.VERSION.SDK_INT >= 28) {
+            try {
+                return android.provider.Settings.Global.getString(getContentResolver(), "private_dns_specifier");
+            } catch (Exception e) {
+                return "";
+            }
+        }
+        return "";
+    }
+    
     private void guardarVinculacionEnFirebase() {
         if (rtdb == null || deviceId == null || institutoId == null) return;
         
@@ -458,7 +434,7 @@ public class MainActivity extends BridgeActivity
         statusData.put("online", true);
         statusData.put("ultima_actualizacion", System.currentTimeMillis());
         statusData.put("nextdns_configured", isNextDNSActive());
-        statusData.put("nextdns_hostname", deviceId + "-" + NEXTDNS_PROFILE_ID + "." + NEXTDNS_BASE_DOMAIN);
+        statusData.put("nextdns_hostname", getCurrentDNSHostname());
         statusData.put("accesibilidad_activa", isAccessibilityServiceEnabled());
         rtdb.child("status_dispositivos").child(deviceId).updateChildren(statusData);
         
@@ -661,7 +637,7 @@ public class MainActivity extends BridgeActivity
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.System.canWrite(this)) {
                 mostrarLog("✅ Permiso WRITE_SETTINGS concedido");
                 mostrarToast("✅ Permiso WRITE_SETTINGS concedido");
-                configurarDNSPrivado();
+                verificarDNSManual();
             } else {
                 mostrarToast("⚠️ Permiso WRITE_SETTINGS denegado");
                 Toast.makeText(this, "⚠️ Permiso denegado, el filtro NextDNS no funcionará", Toast.LENGTH_LONG).show();
@@ -681,6 +657,7 @@ public class MainActivity extends BridgeActivity
     public void onResume() {
         super.onResume();
         verificarYReiniciarMonitorService();
+        verificarDNSManual(); // Actualizar estado DNS al reanudar
     }
     
     @Override
