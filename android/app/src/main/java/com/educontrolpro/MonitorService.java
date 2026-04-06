@@ -46,18 +46,16 @@ public class MonitorService extends AccessibilityService {
     private boolean allowAccess = false;
     private boolean modoBlindadoActivo = false;
     private long lastBlockTime = 0;
-    private static final long MIN_BLOCK_INTERVAL = 200; // 200ms para respuesta ultra rápida
+    private static final long MIN_BLOCK_INTERVAL = 200;
     private Handler heartbeatHandler;
     private Handler watchdogHandler;
     private PowerManager.WakeLock wakeLock;
     private Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean isBlocking = false;
     
-    // Variables para URL actual
     private String currentUrl = "Esperando navegación...";
     private long lastUrlUpdate = 0;
     
-    // Lista de paquetes de ajustes del sistema
     private final Set<String> settingsPackages = new HashSet<>(Arrays.asList(
         "com.android.settings",
         "com.android.systemui",
@@ -73,9 +71,7 @@ public class MonitorService extends AccessibilityService {
         "com.android.bluetooth"
     ));
     
-    // Apps prohibidas - Lista completa
     private final Set<String> forbiddenPackages = new HashSet<>(Arrays.asList(
-        // Redes Sociales
         "com.instagram.android",
         "com.facebook.katana",
         "com.facebook.orca",
@@ -85,12 +81,10 @@ public class MonitorService extends AccessibilityService {
         "com.snapchat.android",
         "com.reddit.frontpage",
         "com.telegram.messenger",
-        // Mensajería
         "com.whatsapp",
         "com.whatsapp.w4b",
         "org.telegram.messenger",
         "com.discord",
-        // Juegos
         "com.roblox.client",
         "com.dts.freefireth",
         "com.mobile.legends",
@@ -105,7 +99,6 @@ public class MonitorService extends AccessibilityService {
         "com.activision.callofduty.shooter",
         "com.tencent.ig",
         "com.pubg.imobile",
-        // Streaming / Videos
         "com.google.android.youtube",
         "com.netflix.mediaclient",
         "com.amazon.avod.thirdpartyclient",
@@ -113,7 +106,6 @@ public class MonitorService extends AccessibilityService {
         "com.disney.disneyplus",
         "com.tiktok.android",
         "com.zhiliaoapp.musically",
-        // Tiendas de Apps
         "com.android.vending",
         "com.sec.android.app.samsungapps",
         "com.huawei.appmarket",
@@ -125,7 +117,6 @@ public class MonitorService extends AccessibilityService {
         "com.google.android.play.games"
     ));
     
-    // Navegadores
     private final List<String> browserPackages = Arrays.asList(
         "com.android.chrome", 
         "org.mozilla.firefox", 
@@ -136,7 +127,6 @@ public class MonitorService extends AccessibilityService {
         "com.sec.android.app.sbrowser"
     );
     
-    // Clases de configuración del navegador
     private final List<String> configClasses = Arrays.asList(
         "Settings", 
         "Preference", 
@@ -173,10 +163,9 @@ public class MonitorService extends AccessibilityService {
             return;
         }
         
-        // 🔥 BLOQUEO DE AJUSTES DEL SISTEMA - RESPUESTA INMEDIATA
+        // 🔥 BLOQUEO DE AJUSTES DEL SISTEMA
         if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
-            eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
-            eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
             
             boolean isSettings = settingsPackages.contains(pkg) || 
                                  pkg.contains("settings") || 
@@ -199,7 +188,7 @@ public class MonitorService extends AccessibilityService {
             }
         }
         
-        // 🔥 BLOQUEO DE APPS PROHIBIDAS - RESPUESTA INMEDIATA
+        // 🔥 BLOQUEO DE APPS PROHIBIDAS
         if (forbiddenPackages.contains(pkg) && 
             (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
              eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED)) {
@@ -208,14 +197,53 @@ public class MonitorService extends AccessibilityService {
             return;
         }
         
-        // Configuración del navegador
+        // ============================================================
+        // 🔒 CONFIGURACIÓN DEL NAVEGADOR - CORREGIDO
+        // Solo bloquea cuando es pantalla de ajustes REAL
+        // NO bloquea la barra de direcciones ni el teclado
+        // ============================================================
         if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             if (browserPackages.contains(pkg) && event.getClassName() != null) {
                 String className = event.getClassName().toString();
-                for (String configClass : configClasses) {
-                    if (className.contains(configClass)) {
-                        expulsarInmediato("configuracion_navegador");
-                        return;
+                
+                // Clases que SÍ son configuración real (deben bloquearse)
+                boolean isRealSettings = className.equals("Settings") ||
+                                         className.equals("SettingsActivity") ||
+                                         className.equals("BrowserPreferences") ||
+                                         className.equals("ChromeSettings") ||
+                                         className.contains("PreferenceFragment") ||
+                                         (className.contains("Settings") && className.contains("Preference"));
+                
+                // Clases que NO deben bloquearse (barra de direcciones, teclado, navegación normal)
+                boolean isAddressBar = className.contains("LocationBar") ||
+                                       className.contains("UrlBar") ||
+                                       className.contains("Omnibox") ||
+                                       className.contains("AddressBar") ||
+                                       className.contains("Toolbar") ||
+                                       className.equals("ChromeTabActivity") ||
+                                       className.equals("BrowserActivity") ||
+                                       className.contains("WebView") ||
+                                       className.contains("FindInPageBar");
+                
+                // Solo bloquear si es configuración REAL y NO es barra de direcciones
+                if (isRealSettings && !isAddressBar) {
+                    Log.w(TAG, "🔒 CONFIGURACIÓN REAL DEL NAVEGADOR: " + className);
+                    expulsarInmediato("configuracion_navegador");
+                    return;
+                } else if (isAddressBar) {
+                    Log.d(TAG, "🌐 Barra de direcciones - Permitir: " + className);
+                    // No bloquear, permitir escribir
+                } else {
+                    // Verificar también con la lista original como respaldo
+                    for (String configClass : configClasses) {
+                        if (className.contains(configClass)) {
+                            // Asegurar que no es barra de direcciones
+                            if (!className.contains("UrlBar") && !className.contains("Omnibox") && !className.contains("AddressBar")) {
+                                Log.w(TAG, "🔒 CONFIGURACIÓN NAVEGADOR: " + className);
+                                expulsarInmediato("configuracion_navegador");
+                                return;
+                            }
+                        }
                     }
                 }
             }
@@ -339,10 +367,20 @@ public class MonitorService extends AccessibilityService {
         reportarEvento(tipo);
     }
     
-    private void mostrarMensajeDirector(String texto, String remitente, String idMsg) {
+    // ============================================================
+    // MÉTODO CORREGIDO: mostrarMensajeDirector
+    // Ahora marca como leído en la ruta correcta
+    // ============================================================
+    private void mostrarMensajeDirector(String texto, String remitente, String idMsg, String titulo) {
         long now = System.currentTimeMillis();
         if (now - lastBlockTime < MIN_BLOCK_INTERVAL) return;
         lastBlockTime = now;
+        
+        Log.d(TAG, "📨 MOSTRANDO MENSAJE DEL DIRECTOR");
+        Log.d(TAG, "   - texto: " + texto);
+        Log.d(TAG, "   - remitente: " + remitente);
+        Log.d(TAG, "   - idMsg: " + idMsg);
+        Log.d(TAG, "   - titulo: " + titulo);
         
         Intent intent = new Intent(this, MessageActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -350,12 +388,18 @@ public class MonitorService extends AccessibilityService {
         intent.putExtra("remitente", remitente != null ? remitente : "Dirección");
         intent.putExtra("messageId", idMsg);
         intent.putExtra("deviceId", deviceId);
-        startActivity(intent);
-        reportarEvento("mensaje_director");
-        
-        if (rtdb != null && deviceId != null && idMsg != null) {
-            rtdb.child("dispositivos").child(deviceId).child("mensaje_actual").child("leido").setValue(true);
+        if (titulo != null && !titulo.isEmpty()) {
+            intent.putExtra("titulo", titulo);
         }
+        startActivity(intent);
+        
+        // Marcar como leído en la ruta CORRECTA: mensajes_dispositivos/{deviceId}/ultimo_mensaje
+        if (rtdb != null && deviceId != null) {
+            rtdb.child("mensajes_dispositivos").child(deviceId).child("ultimo_mensaje").child("leido").setValue(true);
+            Log.d(TAG, "✅ Mensaje marcado como leído en mensajes_dispositivos/" + deviceId + "/ultimo_mensaje");
+        }
+        
+        reportarEvento("mensaje_director");
     }
     
     private void reportarEvento(String tipo) {
@@ -480,9 +524,13 @@ public class MonitorService extends AccessibilityService {
         });
     }
     
+    // ============================================================
+    // syncModes CORREGIDO - Escucha en la ruta correcta de mensajes
+    // ============================================================
     private void syncModes() {
         if (deviceId == null) return;
         
+        // Modo técnico (admin_mode)
         rtdb.child("status_dispositivos").child(deviceId).child("admin_mode_enable")
             .addValueEventListener(new ValueEventListener() {
                 @Override public void onDataChange(DataSnapshot s) {
@@ -492,6 +540,7 @@ public class MonitorService extends AccessibilityService {
                 @Override public void onCancelled(DatabaseError e) {}
             });
         
+        // Blindaje total (shield_mode)
         rtdb.child("status_dispositivos").child(deviceId).child("shield_mode_enable")
             .addValueEventListener(new ValueEventListener() {
                 @Override public void onDataChange(DataSnapshot s) {
@@ -504,19 +553,32 @@ public class MonitorService extends AccessibilityService {
                 @Override public void onCancelled(DatabaseError e) {}
             });
         
-        rtdb.child("dispositivos").child(deviceId).child("mensaje_actual")
+        // ============================================================
+        // ESCUCHAR MENSAJES DEL DIRECTOR - RUTA CORREGIDA
+        // Ahora escucha en: mensajes_dispositivos/{deviceId}/ultimo_mensaje
+        // ============================================================
+        rtdb.child("mensajes_dispositivos").child(deviceId).child("ultimo_mensaje")
             .addValueEventListener(new ValueEventListener() {
                 @Override
                 public void onDataChange(DataSnapshot snapshot) {
                     if (snapshot.exists()) {
-                        String texto = snapshot.child("mensaje").getValue(String.class);
+                        String texto = snapshot.child("texto").getValue(String.class);
                         Boolean leido = snapshot.child("leido").getValue(Boolean.class);
-                        String idMsg = snapshot.child("messageId").getValue(String.class);
+                        String idMsg = snapshot.child("id").getValue(String.class);
                         String remitente = snapshot.child("remitente").getValue(String.class);
+                        String titulo = snapshot.child("titulo").getValue(String.class);
+                        
+                        Log.d(TAG, "📨 Mensaje detectado en mensajes_dispositivos:");
+                        Log.d(TAG, "   - texto: " + texto);
+                        Log.d(TAG, "   - leido: " + leido);
+                        Log.d(TAG, "   - idMsg: " + idMsg);
+                        Log.d(TAG, "   - remitente: " + remitente);
+                        Log.d(TAG, "   - titulo: " + titulo);
                         
                         if (texto != null && !texto.isEmpty() && (leido == null || !leido)) {
-                            Log.d(TAG, "📨 Mensaje del director detectado: " + texto);
-                            mostrarMensajeDirector(texto, remitente, idMsg);
+                            mostrarMensajeDirector(texto, remitente, idMsg, titulo);
+                        } else if (texto != null && !texto.isEmpty()) {
+                            Log.d(TAG, "📨 Mensaje ya fue leído, ignorando");
                         }
                     }
                 }
@@ -552,7 +614,7 @@ public class MonitorService extends AccessibilityService {
             info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
             info.flags = AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS |
                          AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
-            info.notificationTimeout = 50; // Tiempo de respuesta ultra rápido
+            info.notificationTimeout = 50;
             setServiceInfo(info);
             
         } catch (Exception e) {
@@ -588,8 +650,6 @@ public class MonitorService extends AccessibilityService {
         }
     }
     
-    
-
     public String getCurrentUrl() { return currentUrl; }
     public long getLastUrlUpdate() { return lastUrlUpdate; }
 }
