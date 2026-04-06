@@ -46,12 +46,14 @@ public class MonitorService extends AccessibilityService {
     private boolean allowAccess = false;
     private boolean modoBlindadoActivo = false;
     private long lastBlockTime = 0;
-    private static final long MIN_BLOCK_INTERVAL = 800;
+    // INCREMENTADO: 800ms -> 2000ms para evitar spam pero mantener bloqueos efectivos
+    private static final long MIN_BLOCK_INTERVAL = 2000;
     private Handler heartbeatHandler;
     private Handler watchdogHandler;
     private PowerManager.WakeLock wakeLock;
     private Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean isBlocking = false;
+    private int homePressCount = 0; // Contador de intentos de HOME
     
     private String currentUrl = "Esperando navegación...";
     private long lastUrlUpdate = 0;
@@ -59,7 +61,7 @@ public class MonitorService extends AccessibilityService {
     
     // Control de spam mejorado
     private Map<String, Long> lastPackageBlockTime = new HashMap<>();
-    private static final long MIN_PACKAGE_BLOCK_INTERVAL = 1500;
+    private static final long MIN_PACKAGE_BLOCK_INTERVAL = 2000;
     
     // Control de spam para reportes
     private Map<String, Long> lastReportTime = new HashMap<>();
@@ -143,13 +145,15 @@ public class MonitorService extends AccessibilityService {
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (!isServiceActive) return;
         
-        // CORREGIDO: Si isBlocking está true por más de 1 segundo, liberar forzadamente
+        // CORREGIDO: Si isBlocking está true por más de 2 segundos, liberar forzadamente
         if (isBlocking) {
             long blockingDuration = System.currentTimeMillis() - lastBlockTime;
-            if (blockingDuration > 1000) {
+            if (blockingDuration > 2000) {
                 Log.w(TAG, "⚠️ isBlocking trabada por " + blockingDuration + "ms, liberando");
                 isBlocking = false;
+                homePressCount = 0;
             } else {
+                // NO ignorar eventos, solo esperar un poco menos
                 return;
             }
         }
@@ -217,13 +221,14 @@ public class MonitorService extends AccessibilityService {
     }
     
     /**
-     * EXPULSA INMEDIATAMENTE AL HOME - Con doble HOME para asegurar
+     * EXPULSA INMEDIATAMENTE AL HOME - Versión mejorada con múltiples intentos
      */
     private void expulsarAlHome(String tipo) {
         long now = System.currentTimeMillis();
         
-        // Control anti-spam global
+        // Control anti-spam global - aumentado a 2 segundos
         if (now - lastBlockTime < MIN_BLOCK_INTERVAL) {
+            Log.d(TAG, "⏱️ Bloqueo ignorado (spam): " + tipo + " - " + (now - lastBlockTime) + "ms desde último");
             return;
         }
         
@@ -233,24 +238,37 @@ public class MonitorService extends AccessibilityService {
         
         // Activar bandera de bloqueo
         isBlocking = true;
+        homePressCount = 0;
         
-        // CORREGIDO: Presionar HOME dos veces para asegurar
-        performGlobalAction(GLOBAL_ACTION_HOME);
-        
-        // Pequeña pausa y segundo HOME
-        mainHandler.postDelayed(() -> {
-            performGlobalAction(GLOBAL_ACTION_HOME);
-            Log.d(TAG, "🏠 Segundo HOME presionado para asegurar");
-        }, 100);
+        // CORREGIDO: Múltiples intentos de HOME con delays progresivos
+        realizarHomeRepetido(0);
         
         // Reportar evento a Firebase
         reportarEvento(tipo, "sistema");
-        
-        // Liberar bandera después de que la expulsión se complete
-        mainHandler.postDelayed(() -> {
+    }
+    
+    /**
+     * Realiza múltiples intentos de HOME hasta asegurar la expulsión
+     */
+    private void realizarHomeRepetido(int intento) {
+        if (intento >= 5) {
+            Log.w(TAG, "⚠️ Se realizaron 5 intentos de HOME, liberando bandera");
             isBlocking = false;
-            Log.d(TAG, "🔓 Bandera isBlocking liberada");
-        }, 800);
+            homePressCount = 0;
+            return;
+        }
+        
+        boolean success = performGlobalAction(GLOBAL_ACTION_HOME);
+        Log.d(TAG, "🏠 HOME intento " + (intento + 1) + ": " + (success ? "OK" : "FALLÓ"));
+        
+        homePressCount++;
+        
+        // Programar siguiente intento si aún estamos en bloqueo
+        mainHandler.postDelayed(() -> {
+            if (isBlocking) {
+                realizarHomeRepetido(intento + 1);
+            }
+        }, 300);
     }
     
     private void capturarUrlActual(AccessibilityEvent event, String packageName) {
@@ -444,16 +462,16 @@ public class MonitorService extends AccessibilityService {
                     isServiceActive = true;
                 }
                 
-                // CORREGIDO: Limpiar bandera isBlocking si quedó trabada (más de 1.5 segundos)
+                // CORREGIDO: Limpiar bandera isBlocking si quedó trabada (más de 3 segundos)
                 if (isBlocking) {
                     long blockDuration = System.currentTimeMillis() - lastBlockTime;
-                    if (blockDuration > 1500) {
+                    if (blockDuration > 3000) {
                         Log.w(TAG, "⚠️ Watchdog liberó isBlocking trabada por " + blockDuration + "ms");
                         isBlocking = false;
+                        homePressCount = 0;
                     }
                 }
                 
-                // NUEVO: Forzar reconexión del servicio si lleva mucho tiempo sin eventos
                 if (rtdb == null && isServiceActive) {
                     Log.w(TAG, "⚠️ Watchdog: RTDB nulo, reconectando...");
                     try {
