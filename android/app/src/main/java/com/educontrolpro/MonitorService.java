@@ -46,7 +46,7 @@ public class MonitorService extends AccessibilityService {
     private boolean allowAccess = false;
     private boolean modoBlindadoActivo = false;
     private long lastBlockTime = 0;
-    private static final long MIN_BLOCK_INTERVAL = 500; // 500ms para respuesta rápida
+    private static final long MIN_BLOCK_INTERVAL = 1000;
     private Handler heartbeatHandler;
     private Handler watchdogHandler;
     private PowerManager.WakeLock wakeLock;
@@ -59,9 +59,9 @@ public class MonitorService extends AccessibilityService {
     
     // Control de spam para reportes
     private Map<String, Long> lastReportTime = new HashMap<>();
-    private static final long MIN_REPORT_INTERVAL = 10000; // 10 segundos
+    private static final long MIN_REPORT_INTERVAL = 10000;
     
-    // Listas en memoria
+    // Listas en memoria (se cargan al inicio y se actualizan en tiempo real)
     private Set<String> globalBlacklist = new HashSet<>();
     private Set<String> globalWhitelist = new HashSet<>();
     
@@ -161,15 +161,11 @@ public class MonitorService extends AccessibilityService {
             return;
         }
         
-        long now = System.currentTimeMillis();
-        if (now - lastBlockTime < MIN_BLOCK_INTERVAL) return;
-        
         if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             boolean isSettings = settingsPackages.contains(pkg);
             if (isSettings) {
                 if (!lastBlockedPackage.equals(pkg)) {
                     lastBlockedPackage = pkg;
-                    lastBlockTime = now;
                     expulsar("ajustes_sistema", pkg);
                     mainHandler.postDelayed(() -> lastBlockedPackage = "", 2000);
                 }
@@ -184,7 +180,6 @@ public class MonitorService extends AccessibilityService {
                     if (className.contains(configClass)) {
                         if (!lastBlockedPackage.equals(pkg + "_config")) {
                             lastBlockedPackage = pkg + "_config";
-                            lastBlockTime = now;
                             expulsar("configuracion_navegador", pkg);
                             mainHandler.postDelayed(() -> lastBlockedPackage = "", 2000);
                         }
@@ -197,7 +192,6 @@ public class MonitorService extends AccessibilityService {
         if (forbiddenPackages.contains(pkg) && eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             if (!lastBlockedPackage.equals(pkg)) {
                 lastBlockedPackage = pkg;
-                lastBlockTime = now;
                 expulsar("app_prohibida", pkg);
                 mainHandler.postDelayed(() -> lastBlockedPackage = "", 2000);
             }
@@ -206,6 +200,10 @@ public class MonitorService extends AccessibilityService {
     }
     
     private void expulsar(String tipo, String paquete) {
+        long now = System.currentTimeMillis();
+        if (now - lastBlockTime < MIN_BLOCK_INTERVAL) return;
+        lastBlockTime = now;
+        
         Log.w(TAG, "🚫 Expulsando: " + tipo + " - " + paquete);
         performGlobalAction(GLOBAL_ACTION_HOME);
         reportarEvento(tipo, paquete);
@@ -455,11 +453,15 @@ public class MonitorService extends AccessibilityService {
             });
     }
     
+    /**
+     * Carga las listas negra y blanca desde Firebase y las guarda en memoria
+     */
     private void cargarListasEnMemoria() {
         if (rtdb == null || institutoId == null) return;
         
         DatabaseReference sedeRef = rtdb.child("config").child("instituciones").child(institutoId);
         
+        // Cargar blacklist
         sedeRef.child("blacklist").addListenerForSingleValueEvent(new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
@@ -478,6 +480,7 @@ public class MonitorService extends AccessibilityService {
             }
         });
         
+        // Cargar whitelist
         sedeRef.child("whitelist").addListenerForSingleValueEvent(new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
@@ -502,6 +505,7 @@ public class MonitorService extends AccessibilityService {
         
         DatabaseReference sedeRef = rtdb.child("config").child("instituciones").child(institutoId);
         
+        // Escuchar cambios en blacklist
         sedeRef.child("blacklist").addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
@@ -520,6 +524,7 @@ public class MonitorService extends AccessibilityService {
             }
         });
         
+        // Escuchar cambios en whitelist
         sedeRef.child("whitelist").addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
@@ -611,19 +616,13 @@ public class MonitorService extends AccessibilityService {
                               AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED;
             info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
             info.flags = AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS |
-                         AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS |
-                         AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE;
+                         AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
             info.notificationTimeout = 50;
             setServiceInfo(info);
             
         } catch (Exception e) {
             Log.e(TAG, "Error init: " + e.getMessage());
         }
-    }
-    
-    @Override
-    public int onStartCommand(Intent intent, int flags, int startId) {
-        return START_STICKY;
     }
     
     @Override
@@ -656,6 +655,8 @@ public class MonitorService extends AccessibilityService {
     
     public String getCurrentUrl() { return currentUrl; }
     public long getLastUrlUpdate() { return lastUrlUpdate; }
+    
+    // Getters para las listas en memoria
     public Set<String> getGlobalBlacklist() { return globalBlacklist; }
     public Set<String> getGlobalWhitelist() { return globalWhitelist; }
 }
