@@ -46,7 +46,7 @@ public class MonitorService extends AccessibilityService {
     private boolean allowAccess = false;
     private boolean modoBlindadoActivo = false;
     private long lastBlockTime = 0;
-    private static final long MIN_BLOCK_INTERVAL = 1000;
+    private static final long MIN_BLOCK_INTERVAL = 800; // Reducido para respuesta más rápida
     private Handler heartbeatHandler;
     private Handler watchdogHandler;
     private PowerManager.WakeLock wakeLock;
@@ -57,11 +57,15 @@ public class MonitorService extends AccessibilityService {
     private long lastUrlUpdate = 0;
     private String lastBlockedPackage = "";
     
+    // Control de spam mejorado
+    private Map<String, Long> lastPackageBlockTime = new HashMap<>();
+    private static final long MIN_PACKAGE_BLOCK_INTERVAL = 1500; // 1.5 segundos por paquete
+    
     // Control de spam para reportes
     private Map<String, Long> lastReportTime = new HashMap<>();
     private static final long MIN_REPORT_INTERVAL = 10000;
     
-    // Listas en memoria (se cargan al inicio y se actualizan en tiempo real)
+    // Listas en memoria
     private Set<String> globalBlacklist = new HashSet<>();
     private Set<String> globalWhitelist = new HashSet<>();
     
@@ -137,42 +141,48 @@ public class MonitorService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (!isServiceActive || isBlocking) return;
+        if (!isServiceActive) return;
+        
+        // Si está bloqueando, solo esperar a que termine (máximo 1 segundo)
+        if (isBlocking) {
+            return;
+        }
         
         String pkg = event.getPackageName() != null ? event.getPackageName().toString() : "";
         int eventType = event.getEventType();
         
         if (pkg.equals(getPackageName())) return;
         
-        // Capturar URL en cambios de ventana Y cambios de contenido
+        // Capturar URL
         if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
             eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
             capturarUrlActual(event, pkg);
         }
         
-        // IMPORTANTE: Si allowAccess está activado (Modo Técnico), NO bloquear NADA
+        // Modo técnico: NO bloquear nada
         if (allowAccess) {
-            Log.d(TAG, "🔓 Modo Técnico ACTIVADO - Ignorando bloqueos");
             return;
         }
         
-        if (modoBlindadoActivo && !allowAccess) {
-            mostrarBloqueo("blindaje_total", "⚠️ BLOQUEO TOTAL ACTIVADO");
+        // Blindaje total
+        if (modoBlindadoActivo) {
+            expulsarAlHome("blindaje_total");
             return;
         }
         
+        // BLOQUEO DE CONFIGURACIONES DEL SISTEMA
         if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            boolean isSettings = settingsPackages.contains(pkg);
-            if (isSettings) {
+            if (settingsPackages.contains(pkg)) {
                 if (!lastBlockedPackage.equals(pkg)) {
                     lastBlockedPackage = pkg;
-                    expulsar("ajustes_sistema", pkg);
+                    expulsarAlHome("ajustes_sistema");
                     mainHandler.postDelayed(() -> lastBlockedPackage = "", 2000);
                 }
                 return;
             }
         }
         
+        // BLOQUEO DE CONFIGURACIONES DEL NAVEGADOR
         if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             if (browserPackages.contains(pkg) && event.getClassName() != null) {
                 String className = event.getClassName().toString();
@@ -180,7 +190,7 @@ public class MonitorService extends AccessibilityService {
                     if (className.contains(configClass)) {
                         if (!lastBlockedPackage.equals(pkg + "_config")) {
                             lastBlockedPackage = pkg + "_config";
-                            expulsar("configuracion_navegador", pkg);
+                            expulsarAlHome("configuracion_navegador");
                             mainHandler.postDelayed(() -> lastBlockedPackage = "", 2000);
                         }
                         return;
@@ -189,27 +199,46 @@ public class MonitorService extends AccessibilityService {
             }
         }
         
+        // BLOQUEO DE APPS PROHIBIDAS
         if (forbiddenPackages.contains(pkg) && eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             if (!lastBlockedPackage.equals(pkg)) {
                 lastBlockedPackage = pkg;
-                expulsar("app_prohibida", pkg);
+                expulsarAlHome("app_prohibida");
                 mainHandler.postDelayed(() -> lastBlockedPackage = "", 2000);
             }
             return;
         }
     }
     
-    private void expulsar(String tipo, String paquete) {
+    /**
+     * EXPULSA INMEDIATAMENTE AL HOME - Este es el comportamiento correcto
+     * Sin pantallas, sin timeouts visibles, solo expulsión
+     */
+    private void expulsarAlHome(String tipo) {
         long now = System.currentTimeMillis();
-        if (now - lastBlockTime < MIN_BLOCK_INTERVAL) return;
+        
+        // Control anti-spam global
+        if (now - lastBlockTime < MIN_BLOCK_INTERVAL) {
+            return;
+        }
+        
         lastBlockTime = now;
         
-        Log.w(TAG, "🚫 Expulsando: " + tipo + " - " + paquete);
-        performGlobalAction(GLOBAL_ACTION_HOME);
-        reportarEvento(tipo, paquete);
+        Log.w(TAG, "🚫 EXPULSANDO AL HOME: " + tipo);
         
+        // Activar bandera de bloqueo
         isBlocking = true;
-        mainHandler.postDelayed(() -> isBlocking = false, 500);
+        
+        // Ejecutar HOME (expulsión inmediata)
+        performGlobalAction(GLOBAL_ACTION_HOME);
+        
+        // Reportar evento a Firebase
+        reportarEvento(tipo, "sistema");
+        
+        // Liberar bandera después de que la expulsión se complete
+        mainHandler.postDelayed(() -> {
+            isBlocking = false;
+        }, 500);
     }
     
     private void capturarUrlActual(AccessibilityEvent event, String packageName) {
@@ -222,7 +251,7 @@ public class MonitorService extends AccessibilityService {
                 if (url != null && !url.isEmpty() && !url.equals(currentUrl)) {
                     currentUrl = url;
                     lastUrlUpdate = System.currentTimeMillis();
-                    Log.d(TAG, "🌐 URL detectada (ventana): " + currentUrl);
+                    Log.d(TAG, "🌐 URL detectada: " + currentUrl);
                     guardarHistorial(currentUrl);
                     actualizarUrlEnTiempoReal(currentUrl);
                 }
@@ -288,11 +317,10 @@ public class MonitorService extends AccessibilityService {
         updates.put("url_actual", url);
         updates.put("ultima_url_actualizacion", System.currentTimeMillis());
         rtdb.child("status_dispositivos").child(deviceId).updateChildren(updates);
-        
-        Log.d(TAG, "🔄 URL actual actualizada: " + url);
     }
     
     private void mostrarBloqueo(String tipo, String mensaje) {
+        // Esto SOLO se usa para blindaje total, NO para expulsiones normales
         long now = System.currentTimeMillis();
         if (now - lastBlockTime < MIN_BLOCK_INTERVAL) return;
         lastBlockTime = now;
@@ -334,7 +362,6 @@ public class MonitorService extends AccessibilityService {
         long now = System.currentTimeMillis();
         
         if (lastReport != null && (now - lastReport) < MIN_REPORT_INTERVAL) {
-            Log.d(TAG, "🔄 Reporte ignorado (spam control): " + tipo + " - " + paquete);
             return;
         }
         
@@ -348,7 +375,7 @@ public class MonitorService extends AccessibilityService {
         if (institutoId != null) e.put("InstitutoId", institutoId);
         rtdb.child("alertas_seguridad").push().setValue(e);
         
-        Log.d(TAG, "📊 Reporte guardado: " + tipo + " - " + paquete);
+        Log.d(TAG, "📊 Reporte: " + tipo);
     }
     
     private void startForegroundService() {
@@ -402,23 +429,15 @@ public class MonitorService extends AccessibilityService {
             @Override
             public void run() {
                 if (!isServiceActive) {
-                    Log.w(TAG, "⚠️ Watchdog: Servicio detectado como inactivo, reiniciando...");
+                    Log.w(TAG, "⚠️ Watchdog: Servicio inactivo, reiniciando...");
                     isServiceActive = true;
-                    try {
-                        if (rtdb != null && deviceId != null) {
-                            rtdb.child("status_dispositivos").child(deviceId).child("admin_mode_enable")
-                                .addListenerForSingleValueEvent(new ValueEventListener() {
-                                    @Override
-                                    public void onDataChange(DataSnapshot snapshot) {
-                                        allowAccess = snapshot.exists() && Boolean.TRUE.equals(snapshot.getValue(Boolean.class));
-                                        Log.d(TAG, "Watchdog restauró modo técnico: " + allowAccess);
-                                    }
-                                    @Override
-                                    public void onCancelled(DatabaseError error) {}
-                                });
-                        }
-                    } catch (Exception e) {
-                        Log.e(TAG, "Error en watchdog: " + e.getMessage());
+                }
+                // Limpiar bandera isBlocking si quedó trabada (esto es la única "red de seguridad")
+                if (isBlocking) {
+                    long blockDuration = System.currentTimeMillis() - lastBlockTime;
+                    if (blockDuration > 3000) { // Si lleva más de 3 segundos bloqueando, liberar
+                        Log.w(TAG, "⚠️ isBlocking trabada por " + blockDuration + "ms, liberando");
+                        isBlocking = false;
                     }
                 }
                 if (watchdogHandler != null) {
@@ -444,7 +463,7 @@ public class MonitorService extends AccessibilityService {
                 @Override public void onDataChange(DataSnapshot s) {
                     institutoId = s.getValue(String.class);
                     if (institutoId != null) {
-                        Log.d(TAG, "InstitutoId cargado: " + institutoId);
+                        Log.d(TAG, "InstitutoId: " + institutoId);
                         cargarListasEnMemoria();
                         precargarListas();
                     }
@@ -453,15 +472,11 @@ public class MonitorService extends AccessibilityService {
             });
     }
     
-    /**
-     * Carga las listas negra y blanca desde Firebase y las guarda en memoria
-     */
     private void cargarListasEnMemoria() {
         if (rtdb == null || institutoId == null) return;
         
         DatabaseReference sedeRef = rtdb.child("config").child("instituciones").child(institutoId);
         
-        // Cargar blacklist
         sedeRef.child("blacklist").addListenerForSingleValueEvent(new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
@@ -472,15 +487,12 @@ public class MonitorService extends AccessibilityService {
                         globalBlacklist.add(value.toLowerCase());
                     }
                 }
-                Log.d(TAG, "📦 Blacklist cargada en memoria: " + globalBlacklist.size() + " dominios");
+                Log.d(TAG, "Blacklist cargada: " + globalBlacklist.size() + " dominios");
             }
             @Override
-            public void onCancelled(DatabaseError error) {
-                Log.e(TAG, "Error cargando blacklist: " + error.getMessage());
-            }
+            public void onCancelled(DatabaseError error) {}
         });
         
-        // Cargar whitelist
         sedeRef.child("whitelist").addListenerForSingleValueEvent(new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
@@ -491,12 +503,10 @@ public class MonitorService extends AccessibilityService {
                         globalWhitelist.add(value.toLowerCase());
                     }
                 }
-                Log.d(TAG, "📦 Whitelist cargada en memoria: " + globalWhitelist.size() + " dominios");
+                Log.d(TAG, "Whitelist cargada: " + globalWhitelist.size() + " dominios");
             }
             @Override
-            public void onCancelled(DatabaseError error) {
-                Log.e(TAG, "Error cargando whitelist: " + error.getMessage());
-            }
+            public void onCancelled(DatabaseError error) {}
         });
     }
     
@@ -505,7 +515,6 @@ public class MonitorService extends AccessibilityService {
         
         DatabaseReference sedeRef = rtdb.child("config").child("instituciones").child(institutoId);
         
-        // Escuchar cambios en blacklist
         sedeRef.child("blacklist").addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
@@ -516,15 +525,11 @@ public class MonitorService extends AccessibilityService {
                         globalBlacklist.add(value.toLowerCase());
                     }
                 }
-                Log.d(TAG, "📡 Blacklist actualizada en tiempo real: " + globalBlacklist.size() + " dominios");
             }
             @Override
-            public void onCancelled(DatabaseError error) {
-                Log.e(TAG, "Error en blacklist: " + error.getMessage());
-            }
+            public void onCancelled(DatabaseError error) {}
         });
         
-        // Escuchar cambios en whitelist
         sedeRef.child("whitelist").addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
@@ -535,12 +540,9 @@ public class MonitorService extends AccessibilityService {
                         globalWhitelist.add(value.toLowerCase());
                     }
                 }
-                Log.d(TAG, "📡 Whitelist actualizada en tiempo real: " + globalWhitelist.size() + " dominios");
             }
             @Override
-            public void onCancelled(DatabaseError error) {
-                Log.e(TAG, "Error en whitelist: " + error.getMessage());
-            }
+            public void onCancelled(DatabaseError error) {}
         });
     }
     
@@ -551,7 +553,7 @@ public class MonitorService extends AccessibilityService {
             .addValueEventListener(new ValueEventListener() {
                 @Override public void onDataChange(DataSnapshot s) {
                     allowAccess = s.exists() && Boolean.TRUE.equals(s.getValue(Boolean.class));
-                    Log.d(TAG, "Modo técnico (admin_mode): " + (allowAccess ? "ACTIVADO" : "DESACTIVADO"));
+                    Log.d(TAG, "Modo técnico: " + (allowAccess ? "ACTIVADO" : "DESACTIVADO"));
                 }
                 @Override public void onCancelled(DatabaseError e) {}
             });
@@ -560,10 +562,7 @@ public class MonitorService extends AccessibilityService {
             .addValueEventListener(new ValueEventListener() {
                 @Override public void onDataChange(DataSnapshot s) {
                     modoBlindadoActivo = s.exists() && Boolean.TRUE.equals(s.getValue(Boolean.class));
-                    Log.d(TAG, "Blindaje total: " + (modoBlindadoActivo ? "ACTIVADO" : "DESACTIVADO"));
-                    if (modoBlindadoActivo && !allowAccess) {
-                        mostrarBloqueo("blindaje_total", "⚠️ BLOQUEO TOTAL ACTIVADO");
-                    }
+                    Log.d(TAG, "Blindaje: " + (modoBlindadoActivo ? "ACTIVADO" : "DESACTIVADO"));
                 }
                 @Override public void onCancelled(DatabaseError e) {}
             });
@@ -580,15 +579,12 @@ public class MonitorService extends AccessibilityService {
                         String titulo = snapshot.child("titulo").getValue(String.class);
                         
                         if (texto != null && !texto.isEmpty() && (leido == null || !leido)) {
-                            Log.d(TAG, "📨 Mensaje del director detectado: " + texto);
                             mostrarMensajeDirector(texto, remitente, idMsg, titulo);
                         }
                     }
                 }
                 @Override
-                public void onCancelled(DatabaseError error) {
-                    Log.e(TAG, "Error escuchando mensajes: " + error.getMessage());
-                }
+                public void onCancelled(DatabaseError error) {}
             });
     }
     
@@ -596,6 +592,7 @@ public class MonitorService extends AccessibilityService {
     protected void onServiceConnected() {
         super.onServiceConnected();
         isServiceActive = true;
+        
         try {
             rtdb = FirebaseDatabase.getInstance().getReference();
             SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -647,16 +644,14 @@ public class MonitorService extends AccessibilityService {
             } else {
                 startService(restartIntent);
             }
-            Log.d(TAG, "🔄 Servicio reiniciado desde onDestroy");
+            Log.d(TAG, "🔄 Servicio reiniciado");
         } catch (Exception e) {
-            Log.e(TAG, "Error reiniciando servicio: " + e.getMessage());
+            Log.e(TAG, "Error reiniciando: " + e.getMessage());
         }
     }
     
     public String getCurrentUrl() { return currentUrl; }
     public long getLastUrlUpdate() { return lastUrlUpdate; }
-    
-    // Getters para las listas en memoria
     public Set<String> getGlobalBlacklist() { return globalBlacklist; }
     public Set<String> getGlobalWhitelist() { return globalWhitelist; }
 }

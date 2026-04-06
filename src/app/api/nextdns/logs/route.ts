@@ -1,6 +1,6 @@
 // src/app/api/nextdns/logs/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { adminRtdb } from '@/lib/firebase-admin';
+import admin from 'firebase-admin';
 
 const PROFILE_ID = '857b18';
 const API_BASE_URL = 'https://api.nextdns.io';
@@ -60,20 +60,9 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST: Sincronizar logs con RTDB (usado por cron-job.org)
+// POST: Sincronizar logs con RTDB
 export async function POST(request: NextRequest) {
   console.log('🔍 POST /api/nextdns/logs - Iniciando sincronización...');
-  
-  const authHeader = request.headers.get('authorization');
-  const cronSecret = process.env.CRON_SECRET;
-  
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    console.warn('⚠️ Token no autorizado');
-    return NextResponse.json(
-      { error: 'No autorizado' },
-      { status: 401 }
-    );
-  }
   
   try {
     const { limit = 50 } = await request.json();
@@ -103,7 +92,24 @@ export async function POST(request: NextRequest) {
     let savedCount = 0;
     
     if (blockedLogs.length > 0) {
-      const rtdb = adminRtdb.database;
+      // Inicializar Firebase Admin si no está
+      if (!admin.apps.length) {
+        try {
+          admin.initializeApp({
+            credential: admin.credential.cert({
+              projectId: process.env.FIREBASE_PROJECT_ID,
+              clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+              privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+            }),
+            databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://studio-7637044995-2342d-default-rtdb.firebaseio.com'
+          });
+          console.log('✅ Firebase Admin inicializado');
+        } catch (error) {
+          console.error('Error inicializando Firebase:', error);
+        }
+      }
+      
+      const rtdb = admin.apps.length ? admin.database() : null;
       
       if (!rtdb) {
         throw new Error('RTDB no disponible');
