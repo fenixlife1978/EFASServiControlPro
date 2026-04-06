@@ -46,14 +46,14 @@ public class MonitorService extends AccessibilityService {
     private boolean allowAccess = false;
     private boolean modoBlindadoActivo = false;
     private long lastBlockTime = 0;
-    // INCREMENTADO: 800ms -> 2000ms para evitar spam pero mantener bloqueos efectivos
-    private static final long MIN_BLOCK_INTERVAL = 2000;
+    // CORREGIDO: 2000ms -> 3000ms para evitar spam y dar tiempo a Android
+    private static final long MIN_BLOCK_INTERVAL = 3000;
     private Handler heartbeatHandler;
     private Handler watchdogHandler;
     private PowerManager.WakeLock wakeLock;
     private Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean isBlocking = false;
-    private int homePressCount = 0; // Contador de intentos de HOME
+    private int homePressCount = 0;
     
     private String currentUrl = "Esperando navegación...";
     private long lastUrlUpdate = 0;
@@ -145,7 +145,7 @@ public class MonitorService extends AccessibilityService {
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (!isServiceActive) return;
         
-        // CORREGIDO: Si isBlocking está true por más de 2 segundos, liberar forzadamente
+        // Si isBlocking está true por más de 2 segundos, liberar forzadamente
         if (isBlocking) {
             long blockingDuration = System.currentTimeMillis() - lastBlockTime;
             if (blockingDuration > 2000) {
@@ -153,7 +153,6 @@ public class MonitorService extends AccessibilityService {
                 isBlocking = false;
                 homePressCount = 0;
             } else {
-                // NO ignorar eventos, solo esperar un poco menos
                 return;
             }
         }
@@ -226,7 +225,7 @@ public class MonitorService extends AccessibilityService {
     private void expulsarAlHome(String tipo) {
         long now = System.currentTimeMillis();
         
-        // Control anti-spam global - aumentado a 2 segundos
+        // Control anti-spam global
         if (now - lastBlockTime < MIN_BLOCK_INTERVAL) {
             Log.d(TAG, "⏱️ Bloqueo ignorado (spam): " + tipo + " - " + (now - lastBlockTime) + "ms desde último");
             return;
@@ -240,7 +239,7 @@ public class MonitorService extends AccessibilityService {
         isBlocking = true;
         homePressCount = 0;
         
-        // CORREGIDO: Múltiples intentos de HOME con delays progresivos
+        // Múltiples intentos de HOME con delays
         realizarHomeRepetido(0);
         
         // Reportar evento a Firebase
@@ -249,10 +248,11 @@ public class MonitorService extends AccessibilityService {
     
     /**
      * Realiza múltiples intentos de HOME hasta asegurar la expulsión
+     * CORREGIDO: 3 intentos con delay de 800ms para que Android los procese correctamente
      */
     private void realizarHomeRepetido(int intento) {
-        if (intento >= 5) {
-            Log.w(TAG, "⚠️ Se realizaron 5 intentos de HOME, liberando bandera");
+        if (intento >= 3) {
+            Log.w(TAG, "⚠️ Se realizaron 3 intentos de HOME, liberando bandera");
             isBlocking = false;
             homePressCount = 0;
             return;
@@ -263,12 +263,12 @@ public class MonitorService extends AccessibilityService {
         
         homePressCount++;
         
-        // Programar siguiente intento si aún estamos en bloqueo
+        // Delay de 800ms entre intentos (Android necesita tiempo para procesar HOME)
         mainHandler.postDelayed(() -> {
             if (isBlocking) {
                 realizarHomeRepetido(intento + 1);
             }
-        }, 300);
+        }, 800);
     }
     
     private void capturarUrlActual(AccessibilityEvent event, String packageName) {
@@ -462,7 +462,7 @@ public class MonitorService extends AccessibilityService {
                     isServiceActive = true;
                 }
                 
-                // CORREGIDO: Limpiar bandera isBlocking si quedó trabada (más de 3 segundos)
+                // Limpiar bandera isBlocking si quedó trabada (más de 3 segundos)
                 if (isBlocking) {
                     long blockDuration = System.currentTimeMillis() - lastBlockTime;
                     if (blockDuration > 3000) {
