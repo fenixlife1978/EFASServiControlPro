@@ -46,7 +46,7 @@ public class MonitorService extends AccessibilityService {
     private boolean allowAccess = false;
     private boolean modoBlindadoActivo = false;
     private long lastBlockTime = 0;
-    private static final long MIN_BLOCK_INTERVAL = 800; // Reducido para respuesta más rápida
+    private static final long MIN_BLOCK_INTERVAL = 800;
     private Handler heartbeatHandler;
     private Handler watchdogHandler;
     private PowerManager.WakeLock wakeLock;
@@ -59,7 +59,7 @@ public class MonitorService extends AccessibilityService {
     
     // Control de spam mejorado
     private Map<String, Long> lastPackageBlockTime = new HashMap<>();
-    private static final long MIN_PACKAGE_BLOCK_INTERVAL = 1500; // 1.5 segundos por paquete
+    private static final long MIN_PACKAGE_BLOCK_INTERVAL = 1500;
     
     // Control de spam para reportes
     private Map<String, Long> lastReportTime = new HashMap<>();
@@ -143,9 +143,15 @@ public class MonitorService extends AccessibilityService {
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (!isServiceActive) return;
         
-        // Si está bloqueando, solo esperar a que termine (máximo 1 segundo)
+        // CORREGIDO: Si isBlocking está true por más de 1 segundo, liberar forzadamente
         if (isBlocking) {
-            return;
+            long blockingDuration = System.currentTimeMillis() - lastBlockTime;
+            if (blockingDuration > 1000) {
+                Log.w(TAG, "⚠️ isBlocking trabada por " + blockingDuration + "ms, liberando");
+                isBlocking = false;
+            } else {
+                return;
+            }
         }
         
         String pkg = event.getPackageName() != null ? event.getPackageName().toString() : "";
@@ -211,8 +217,7 @@ public class MonitorService extends AccessibilityService {
     }
     
     /**
-     * EXPULSA INMEDIATAMENTE AL HOME - Este es el comportamiento correcto
-     * Sin pantallas, sin timeouts visibles, solo expulsión
+     * EXPULSA INMEDIATAMENTE AL HOME - Con doble HOME para asegurar
      */
     private void expulsarAlHome(String tipo) {
         long now = System.currentTimeMillis();
@@ -229,8 +234,14 @@ public class MonitorService extends AccessibilityService {
         // Activar bandera de bloqueo
         isBlocking = true;
         
-        // Ejecutar HOME (expulsión inmediata)
+        // CORREGIDO: Presionar HOME dos veces para asegurar
         performGlobalAction(GLOBAL_ACTION_HOME);
+        
+        // Pequeña pausa y segundo HOME
+        mainHandler.postDelayed(() -> {
+            performGlobalAction(GLOBAL_ACTION_HOME);
+            Log.d(TAG, "🏠 Segundo HOME presionado para asegurar");
+        }, 100);
         
         // Reportar evento a Firebase
         reportarEvento(tipo, "sistema");
@@ -238,7 +249,8 @@ public class MonitorService extends AccessibilityService {
         // Liberar bandera después de que la expulsión se complete
         mainHandler.postDelayed(() -> {
             isBlocking = false;
-        }, 500);
+            Log.d(TAG, "🔓 Bandera isBlocking liberada");
+        }, 800);
     }
     
     private void capturarUrlActual(AccessibilityEvent event, String packageName) {
@@ -320,7 +332,6 @@ public class MonitorService extends AccessibilityService {
     }
     
     private void mostrarBloqueo(String tipo, String mensaje) {
-        // Esto SOLO se usa para blindaje total, NO para expulsiones normales
         long now = System.currentTimeMillis();
         if (now - lastBlockTime < MIN_BLOCK_INTERVAL) return;
         lastBlockTime = now;
@@ -432,14 +443,26 @@ public class MonitorService extends AccessibilityService {
                     Log.w(TAG, "⚠️ Watchdog: Servicio inactivo, reiniciando...");
                     isServiceActive = true;
                 }
-                // Limpiar bandera isBlocking si quedó trabada (esto es la única "red de seguridad")
+                
+                // CORREGIDO: Limpiar bandera isBlocking si quedó trabada (más de 1.5 segundos)
                 if (isBlocking) {
                     long blockDuration = System.currentTimeMillis() - lastBlockTime;
-                    if (blockDuration > 3000) { // Si lleva más de 3 segundos bloqueando, liberar
-                        Log.w(TAG, "⚠️ isBlocking trabada por " + blockDuration + "ms, liberando");
+                    if (blockDuration > 1500) {
+                        Log.w(TAG, "⚠️ Watchdog liberó isBlocking trabada por " + blockDuration + "ms");
                         isBlocking = false;
                     }
                 }
+                
+                // NUEVO: Forzar reconexión del servicio si lleva mucho tiempo sin eventos
+                if (rtdb == null && isServiceActive) {
+                    Log.w(TAG, "⚠️ Watchdog: RTDB nulo, reconectando...");
+                    try {
+                        rtdb = FirebaseDatabase.getInstance().getReference();
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error reconectando RTDB: " + e.getMessage());
+                    }
+                }
+                
                 if (watchdogHandler != null) {
                     watchdogHandler.postDelayed(this, SERVICE_CHECK_INTERVAL);
                 }

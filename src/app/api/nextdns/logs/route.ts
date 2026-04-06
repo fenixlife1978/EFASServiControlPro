@@ -13,6 +13,40 @@ const getApiKey = (): string => {
   return apiKey;
 };
 
+// Inicializar Firebase Admin si no está
+function getRtdb() {
+  if (!admin.apps.length) {
+    try {
+      const dbUrl = process.env.FIREBASE_DATABASE_URL || 
+                    process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL || 
+                    'https://studio-7637044995-2342d-default-rtdb.firebaseio.com/';
+      
+      console.log('📡 Inicializando Firebase con URL:', dbUrl);
+      
+      admin.initializeApp({
+        credential: admin.credential.cert({
+          projectId: process.env.FIREBASE_PROJECT_ID,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+        }),
+        databaseURL: dbUrl
+      });
+      
+      console.log('✅ Firebase Admin inicializado');
+    } catch (error) {
+      console.error('❌ Error inicializando Firebase:', error);
+      return null;
+    }
+  }
+  
+  try {
+    return admin.database();
+  } catch (error) {
+    console.error('❌ Error obteniendo RTDB:', error);
+    return null;
+  }
+}
+
 // GET: Obtener logs manualmente
 export async function GET(request: NextRequest) {
   console.log('🔍 GET /api/nextdns/logs - Iniciando...');
@@ -89,34 +123,29 @@ export async function POST(request: NextRequest) {
     
     console.log(`📊 Encontrados: ${blockedLogs.length} logs bloqueados`);
     
+    // 🔍 LOG TEMPORAL - Ver qué contiene device en el primer log bloqueado
+    if (blockedLogs.length > 0) {
+      console.log('🔍 PRIMER LOG BLOQUEADO COMPLETO:', JSON.stringify(blockedLogs[0], null, 2));
+      console.log('🔍 device:', blockedLogs[0].device);
+      console.log('🔍 device.name:', blockedLogs[0].device?.name);
+      console.log('🔍 device.id:', blockedLogs[0].device?.id);
+    }
+    
     let savedCount = 0;
     
     if (blockedLogs.length > 0) {
-      // Inicializar Firebase Admin si no está
-      if (!admin.apps.length) {
-        try {
-          admin.initializeApp({
-            credential: admin.credential.cert({
-              projectId: process.env.FIREBASE_PROJECT_ID,
-              clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-              privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-            }),
-            databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://studio-7637044995-2342d-default-rtdb.firebaseio.com'
-          });
-          console.log('✅ Firebase Admin inicializado');
-        } catch (error) {
-          console.error('Error inicializando Firebase:', error);
-        }
-      }
-      
-      const rtdb = admin.apps.length ? admin.database() : null;
+      const rtdb = getRtdb();
       
       if (!rtdb) {
-        throw new Error('RTDB no disponible');
+        throw new Error('RTDB no disponible - Firebase no inicializado');
       }
       
       for (const log of blockedLogs) {
-        let deviceId = log.device_name || log.device_id || 'desconocido';
+        // Prioriza el nombre del dispositivo (DEV-0001, DEV-0002, etc.)
+        let deviceId = log.device?.name || log.device?.id || log.device_id || log.device_name || 'desconocido';
+        
+        console.log(`🔍 Dispositivo para ${log.domain}: device.name=${log.device?.name}, device.id=${log.device?.id}, resultado=${deviceId}`);
+        
         const reasons = log.reasons?.map((r: any) => r.name || r.id).join(', ') || 'NextDNS';
         const alertId = `nextdns_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
         
@@ -151,7 +180,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error en POST /api/nextdns/logs:', error);
     return NextResponse.json(
-      { error: 'Error interno del servidor' },
+      { error: 'Error interno del servidor: ' + (error as Error).message },
       { status: 500 }
     );
   }

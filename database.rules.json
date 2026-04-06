@@ -1,0 +1,107 @@
+{
+  "rules": {
+    "usuarios": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["email"]
+    },
+    
+    "usuarios_por_email": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["email"]
+    },
+    
+    "dispositivos": {
+      ".read": "true",
+      ".write": "true",
+      ".indexOn": ["InstitutoId", "aulaId"]
+    },
+    
+    "status_dispositivos": {
+      ".read": "true",
+      ".write": "true",
+      ".indexOn": ["lastSeen", "InstitutoId"]
+    },
+    
+    "config": {
+      ".read": "true",
+      ".write": "auth != null"
+    },
+    
+    "configuracion_global": {
+      ".read": "true",
+      ".write": "true",
+      "blacklist": {
+        ".indexOn": ["domain", "active"]
+      },
+      "whitelist": {
+        ".indexOn": ["domain", "active"]
+      }
+    },
+    
+    "alertas_seguridad": {
+      ".read": "auth != null",
+      ".write": "true",
+      ".indexOn": ["deviceId", "timestamp"]
+    },
+    
+    "mensajes_dispositivos": {
+      ".read": "true",
+      ".write": "true",
+      "$deviceId": {
+        ".indexOn": ["timestamp", "leido"],
+        "ultimo_mensaje": {
+          ".indexOn": ["leido", "fecha_envio"]
+        },
+        "historial": {
+          ".indexOn": ["timestamp"]
+        },
+        "leidos": {
+          ".indexOn": ["leido_en"]
+        }
+      }
+    },
+    
+    "eventos_sistema": {
+      ".read": "auth != null",
+      ".write": "true",
+      "$deviceId": {
+        ".indexOn": ["timestamp", "tipo"]
+      }
+    },
+    
+    "monitoreo_dispositivos": {
+      ".read": "auth != null",
+      ".write": "true",
+      "$deviceId": {
+        ".indexOn": ["timestamp"],
+        "alertas_admin": {
+          ".indexOn": ["timestamp"]
+        }
+      }
+    },
+    
+    "debug_logs_global": {
+      ".read": "auth != null",
+      ".write": "true",
+      ".indexOn": ["timestamp", "tipo", "deviceId"]
+    },
+    
+    "historial_navegacion": {
+      ".read": "auth != null",
+      ".write": "true",
+      "$deviceId": {
+        ".indexOn": ["timestamp"]
+      }
+    },
+    
+    "control_sedes": {
+      ".read": "true",
+      ".write": "auth != null",
+      "$sedeId": {
+        ".indexOn": ["last_update"]
+      }
+    }
+  }
+}
