@@ -46,7 +46,7 @@ public class MonitorService extends AccessibilityService {
     private boolean allowAccess = false;
     private boolean modoBlindadoActivo = false;
     private long lastBlockTime = 0;
-    private static final long MIN_BLOCK_INTERVAL = 1000;
+    private static final long MIN_BLOCK_INTERVAL = 500; // 500ms para respuesta rápida
     private Handler heartbeatHandler;
     private Handler watchdogHandler;
     private PowerManager.WakeLock wakeLock;
@@ -59,9 +59,9 @@ public class MonitorService extends AccessibilityService {
     
     // Control de spam para reportes
     private Map<String, Long> lastReportTime = new HashMap<>();
-    private static final long MIN_REPORT_INTERVAL = 10000;
+    private static final long MIN_REPORT_INTERVAL = 10000; // 10 segundos
     
-    // Listas en memoria (se cargan al inicio y se actualizan en tiempo real)
+    // Listas en memoria
     private Set<String> globalBlacklist = new HashSet<>();
     private Set<String> globalWhitelist = new HashSet<>();
     
@@ -161,11 +161,15 @@ public class MonitorService extends AccessibilityService {
             return;
         }
         
+        long now = System.currentTimeMillis();
+        if (now - lastBlockTime < MIN_BLOCK_INTERVAL) return;
+        
         if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             boolean isSettings = settingsPackages.contains(pkg);
             if (isSettings) {
                 if (!lastBlockedPackage.equals(pkg)) {
                     lastBlockedPackage = pkg;
+                    lastBlockTime = now;
                     expulsar("ajustes_sistema", pkg);
                     mainHandler.postDelayed(() -> lastBlockedPackage = "", 2000);
                 }
@@ -180,6 +184,7 @@ public class MonitorService extends AccessibilityService {
                     if (className.contains(configClass)) {
                         if (!lastBlockedPackage.equals(pkg + "_config")) {
                             lastBlockedPackage = pkg + "_config";
+                            lastBlockTime = now;
                             expulsar("configuracion_navegador", pkg);
                             mainHandler.postDelayed(() -> lastBlockedPackage = "", 2000);
                         }
@@ -192,6 +197,7 @@ public class MonitorService extends AccessibilityService {
         if (forbiddenPackages.contains(pkg) && eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             if (!lastBlockedPackage.equals(pkg)) {
                 lastBlockedPackage = pkg;
+                lastBlockTime = now;
                 expulsar("app_prohibida", pkg);
                 mainHandler.postDelayed(() -> lastBlockedPackage = "", 2000);
             }
@@ -200,10 +206,6 @@ public class MonitorService extends AccessibilityService {
     }
     
     private void expulsar(String tipo, String paquete) {
-        long now = System.currentTimeMillis();
-        if (now - lastBlockTime < MIN_BLOCK_INTERVAL) return;
-        lastBlockTime = now;
-        
         Log.w(TAG, "🚫 Expulsando: " + tipo + " - " + paquete);
         performGlobalAction(GLOBAL_ACTION_HOME);
         reportarEvento(tipo, paquete);
@@ -654,8 +656,6 @@ public class MonitorService extends AccessibilityService {
     
     public String getCurrentUrl() { return currentUrl; }
     public long getLastUrlUpdate() { return lastUrlUpdate; }
-
-
     public Set<String> getGlobalBlacklist() { return globalBlacklist; }
     public Set<String> getGlobalWhitelist() { return globalWhitelist; }
 }
