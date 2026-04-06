@@ -453,15 +453,11 @@ public class MonitorService extends AccessibilityService {
             });
     }
     
-    /**
-     * Carga las listas negra y blanca desde Firebase y las guarda en memoria
-     */
     private void cargarListasEnMemoria() {
         if (rtdb == null || institutoId == null) return;
         
         DatabaseReference sedeRef = rtdb.child("config").child("instituciones").child(institutoId);
         
-        // Cargar blacklist
         sedeRef.child("blacklist").addListenerForSingleValueEvent(new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
@@ -480,7 +476,6 @@ public class MonitorService extends AccessibilityService {
             }
         });
         
-        // Cargar whitelist
         sedeRef.child("whitelist").addListenerForSingleValueEvent(new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
@@ -505,7 +500,6 @@ public class MonitorService extends AccessibilityService {
         
         DatabaseReference sedeRef = rtdb.child("config").child("instituciones").child(institutoId);
         
-        // Escuchar cambios en blacklist
         sedeRef.child("blacklist").addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
@@ -524,7 +518,6 @@ public class MonitorService extends AccessibilityService {
             }
         });
         
-        // Escuchar cambios en whitelist
         sedeRef.child("whitelist").addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
@@ -616,13 +609,19 @@ public class MonitorService extends AccessibilityService {
                               AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED;
             info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
             info.flags = AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS |
-                         AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
+                         AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS |
+                         AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE;
             info.notificationTimeout = 50;
             setServiceInfo(info);
             
         } catch (Exception e) {
             Log.e(TAG, "Error init: " + e.getMessage());
         }
+    }
+    
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        return START_STICKY;
     }
     
     @Override
@@ -655,8 +654,8 @@ public class MonitorService extends AccessibilityService {
     
     public String getCurrentUrl() { return currentUrl; }
     public long getLastUrlUpdate() { return lastUrlUpdate; }
-    
-    // Getters para las listas en memoria
+
+
     public Set<String> getGlobalBlacklist() { return globalBlacklist; }
     public Set<String> getGlobalWhitelist() { return globalWhitelist; }
 }
