@@ -37,7 +37,7 @@ public class MonitorService extends AccessibilityService {
     private static final String PREFS_NAME = "CapacitorStorage";
     private static final long HEARTBEAT_INTERVAL = 15000;
     private static final String CHANNEL_ID = "educontrol_foreground";
-    private static final long SERVICE_CHECK_INTERVAL = 10000;
+    private static final long SERVICE_CHECK_INTERVAL = 30000;
     
     private DatabaseReference rtdb;
     private String deviceId;
@@ -46,34 +46,36 @@ public class MonitorService extends AccessibilityService {
     private boolean allowAccess = false;
     private boolean modoBlindadoActivo = false;
     private long lastBlockTime = 0;
-    private static final long MIN_BLOCK_INTERVAL = 1000;
+    private static final long MIN_BLOCK_INTERVAL = 200; // 200ms para respuesta ultra rápida
     private Handler heartbeatHandler;
     private Handler watchdogHandler;
     private PowerManager.WakeLock wakeLock;
     private Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean isBlocking = false;
     
+    // Variables para URL actual
     private String currentUrl = "Esperando navegación...";
     private long lastUrlUpdate = 0;
-    private String lastBlockedPackage = "";
     
-    // Control de spam para reportes
-    private Map<String, Long> lastReportTime = new HashMap<>();
-    private static final long MIN_REPORT_INTERVAL = 10000;
-    
-    // Listas en memoria (se cargan al inicio y se actualizan en tiempo real)
-    private Set<String> globalBlacklist = new HashSet<>();
-    private Set<String> globalWhitelist = new HashSet<>();
-    
+    // Lista de paquetes de ajustes del sistema
     private final Set<String> settingsPackages = new HashSet<>(Arrays.asList(
         "com.android.settings",
         "com.android.systemui",
         "com.android.systemui.settings",
+        "com.google.android.gms",
+        "com.google.android.gsf",
+        "com.android.phone",
+        "com.android.contacts",
         "com.android.providers.settings",
-        "com.android.settings.intelligence"
+        "com.android.settings.intelligence",
+        "com.google.android.setupwizard",
+        "com.android.wifi",
+        "com.android.bluetooth"
     ));
     
+    // Apps prohibidas - Lista completa
     private final Set<String> forbiddenPackages = new HashSet<>(Arrays.asList(
+        // Redes Sociales
         "com.instagram.android",
         "com.facebook.katana",
         "com.facebook.orca",
@@ -83,10 +85,12 @@ public class MonitorService extends AccessibilityService {
         "com.snapchat.android",
         "com.reddit.frontpage",
         "com.telegram.messenger",
+        // Mensajería
         "com.whatsapp",
         "com.whatsapp.w4b",
         "org.telegram.messenger",
         "com.discord",
+        // Juegos
         "com.roblox.client",
         "com.dts.freefireth",
         "com.mobile.legends",
@@ -101,6 +105,7 @@ public class MonitorService extends AccessibilityService {
         "com.activision.callofduty.shooter",
         "com.tencent.ig",
         "com.pubg.imobile",
+        // Streaming / Videos
         "com.google.android.youtube",
         "com.netflix.mediaclient",
         "com.amazon.avod.thirdpartyclient",
@@ -108,15 +113,19 @@ public class MonitorService extends AccessibilityService {
         "com.disney.disneyplus",
         "com.tiktok.android",
         "com.zhiliaoapp.musically",
+        // Tiendas de Apps
         "com.android.vending",
         "com.sec.android.app.samsungapps",
         "com.huawei.appmarket",
         "com.xiaomi.market",
         "com.oppo.market",
         "com.vivo.appstore",
-        "com.amazon.venezia"
+        "com.amazon.venezia",
+        "com.google.android.apps.podcasts",
+        "com.google.android.play.games"
     ));
     
+    // Navegadores
     private final List<String> browserPackages = Arrays.asList(
         "com.android.chrome", 
         "org.mozilla.firefox", 
@@ -127,12 +136,15 @@ public class MonitorService extends AccessibilityService {
         "com.sec.android.app.sbrowser"
     );
     
+    // Clases de configuración del navegador
     private final List<String> configClasses = Arrays.asList(
         "Settings", 
         "Preference", 
         "SettingsActivity", 
         "BrowserPreferences",
-        "ChromeSettings"
+        "ChromeSettings",
+        "PreferenceFragment",
+        "SettingsFragment"
     );
 
     @Override
@@ -144,72 +156,99 @@ public class MonitorService extends AccessibilityService {
         
         if (pkg.equals(getPackageName())) return;
         
-        // Capturar URL en cambios de ventana Y cambios de contenido
-        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
-            eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+        // Capturar URL actual
+        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             capturarUrlActual(event, pkg);
         }
         
-        // IMPORTANTE: Si allowAccess está activado (Modo Técnico), NO bloquear NADA
+        // BLINDAJE TOTAL
+        if (modoBlindadoActivo && !allowAccess) {
+            mostrarBloqueo("blindaje_total", "⚠️ BLOQUEO TOTAL ACTIVADO ⚠️\nEl dispositivo ha sido bloqueado por seguridad.\nContacta a tu profesor para desbloquear.");
+            return;
+        }
+        
+        // MODO TÉCNICO
         if (allowAccess) {
             Log.d(TAG, "🔓 Modo Técnico ACTIVADO - Ignorando bloqueos");
             return;
         }
         
-        if (modoBlindadoActivo && !allowAccess) {
-            mostrarBloqueo("blindaje_total", "⚠️ BLOQUEO TOTAL ACTIVADO");
-            return;
-        }
-        
-        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            boolean isSettings = settingsPackages.contains(pkg);
-            if (isSettings) {
-                if (!lastBlockedPackage.equals(pkg)) {
-                    lastBlockedPackage = pkg;
-                    expulsar("ajustes_sistema", pkg);
-                    mainHandler.postDelayed(() -> lastBlockedPackage = "", 2000);
-                }
+        // 🔥 BLOQUEO DE AJUSTES DEL SISTEMA - RESPUESTA INMEDIATA
+        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+            eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
+            eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            
+            boolean isSettings = settingsPackages.contains(pkg) || 
+                                 pkg.contains("settings") || 
+                                 pkg.contains("Settings") ||
+                                 pkg.contains("config") ||
+                                 pkg.equals("com.android.systemui");
+            
+            boolean isAccessibilitySettings = false;
+            if (event.getClassName() != null) {
+                String className = event.getClassName().toString();
+                isAccessibilitySettings = className.contains("Accessibility") ||
+                                          className.contains("accessibility") ||
+                                          className.contains("Settings");
+            }
+            
+            if (isSettings || isAccessibilitySettings) {
+                Log.w(TAG, "🔒 BLOQUEO INMEDIATO: " + pkg);
+                expulsarInmediato("ajustes_sistema");
                 return;
             }
         }
         
+        // 🔥 BLOQUEO DE APPS PROHIBIDAS - RESPUESTA INMEDIATA
+        if (forbiddenPackages.contains(pkg) && 
+            (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+             eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED)) {
+            Log.w(TAG, "🔒 APP PROHIBIDA DETECTADA: " + pkg);
+            expulsarInmediato("app_prohibida");
+            return;
+        }
+        
+        // Configuración del navegador
         if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             if (browserPackages.contains(pkg) && event.getClassName() != null) {
                 String className = event.getClassName().toString();
                 for (String configClass : configClasses) {
                     if (className.contains(configClass)) {
-                        if (!lastBlockedPackage.equals(pkg + "_config")) {
-                            lastBlockedPackage = pkg + "_config";
-                            expulsar("configuracion_navegador", pkg);
-                            mainHandler.postDelayed(() -> lastBlockedPackage = "", 2000);
-                        }
+                        expulsarInmediato("configuracion_navegador");
                         return;
                     }
                 }
             }
         }
-        
-        if (forbiddenPackages.contains(pkg) && eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            if (!lastBlockedPackage.equals(pkg)) {
-                lastBlockedPackage = pkg;
-                expulsar("app_prohibida", pkg);
-                mainHandler.postDelayed(() -> lastBlockedPackage = "", 2000);
-            }
-            return;
-        }
     }
     
-    private void expulsar(String tipo, String paquete) {
+    /**
+     * Expulsión inmediata y agresiva
+     */
+    private void expulsarInmediato(String tipo) {
         long now = System.currentTimeMillis();
         if (now - lastBlockTime < MIN_BLOCK_INTERVAL) return;
         lastBlockTime = now;
         
-        Log.w(TAG, "🚫 Expulsando: " + tipo + " - " + paquete);
-        performGlobalAction(GLOBAL_ACTION_HOME);
-        reportarEvento(tipo, paquete);
+        Log.w(TAG, "🚫 EXPULSIÓN INMEDIATA: " + tipo);
         
+        // 1. Enviar al home
+        performGlobalAction(GLOBAL_ACTION_HOME);
+        
+        // 2. Enviar BACK varias veces para asegurar
+        performGlobalAction(GLOBAL_ACTION_BACK);
+        
+        // 3. Pequeña pausa y otro HOME por si acaso
+        mainHandler.postDelayed(() -> {
+            performGlobalAction(GLOBAL_ACTION_HOME);
+        }, 50);
+        
+        // 4. Reportar evento
+        reportarEvento(tipo);
+        
+        // 5. Bloquear temporalmente para no saturar
         isBlocking = true;
-        mainHandler.postDelayed(() -> isBlocking = false, 500);
+        mainHandler.postDelayed(() -> isBlocking = false, 300);
     }
     
     private void capturarUrlActual(AccessibilityEvent event, String packageName) {
@@ -222,7 +261,7 @@ public class MonitorService extends AccessibilityService {
                 if (url != null && !url.isEmpty() && !url.equals(currentUrl)) {
                     currentUrl = url;
                     lastUrlUpdate = System.currentTimeMillis();
-                    Log.d(TAG, "🌐 URL detectada (ventana): " + currentUrl);
+                    Log.d(TAG, "🌐 URL detectada: " + currentUrl);
                     guardarHistorial(currentUrl);
                     actualizarUrlEnTiempoReal(currentUrl);
                 }
@@ -241,11 +280,6 @@ public class MonitorService extends AccessibilityService {
             if (text.startsWith("http://") || text.startsWith("https://")) {
                 return text;
             }
-            if (text.contains(".com/") || text.contains(".org/") || text.contains(".net/")) {
-                if (text.length() > 10 && !text.contains("Google") && !text.contains("Búsqueda")) {
-                    return text;
-                }
-            }
         }
         
         for (int i = 0; i < node.getChildCount(); i++) {
@@ -259,6 +293,7 @@ public class MonitorService extends AccessibilityService {
                 child.recycle();
             }
         }
+        
         return null;
     }
     
@@ -272,10 +307,10 @@ public class MonitorService extends AccessibilityService {
         historyEntry.put("deviceId", deviceId);
         if (institutoId != null) historyEntry.put("InstitutoId", institutoId);
         
-        rtdb.child("historial_navegacion").child(deviceId).push().setValue(historyEntry);
+        rtdb.child("historial").child(deviceId).push().setValue(historyEntry);
         
         if (institutoId != null) {
-            rtdb.child("historial_navegacion_instituciones").child(institutoId).child(deviceId).push().setValue(historyEntry);
+            rtdb.child("historial_instituciones").child(institutoId).child(deviceId).push().setValue(historyEntry);
         }
         
         Log.d(TAG, "📝 Historial guardado: " + url);
@@ -288,8 +323,6 @@ public class MonitorService extends AccessibilityService {
         updates.put("url_actual", url);
         updates.put("ultima_url_actualizacion", System.currentTimeMillis());
         rtdb.child("status_dispositivos").child(deviceId).updateChildren(updates);
-        
-        Log.d(TAG, "🔄 URL actual actualizada: " + url);
     }
     
     private void mostrarBloqueo(String tipo, String mensaje) {
@@ -303,10 +336,10 @@ public class MonitorService extends AccessibilityService {
         intent.putExtra("deviceId", deviceId);
         intent.putExtra("mensaje", mensaje);
         startActivity(intent);
-        reportarEvento(tipo, "sistema");
+        reportarEvento(tipo);
     }
     
-    private void mostrarMensajeDirector(String texto, String remitente, String idMsg, String titulo) {
+    private void mostrarMensajeDirector(String texto, String remitente, String idMsg) {
         long now = System.currentTimeMillis();
         if (now - lastBlockTime < MIN_BLOCK_INTERVAL) return;
         lastBlockTime = now;
@@ -317,38 +350,25 @@ public class MonitorService extends AccessibilityService {
         intent.putExtra("remitente", remitente != null ? remitente : "Dirección");
         intent.putExtra("messageId", idMsg);
         intent.putExtra("deviceId", deviceId);
-        if (titulo != null) intent.putExtra("titulo", titulo);
         startActivity(intent);
-        reportarEvento("mensaje_director", "sistema");
+        reportarEvento("mensaje_director");
         
         if (rtdb != null && deviceId != null && idMsg != null) {
-            rtdb.child("mensajes_dispositivos").child(deviceId).child("ultimo_mensaje").child("leido").setValue(true);
+            rtdb.child("dispositivos").child(deviceId).child("mensaje_actual").child("leido").setValue(true);
         }
     }
     
-    private void reportarEvento(String tipo, String paquete) {
+    private void reportarEvento(String tipo) {
         if (rtdb == null || deviceId == null) return;
-        
-        String key = tipo + "_" + deviceId;
-        Long lastReport = lastReportTime.get(key);
-        long now = System.currentTimeMillis();
-        
-        if (lastReport != null && (now - lastReport) < MIN_REPORT_INTERVAL) {
-            Log.d(TAG, "🔄 Reporte ignorado (spam control): " + tipo + " - " + paquete);
-            return;
-        }
-        
-        lastReportTime.put(key, now);
-        
         Map<String, Object> e = new HashMap<>();
         e.put("tipo", tipo);
-        e.put("timestamp", now);
+        e.put("timestamp", System.currentTimeMillis());
         e.put("deviceId", deviceId);
-        e.put("paquete", paquete);
         if (institutoId != null) e.put("InstitutoId", institutoId);
+        if (currentUrl != null && !currentUrl.equals("Esperando navegación...")) {
+            e.put("url_actual", currentUrl);
+        }
         rtdb.child("alertas_seguridad").push().setValue(e);
-        
-        Log.d(TAG, "📊 Reporte guardado: " + tipo + " - " + paquete);
     }
     
     private void startForegroundService() {
@@ -365,7 +385,7 @@ public class MonitorService extends AccessibilityService {
         
         Notification notif = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("EduControlPro Activo")
-                .setContentText("Protección funcionando")
+                .setContentText("Protección funcionando - No cerrar esta app")
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
                 .setContentIntent(pi)
                 .setOngoing(true)
@@ -404,22 +424,6 @@ public class MonitorService extends AccessibilityService {
                 if (!isServiceActive) {
                     Log.w(TAG, "⚠️ Watchdog: Servicio detectado como inactivo, reiniciando...");
                     isServiceActive = true;
-                    try {
-                        if (rtdb != null && deviceId != null) {
-                            rtdb.child("status_dispositivos").child(deviceId).child("admin_mode_enable")
-                                .addListenerForSingleValueEvent(new ValueEventListener() {
-                                    @Override
-                                    public void onDataChange(DataSnapshot snapshot) {
-                                        allowAccess = snapshot.exists() && Boolean.TRUE.equals(snapshot.getValue(Boolean.class));
-                                        Log.d(TAG, "Watchdog restauró modo técnico: " + allowAccess);
-                                    }
-                                    @Override
-                                    public void onCancelled(DatabaseError error) {}
-                                });
-                        }
-                    } catch (Exception e) {
-                        Log.e(TAG, "Error en watchdog: " + e.getMessage());
-                    }
                 }
                 if (watchdogHandler != null) {
                     watchdogHandler.postDelayed(this, SERVICE_CHECK_INTERVAL);
@@ -445,7 +449,6 @@ public class MonitorService extends AccessibilityService {
                     institutoId = s.getValue(String.class);
                     if (institutoId != null) {
                         Log.d(TAG, "InstitutoId cargado: " + institutoId);
-                        cargarListasEnMemoria();
                         precargarListas();
                     }
                 }
@@ -453,94 +456,27 @@ public class MonitorService extends AccessibilityService {
             });
     }
     
-    /**
-     * Carga las listas negra y blanca desde Firebase y las guarda en memoria
-     */
-    private void cargarListasEnMemoria() {
-        if (rtdb == null || institutoId == null) return;
-        
-        DatabaseReference sedeRef = rtdb.child("config").child("instituciones").child(institutoId);
-        
-        // Cargar blacklist
-        sedeRef.child("blacklist").addListenerForSingleValueEvent(new ValueEventListener() {
-            @Override
-            public void onDataChange(DataSnapshot snapshot) {
-                globalBlacklist.clear();
-                for (DataSnapshot child : snapshot.getChildren()) {
-                    String value = child.getValue(String.class);
-                    if (value != null && !value.isEmpty()) {
-                        globalBlacklist.add(value.toLowerCase());
-                    }
-                }
-                Log.d(TAG, "📦 Blacklist cargada en memoria: " + globalBlacklist.size() + " dominios");
-            }
-            @Override
-            public void onCancelled(DatabaseError error) {
-                Log.e(TAG, "Error cargando blacklist: " + error.getMessage());
-            }
-        });
-        
-        // Cargar whitelist
-        sedeRef.child("whitelist").addListenerForSingleValueEvent(new ValueEventListener() {
-            @Override
-            public void onDataChange(DataSnapshot snapshot) {
-                globalWhitelist.clear();
-                for (DataSnapshot child : snapshot.getChildren()) {
-                    String value = child.getValue(String.class);
-                    if (value != null && !value.isEmpty()) {
-                        globalWhitelist.add(value.toLowerCase());
-                    }
-                }
-                Log.d(TAG, "📦 Whitelist cargada en memoria: " + globalWhitelist.size() + " dominios");
-            }
-            @Override
-            public void onCancelled(DatabaseError error) {
-                Log.e(TAG, "Error cargando whitelist: " + error.getMessage());
-            }
-        });
-    }
-    
     private void precargarListas() {
         if (rtdb == null || institutoId == null) return;
         
         DatabaseReference sedeRef = rtdb.child("config").child("instituciones").child(institutoId);
         
-        // Escuchar cambios en blacklist
-        sedeRef.child("blacklist").addValueEventListener(new ValueEventListener() {
+        sedeRef.child("blacklist").addListenerForSingleValueEvent(new ValueEventListener() {
             @Override
-            public void onDataChange(DataSnapshot snapshot) {
-                globalBlacklist.clear();
-                for (DataSnapshot child : snapshot.getChildren()) {
-                    String value = child.getValue(String.class);
-                    if (value != null && !value.isEmpty()) {
-                        globalBlacklist.add(value.toLowerCase());
-                    }
-                }
-                Log.d(TAG, "📡 Blacklist actualizada en tiempo real: " + globalBlacklist.size() + " dominios");
+            public void onDataChange(DataSnapshot s) {
+                Log.d(TAG, "📦 Lista negra precargada: " + s.getChildrenCount() + " dominios");
             }
             @Override
-            public void onCancelled(DatabaseError error) {
-                Log.e(TAG, "Error en blacklist: " + error.getMessage());
-            }
+            public void onCancelled(DatabaseError e) {}
         });
         
-        // Escuchar cambios en whitelist
-        sedeRef.child("whitelist").addValueEventListener(new ValueEventListener() {
+        sedeRef.child("whitelist").addListenerForSingleValueEvent(new ValueEventListener() {
             @Override
-            public void onDataChange(DataSnapshot snapshot) {
-                globalWhitelist.clear();
-                for (DataSnapshot child : snapshot.getChildren()) {
-                    String value = child.getValue(String.class);
-                    if (value != null && !value.isEmpty()) {
-                        globalWhitelist.add(value.toLowerCase());
-                    }
-                }
-                Log.d(TAG, "📡 Whitelist actualizada en tiempo real: " + globalWhitelist.size() + " dominios");
+            public void onDataChange(DataSnapshot s) {
+                Log.d(TAG, "📦 Lista blanca precargada: " + s.getChildrenCount() + " dominios");
             }
             @Override
-            public void onCancelled(DatabaseError error) {
-                Log.e(TAG, "Error en whitelist: " + error.getMessage());
-            }
+            public void onCancelled(DatabaseError e) {}
         });
     }
     
@@ -551,7 +487,7 @@ public class MonitorService extends AccessibilityService {
             .addValueEventListener(new ValueEventListener() {
                 @Override public void onDataChange(DataSnapshot s) {
                     allowAccess = s.exists() && Boolean.TRUE.equals(s.getValue(Boolean.class));
-                    Log.d(TAG, "Modo técnico (admin_mode): " + (allowAccess ? "ACTIVADO" : "DESACTIVADO"));
+                    Log.d(TAG, "Modo técnico: " + (allowAccess ? "ACTIVADO" : "DESACTIVADO"));
                 }
                 @Override public void onCancelled(DatabaseError e) {}
             });
@@ -562,26 +498,25 @@ public class MonitorService extends AccessibilityService {
                     modoBlindadoActivo = s.exists() && Boolean.TRUE.equals(s.getValue(Boolean.class));
                     Log.d(TAG, "Blindaje total: " + (modoBlindadoActivo ? "ACTIVADO" : "DESACTIVADO"));
                     if (modoBlindadoActivo && !allowAccess) {
-                        mostrarBloqueo("blindaje_total", "⚠️ BLOQUEO TOTAL ACTIVADO");
+                        mostrarBloqueo("blindaje_total", "⚠️ BLOQUEO TOTAL ACTIVADO ⚠️\nEl dispositivo ha sido bloqueado por seguridad.\nContacta a tu profesor para desbloquear.");
                     }
                 }
                 @Override public void onCancelled(DatabaseError e) {}
             });
         
-        rtdb.child("mensajes_dispositivos").child(deviceId).child("ultimo_mensaje")
+        rtdb.child("dispositivos").child(deviceId).child("mensaje_actual")
             .addValueEventListener(new ValueEventListener() {
                 @Override
                 public void onDataChange(DataSnapshot snapshot) {
                     if (snapshot.exists()) {
-                        String texto = snapshot.child("texto").getValue(String.class);
+                        String texto = snapshot.child("mensaje").getValue(String.class);
                         Boolean leido = snapshot.child("leido").getValue(Boolean.class);
-                        String idMsg = snapshot.child("id").getValue(String.class);
+                        String idMsg = snapshot.child("messageId").getValue(String.class);
                         String remitente = snapshot.child("remitente").getValue(String.class);
-                        String titulo = snapshot.child("titulo").getValue(String.class);
                         
                         if (texto != null && !texto.isEmpty() && (leido == null || !leido)) {
                             Log.d(TAG, "📨 Mensaje del director detectado: " + texto);
-                            mostrarMensajeDirector(texto, remitente, idMsg, titulo);
+                            mostrarMensajeDirector(texto, remitente, idMsg);
                         }
                     }
                 }
@@ -617,7 +552,7 @@ public class MonitorService extends AccessibilityService {
             info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
             info.flags = AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS |
                          AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
-            info.notificationTimeout = 50;
+            info.notificationTimeout = 50; // Tiempo de respuesta ultra rápido
             setServiceInfo(info);
             
         } catch (Exception e) {
@@ -653,10 +588,8 @@ public class MonitorService extends AccessibilityService {
         }
     }
     
+    
+
     public String getCurrentUrl() { return currentUrl; }
     public long getLastUrlUpdate() { return lastUrlUpdate; }
-    
-    // Getters para las listas en memoria
-    public Set<String> getGlobalBlacklist() { return globalBlacklist; }
-    public Set<String> getGlobalWhitelist() { return globalWhitelist; }
 }
