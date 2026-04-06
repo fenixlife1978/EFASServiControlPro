@@ -46,8 +46,6 @@ public class MonitorService extends AccessibilityService {
     private boolean allowAccess = false;
     private boolean modoBlindadoActivo = false;
     private long lastBlockTime = 0;
-    // CORREGIDO: 2000ms -> 3000ms para evitar spam y dar tiempo a Android
-    private static final long MIN_BLOCK_INTERVAL = 3000;
     private Handler heartbeatHandler;
     private Handler watchdogHandler;
     private PowerManager.WakeLock wakeLock;
@@ -59,11 +57,7 @@ public class MonitorService extends AccessibilityService {
     private long lastUrlUpdate = 0;
     private String lastBlockedPackage = "";
     
-    // Control de spam mejorado
-    private Map<String, Long> lastPackageBlockTime = new HashMap<>();
-    private static final long MIN_PACKAGE_BLOCK_INTERVAL = 2000;
-    
-    // Control de spam para reportes
+    // Control de spam para reportes (SOLO para Firebase)
     private Map<String, Long> lastReportTime = new HashMap<>();
     private static final long MIN_REPORT_INTERVAL = 10000;
     
@@ -220,19 +214,10 @@ public class MonitorService extends AccessibilityService {
     }
     
     /**
-     * EXPULSA INMEDIATAMENTE AL HOME - Versión mejorada con múltiples intentos
+     * EXPULSA INMEDIATAMENTE AL HOME - SIN spam control
+     * Ahora expulsa CADA VEZ que se detecta una app prohibida
      */
     private void expulsarAlHome(String tipo) {
-        long now = System.currentTimeMillis();
-        
-        // Control anti-spam global
-        if (now - lastBlockTime < MIN_BLOCK_INTERVAL) {
-            Log.d(TAG, "⏱️ Bloqueo ignorado (spam): " + tipo + " - " + (now - lastBlockTime) + "ms desde último");
-            return;
-        }
-        
-        lastBlockTime = now;
-        
         Log.w(TAG, "🚫 EXPULSANDO AL HOME: " + tipo);
         
         // Activar bandera de bloqueo
@@ -242,13 +227,13 @@ public class MonitorService extends AccessibilityService {
         // Múltiples intentos de HOME con delays
         realizarHomeRepetido(0);
         
-        // Reportar evento a Firebase
+        // Reportar evento a Firebase (solo este tiene control de spam)
         reportarEvento(tipo, "sistema");
     }
     
     /**
      * Realiza múltiples intentos de HOME hasta asegurar la expulsión
-     * CORREGIDO: 3 intentos con delay de 800ms para que Android los procese correctamente
+     * 3 intentos con delay de 500ms
      */
     private void realizarHomeRepetido(int intento) {
         if (intento >= 3) {
@@ -263,12 +248,11 @@ public class MonitorService extends AccessibilityService {
         
         homePressCount++;
         
-        // Delay de 800ms entre intentos (Android necesita tiempo para procesar HOME)
         mainHandler.postDelayed(() -> {
             if (isBlocking) {
                 realizarHomeRepetido(intento + 1);
             }
-        }, 800);
+        }, 500);
     }
     
     private void capturarUrlActual(AccessibilityEvent event, String packageName) {
@@ -351,8 +335,6 @@ public class MonitorService extends AccessibilityService {
     
     private void mostrarBloqueo(String tipo, String mensaje) {
         long now = System.currentTimeMillis();
-        if (now - lastBlockTime < MIN_BLOCK_INTERVAL) return;
-        lastBlockTime = now;
         
         Intent intent = new Intent(this, BlockActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -365,8 +347,6 @@ public class MonitorService extends AccessibilityService {
     
     private void mostrarMensajeDirector(String texto, String remitente, String idMsg, String titulo) {
         long now = System.currentTimeMillis();
-        if (now - lastBlockTime < MIN_BLOCK_INTERVAL) return;
-        lastBlockTime = now;
         
         Intent intent = new Intent(this, MessageActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -390,6 +370,7 @@ public class MonitorService extends AccessibilityService {
         Long lastReport = lastReportTime.get(key);
         long now = System.currentTimeMillis();
         
+        // Control de spam SOLO para reportes de Firebase
         if (lastReport != null && (now - lastReport) < MIN_REPORT_INTERVAL) {
             return;
         }
