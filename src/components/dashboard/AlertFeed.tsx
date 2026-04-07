@@ -5,9 +5,9 @@ import { db, rtdb } from '@/firebase/config';
 import { 
   collection, query, where, onSnapshot
 } from 'firebase/firestore';
-import { ref, onValue, off } from 'firebase/database';
+import { ref, onValue, off, get, set } from 'firebase/database';
 import { 
-  ShieldAlert, Clock, Search, Calendar, Download, CheckCircle, Filter, Globe, Smartphone, Shield, Trash2
+  ShieldAlert, Clock, Search, Calendar, Download, CheckCircle, Filter, Globe, Smartphone, Shield, Trash2, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -31,9 +31,15 @@ interface AlertFeedProps {
 
 export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
   const [alertas, setAlertas] = useState<Alerta[]>([]);
-  const [displayAlertas, setDisplayAlertas] = useState<Alerta[]>([]);
+  const [allAlertas, setAllAlertas] = useState<Alerta[]>([]);
   const [deviceInfoMap, setDeviceInfoMap] = useState<Record<string, { alumno_asignado: string; aulaId: string }>>({});
+  const [availableDevices, setAvailableDevices] = useState<{id: string, name: string}[]>([]);
+  const [selectedDevice, setSelectedDevice] = useState<string>('all');
+  const [timeRange, setTimeRange] = useState<string>('24h');
   const [loading, setLoading] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(20);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   const [tempSearchTerm, setTempSearchTerm] = useState('');
   const [tempFechaInicio, setTempFechaInicio] = useState<string>('');
@@ -46,6 +52,25 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
   const [showFilters, setShowFilters] = useState(false);
   const [exportando, setExportando] = useState(false);
 
+  // Helper para obtener timestamp según rango (solo 24h y 72h)
+  const getTimeRangeTimestamp = (range: string): number => {
+    const now = Date.now();
+    switch(range) {
+      case '24h': return now - (24 * 60 * 60 * 1000);
+      case '72h': return now - (72 * 60 * 60 * 1000);
+      default: return now - (72 * 60 * 60 * 1000);
+    }
+  };
+
+  // Helper para obtener etiqueta del rango
+  const getTimeRangeLabel = (range: string): string => {
+    switch(range) {
+      case '24h': return 'Últimas 24 horas';
+      case '72h': return 'Últimas 72 horas';
+      default: return 'Últimas 72 horas';
+    }
+  };
+
   // 1. Cargar dispositivos desde RTDB
   useEffect(() => {
     if (!institutoId) return;
@@ -55,19 +80,26 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
     const unsubscribe = onValue(dispositivosRef, (snapshot) => {
       const data = snapshot.val();
       const map: Record<string, { alumno_asignado: string; aulaId: string }> = {};
+      const devicesList: {id: string, name: string}[] = [];
       
       if (data) {
         Object.entries(data).forEach(([deviceId, device]: [string, any]) => {
           if (device.InstitutoId === institutoId) {
+            const name = device.alumno_asignado || device.nombre || 'Sin asignar';
             map[deviceId] = {
-              alumno_asignado: device.alumno_asignado || 'Sin asignar',
+              alumno_asignado: name,
               aulaId: device.aulaId || ''
             };
+            devicesList.push({ id: deviceId, name: `${name} (${deviceId.slice(-4)})` });
           }
         });
       }
       
+      devicesList.sort((a, b) => a.name.localeCompare(b.name));
+      devicesList.unshift({ id: 'all', name: '📱 TODOS LOS DISPOSITIVOS' });
+      
       setDeviceInfoMap(map);
+      setAvailableDevices(devicesList);
     });
 
     return () => off(dispositivosRef);
@@ -97,11 +129,9 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
           .filter(alert => deviceIds.includes(alert.deviceId))
           .sort((a, b) => b.timestamp - a.timestamp);
         
-        setAlertas(alertsList);
-        setDisplayAlertas(alertsList);
+        setAllAlertas(alertsList);
       } else {
-        setAlertas([]);
-        setDisplayAlertas([]);
+        setAllAlertas([]);
       }
       setLoading(false);
     }, (error) => {
@@ -112,31 +142,39 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
     return () => off(alertasRef);
   }, [institutoId, deviceInfoMap]);
 
-  // 3. Enriquecer alertas con nombre del alumno
-  const enrichedAlertas = useMemo(() => {
-    return displayAlertas.map(alerta => {
-      const device = deviceInfoMap[alerta.deviceId || ''];
-      return {
-        ...alerta,
-        estudianteNombre: device?.alumno_asignado || 'Sin asignar',
-        aulaId: device?.aulaId || null
-      };
-    });
-  }, [displayAlertas, deviceInfoMap]);
+  // 3. Filtrar alertas por dispositivo y rango de tiempo
+  const filteredByDeviceAndTime = useMemo(() => {
+    let result = [...allAlertas];
+    
+    // Filtrar por dispositivo
+    if (selectedDevice !== 'all') {
+      result = result.filter(alerta => alerta.deviceId === selectedDevice);
+    }
+    
+    // Filtrar por rango de tiempo (solo 24h o 72h)
+    const timeLimit = getTimeRangeTimestamp(timeRange);
+    result = result.filter(alerta => alerta.timestamp >= timeLimit);
+    
+    return result;
+  }, [allAlertas, selectedDevice, timeRange]);
 
-  // 4. Filtrar
+  // 4. Aplicar filtros de búsqueda y fechas
   const filteredAlertas = useMemo(() => {
-    let filtradas = [...enrichedAlertas];
+    let filtradas = [...filteredByDeviceAndTime];
 
     if (aulaId) {
-      filtradas = filtradas.filter(a => a.aulaId === aulaId);
+      filtradas = filtradas.filter(a => {
+        const device = deviceInfoMap[a.deviceId || ''];
+        return device?.aulaId === aulaId;
+      });
     }
 
     if (appliedSearchTerm) {
       const term = appliedSearchTerm.toLowerCase();
-      filtradas = filtradas.filter(a => 
-        a.estudianteNombre?.toLowerCase().includes(term)
-      );
+      filtradas = filtradas.filter(a => {
+        const device = deviceInfoMap[a.deviceId || ''];
+        return device?.alumno_asignado?.toLowerCase().includes(term);
+      });
     }
 
     if (appliedFechaInicio) {
@@ -151,18 +189,83 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
     }
 
     return filtradas;
-  }, [enrichedAlertas, appliedSearchTerm, appliedFechaInicio, appliedFechaFin, aulaId]);
+  }, [filteredByDeviceAndTime, appliedSearchTerm, appliedFechaInicio, appliedFechaFin, aulaId, deviceInfoMap]);
 
-  // 5. Limpiar pantalla (solo visual, no elimina datos)
-  const limpiarPantalla = () => {
-    setDisplayAlertas([]);
-    toast.success("🧹 Pantalla de alertas limpiada");
+  // 5. Paginación
+  const totalPages = Math.ceil(filteredAlertas.length / itemsPerPage);
+  const paginatedAlertas = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    const end = start + itemsPerPage;
+    return filteredAlertas.slice(start, end);
+  }, [filteredAlertas, currentPage, itemsPerPage]);
+
+  // Resetear página cuando cambia el filtro
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedDevice, timeRange, appliedSearchTerm, appliedFechaInicio, appliedFechaFin]);
+
+  // 6. Limpiar TODAS las infracciones de Firebase
+  const limpiarTodoFirebase = async () => {
+    if (!institutoId) return;
+    
+    const confirmed = confirm('⚠️ ¿ESTÁS SEGURO?\n\nEsta acción eliminará TODAS las infracciones registradas en Firebase para esta sede.\n\nEsta operación NO se puede deshacer.');
+    if (!confirmed) return;
+    
+    setIsDeleting(true);
+    toast.loading('Eliminando infracciones...');
+    
+    try {
+      const alertasRef = ref(rtdb, 'alertas_seguridad');
+      const snapshot = await get(alertasRef);
+      const data = snapshot.val();
+      
+      if (data) {
+        const keysToDelete: string[] = [];
+        
+        Object.entries(data).forEach(([key, value]: [string, any]) => {
+          const deviceId = value.deviceId || '';
+          const deviceInfo = deviceInfoMap[deviceId];
+          
+          if (deviceInfo) {
+            keysToDelete.push(key);
+          }
+        });
+        
+        if (keysToDelete.length > 0) {
+          const deletePromises = keysToDelete.map(key => 
+            set(ref(rtdb, `alertas_seguridad/${key}`), null)
+          );
+          await Promise.all(deletePromises);
+          toast.success(`✅ ${keysToDelete.length} infracciones eliminadas correctamente`);
+        } else {
+          toast.info('No hay infracciones para eliminar');
+        }
+      }
+    } catch (error) {
+      console.error('Error eliminando infracciones:', error);
+      toast.error('Error al eliminar infracciones');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
-  // 6. Restaurar todas las alertas
+  // 7. Limpiar pantalla (solo visual, no elimina datos)
+  const limpiarPantalla = () => {
+    // No hace nada porque ahora los datos vienen de filteredAlertas
+    toast.success("🧹 Filtros aplicados");
+  };
+
+  // 8. Restaurar todas las alertas
   const restaurarAlertas = () => {
-    setDisplayAlertas(alertas);
-    toast.success("📋 Todas las alertas restauradas");
+    setSelectedDevice('all');
+    setTimeRange('24h');
+    setAppliedSearchTerm('');
+    setTempSearchTerm('');
+    setAppliedFechaInicio('');
+    setTempFechaInicio('');
+    setAppliedFechaFin('');
+    setTempFechaFin('');
+    toast.success("📋 Todos los filtros restaurados");
   };
 
   const handleBuscar = () => {
@@ -209,18 +312,27 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
       docPDF.setFontSize(8);
       docPDF.setTextColor(249, 115, 22);
       docPDF.text(`REPORTE GENERADO: ${new Date().toLocaleString()}`, 15, 28);
+      docPDF.text(`PERÍODO: ${getTimeRangeLabel(timeRange)}`, 15, 36);
+      if (selectedDevice !== 'all') {
+        const device = availableDevices.find(d => d.id === selectedDevice);
+        docPDF.text(`DISPOSITIVO: ${device?.name || selectedDevice}`, 15, 44);
+      }
 
-      const tableRows = filteredAlertas.map(a => [
-        (a.estudianteNombre || 'N/A').toUpperCase(),
-        new Date(a.timestamp).toLocaleString(),
-        a.descripcion || a.urlIntentada || 'Bloqueo Genérico',
-        getTipoLabel(a.tipo || 'desconocido')
-      ]);
+      const tableRows = filteredAlertas.map(a => {
+        const device = deviceInfoMap[a.deviceId || ''];
+        return [
+          (device?.alumno_asignado || 'N/A').toUpperCase(),
+          new Date(a.timestamp).toLocaleString(),
+          a.descripcion || a.urlIntentada || 'Bloqueo Genérico',
+          getTipoLabel(a.tipo || 'desconocido')
+        ];
+      });
 
+      const startY = selectedDevice !== 'all' ? 52 : 44;
       autoTable(docPDF, {
         head: [['ESTUDIANTE', 'FECHA / HORA', 'INCIDENCIA', 'TIPO']],
         body: tableRows,
-        startY: 45,
+        startY: startY,
         styles: { fontSize: 7 },
         headStyles: { fillColor: [249, 115, 22] }
       });
@@ -251,11 +363,40 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
             Alertas de <span className="text-orange-500">Seguridad</span>
           </h3>
           <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mt-1">
-            RTDB Live • {filteredAlertas.length} registros
+            {getTimeRangeLabel(timeRange)} • {filteredAlertas.length} registros
           </p>
         </div>
         
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          {/* Selector de dispositivo */}
+          <div className="flex items-center gap-2 bg-slate-900/50 rounded-xl px-3 py-1.5 border border-slate-700">
+            <Smartphone size={12} className="text-orange-500" />
+            <select
+              value={selectedDevice}
+              onChange={(e) => setSelectedDevice(e.target.value)}
+              className="bg-transparent text-[9px] font-black text-white uppercase tracking-wider focus:outline-none cursor-pointer max-w-[180px]"
+            >
+              {availableDevices.map(device => (
+                <option key={device.id} value={device.id}>
+                  {device.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Selector de rango de tiempo */}
+          <div className="flex items-center gap-2 bg-slate-900/50 rounded-xl px-3 py-1.5 border border-slate-700">
+            <Clock size={12} className="text-orange-500" />
+            <select
+              value={timeRange}
+              onChange={(e) => setTimeRange(e.target.value)}
+              className="bg-transparent text-[9px] font-black text-white uppercase tracking-wider focus:outline-none cursor-pointer"
+            >
+              <option value="24h">ÚLTIMAS 24 HORAS</option>
+              <option value="72h">ÚLTIMAS 72 HORAS</option>
+            </select>
+          </div>
+
           <button
             onClick={() => setShowFilters(!showFilters)}
             className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase flex items-center gap-2 border ${
@@ -298,10 +439,13 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
               <Download size={14} /> PDF
             </button>
             <button onClick={limpiarPantalla} className="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-xl text-[9px] font-black">
-              <Trash2 size={14} /> LIMPIAR
+              <Trash2 size={14} /> LIMPIAR VISTA
             </button>
             <button onClick={restaurarAlertas} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-[9px] font-black">
               RESTAURAR
+            </button>
+            <button onClick={limpiarTodoFirebase} disabled={isDeleting} className="bg-red-800 hover:bg-red-900 text-white px-4 py-2 rounded-xl text-[9px] font-black">
+              <Trash2 size={14} /> LIMPIAR TODO
             </button>
             <button onClick={handleBuscar} className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-2 rounded-xl text-[9px] font-black">
               APLICAR
@@ -310,48 +454,82 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
         </div>
       )}
 
+      {/* CONTADOR Y PAGINACIÓN */}
+      <div className="flex justify-between items-center mb-3">
+        <p className="text-[8px] text-slate-500">
+          Mostrando {paginatedAlertas.length} de {filteredAlertas.length} alertas
+        </p>
+        {totalPages > 1 && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="p-1 rounded-lg bg-slate-800/50 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+            >
+              <ChevronLeft size={12} className="text-white" />
+            </button>
+            <span className="text-[8px] text-slate-400 font-mono">
+              {currentPage} / {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="p-1 rounded-lg bg-slate-800/50 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+            >
+              <ChevronRight size={12} className="text-white" />
+            </button>
+          </div>
+        )}
+      </div>
+
       <div className="space-y-3 max-h-[500px] overflow-y-auto">
-        {filteredAlertas.length === 0 ? (
+        {paginatedAlertas.length === 0 ? (
           <div className="py-20 text-center border-2 border-dashed border-slate-800 rounded-[2rem]">
             <CheckCircle className="mx-auto text-slate-800 mb-2" size={32} />
             <p className="text-slate-600 text-[9px] font-black uppercase">Sin incidencias</p>
+            <p className="text-[7px] text-slate-700 mt-1">
+              {selectedDevice !== 'all' ? 'Este dispositivo no tiene alertas en el período seleccionado' : getTimeRangeLabel(timeRange)}
+            </p>
           </div>
         ) : (
-          filteredAlertas.map((alerta) => (
-            <div key={alerta.id} className="group p-4 rounded-2xl border bg-slate-900/50 border-slate-800 hover:border-orange-500/50">
-              <div className="flex items-start gap-4">
-                <div className="p-3 rounded-xl shrink-0 bg-orange-500/10">
-                  {getTipoIcon(alerta.tipo || 'desconocido')}
-                </div>
-                
-                <div className="flex-1">
-                  <div className="flex justify-between items-start mb-1">
-                    <h4 className="text-white font-black text-[11px] uppercase">
-                      {alerta.estudianteNombre}
-                    </h4>
-                    <span className="text-[8px] font-mono text-slate-500 bg-black/50 px-2 py-1 rounded-md">
-                      {new Date(alerta.timestamp).toLocaleTimeString()}
-                    </span>
+          paginatedAlertas.map((alerta) => {
+            const device = deviceInfoMap[alerta.deviceId || ''];
+            return (
+              <div key={alerta.id} className="group p-4 rounded-2xl border bg-slate-900/50 border-slate-800 hover:border-orange-500/50">
+                <div className="flex items-start gap-4">
+                  <div className="p-3 rounded-xl shrink-0 bg-orange-500/10">
+                    {getTipoIcon(alerta.tipo || 'desconocido')}
                   </div>
                   
-                  <p className="text-slate-400 text-[10px] mb-2">
-                    {alerta.descripcion || alerta.urlIntentada || 'INTENTO DE ACCESO'}
-                  </p>
-                  
-                  <div className="flex gap-2">
-                    <span className="px-2 py-0.5 bg-red-500/10 text-red-500 rounded-md text-[7px] font-black uppercase">
-                      {getTipoLabel(alerta.tipo || 'desconocido')}
-                    </span>
-                    {alerta.aulaId && (
-                      <span className="px-2 py-0.5 bg-blue-500/10 text-blue-500 rounded-md text-[7px] font-black">
-                        AULA: {alerta.aulaId}
+                  <div className="flex-1">
+                    <div className="flex justify-between items-start mb-1">
+                      <h4 className="text-white font-black text-[11px] uppercase">
+                        {device?.alumno_asignado || 'Sin asignar'}
+                      </h4>
+                      <span className="text-[8px] font-mono text-slate-500 bg-black/50 px-2 py-1 rounded-md">
+                        {new Date(alerta.timestamp).toLocaleTimeString()}
                       </span>
-                    )}
+                    </div>
+                    
+                    <p className="text-slate-400 text-[10px] mb-2">
+                      {alerta.descripcion || alerta.urlIntentada || 'INTENTO DE ACCESO'}
+                    </p>
+                    
+                    <div className="flex gap-2">
+                      <span className="px-2 py-0.5 bg-red-500/10 text-red-500 rounded-md text-[7px] font-black uppercase">
+                        {getTipoLabel(alerta.tipo || 'desconocido')}
+                      </span>
+                      {device?.aulaId && (
+                        <span className="px-2 py-0.5 bg-blue-500/10 text-blue-500 rounded-md text-[7px] font-black">
+                          AULA: {device.aulaId}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>

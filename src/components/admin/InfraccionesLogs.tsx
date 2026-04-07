@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { rtdb } from '@/firebase/config';
-import { ref, onValue, query, orderByChild, limitToLast, off, get } from 'firebase/database';
-import { ShieldAlert, History, Activity, Globe, AlertTriangle, Smartphone, ShieldX, Download, Eye, Trash2 } from 'lucide-react';
+import { ref, onValue, query, orderByChild, limitToLast, off, get, set } from 'firebase/database';
+import { ShieldAlert, History, Activity, Globe, AlertTriangle, Smartphone, ShieldX, Download, Eye, Trash2, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -33,8 +33,14 @@ export default function InfraccionesLogs() {
   const [allLogs, setAllLogs] = useState<SecurityLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [validDevicesMap, setValidDevicesMap] = useState<Map<string, DeviceInfo>>(new Map());
+  const [availableDevices, setAvailableDevices] = useState<{id: string, name: string}[]>([]);
+  const [selectedDevice, setSelectedDevice] = useState<string>('all');
+  const [timeRange, setTimeRange] = useState<string>('24h');
   const [showAllDialog, setShowAllDialog] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(20);
   const [currentTime, setCurrentTime] = useState(Date.now());
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Actualizar tiempo cada segundo
   useEffect(() => {
@@ -43,6 +49,25 @@ export default function InfraccionesLogs() {
     }, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Helper para obtener timestamp según rango (solo 24h y 72h)
+  const getTimeRangeTimestamp = (range: string): number => {
+    const now = Date.now();
+    switch(range) {
+      case '24h': return now - (24 * 60 * 60 * 1000);
+      case '72h': return now - (72 * 60 * 60 * 1000);
+      default: return now - (72 * 60 * 60 * 1000);
+    }
+  };
+
+  // Helper para obtener etiqueta del rango
+  const getTimeRangeLabel = (range: string): string => {
+    switch(range) {
+      case '24h': return 'Últimas 24 horas';
+      case '72h': return 'Últimas 72 horas';
+      default: return 'Últimas 72 horas';
+    }
+  };
 
   // 1. Cargar dispositivos de la sede
   useEffect(() => {
@@ -53,21 +78,28 @@ export default function InfraccionesLogs() {
     const unsubscribe = onValue(dispositivosRef, (snapshot) => {
       const data = snapshot.val();
       const map = new Map<string, DeviceInfo>();
+      const devicesList: {id: string, name: string}[] = [];
       
       if (data) {
         Object.entries(data).forEach(([deviceId, device]: [string, any]) => {
           if (device.InstitutoId === institutionId) {
+            const name = device.alumno_asignado || device.nombre || 'Sin asignar';
             map.set(deviceId, {
               deviceId: deviceId,
-              alumno_asignado: device.alumno_asignado || device.nombre || 'Sin asignar',
+              alumno_asignado: name,
               aulaId: device.aulaId || '—',
               seccion: device.seccion || '—'
             });
+            devicesList.push({ id: deviceId, name: `${name} (${deviceId.slice(-4)})` });
           }
         });
       }
       
+      devicesList.sort((a, b) => a.name.localeCompare(b.name));
+      devicesList.unshift({ id: 'all', name: '📱 TODOS LOS DISPOSITIVOS' });
+      
       setValidDevicesMap(map);
+      setAvailableDevices(devicesList);
     });
 
     return () => off(dispositivosRef);
@@ -79,7 +111,7 @@ export default function InfraccionesLogs() {
     if (validDevicesMap.size === 0 && !loading) return;
 
     const alertasRef = ref(rtdb, 'alertas_seguridad');
-    const recentQuery = query(alertasRef, orderByChild('timestamp'), limitToLast(100));
+    const recentQuery = query(alertasRef, orderByChild('timestamp'), limitToLast(500));
     
     const unsubscribe = onValue(recentQuery, (snapshot) => {
       const data = snapshot.val();
@@ -116,12 +148,85 @@ export default function InfraccionesLogs() {
       
       const sorted = alertsList.sort((a, b) => b.timestamp - a.timestamp);
       setAllLogs(sorted);
-      setLogs(sorted.slice(0, 10)); // Solo últimas 10
       setLoading(false);
     });
 
     return () => off(alertasRef);
   }, [institutionId, validDevicesMap]);
+
+  // 3. Filtrar logs por dispositivo y rango de tiempo
+  const filteredLogs = useMemo(() => {
+    let result = [...allLogs];
+    
+    // Filtrar por dispositivo
+    if (selectedDevice !== 'all') {
+      result = result.filter(log => log.deviceId === selectedDevice);
+    }
+    
+    // Filtrar por rango de tiempo (solo 24h o 72h)
+    const timeLimit = getTimeRangeTimestamp(timeRange);
+    result = result.filter(log => log.timestamp >= timeLimit);
+    
+    return result;
+  }, [allLogs, selectedDevice, timeRange]);
+
+  // 4. Paginación
+  const totalPages = Math.ceil(filteredLogs.length / itemsPerPage);
+  const paginatedLogs = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    const end = start + itemsPerPage;
+    return filteredLogs.slice(start, end);
+  }, [filteredLogs, currentPage, itemsPerPage]);
+
+  // Resetear página cuando cambia el filtro
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedDevice, timeRange]);
+
+  // 5. Limpiar TODAS las infracciones de Firebase
+  const limpiarTodoFirebase = async () => {
+    if (!institutionId) return;
+    
+    const confirmed = confirm('⚠️ ¿ESTÁS SEGURO?\n\nEsta acción eliminará TODAS las infracciones registradas en Firebase para esta sede.\n\nEsta operación NO se puede deshacer.');
+    if (!confirmed) return;
+    
+    setIsDeleting(true);
+    toast.loading('Eliminando infracciones...');
+    
+    try {
+      const alertasRef = ref(rtdb, 'alertas_seguridad');
+      const snapshot = await get(alertasRef);
+      const data = snapshot.val();
+      
+      if (data) {
+        const keysToDelete: string[] = [];
+        
+        Object.entries(data).forEach(([key, value]: [string, any]) => {
+          const deviceId = value.deviceId || '';
+          const deviceInfo = validDevicesMap.get(deviceId);
+          
+          if (deviceInfo) {
+            keysToDelete.push(key);
+          }
+        });
+        
+        if (keysToDelete.length > 0) {
+          const deletePromises = keysToDelete.map(key => 
+            set(ref(rtdb, `alertas_seguridad/${key}`), null)
+          );
+          await Promise.all(deletePromises);
+          toast.success(`✅ ${keysToDelete.length} infracciones eliminadas correctamente`);
+        } else {
+          toast.info('No hay infracciones para eliminar');
+        }
+      }
+    } catch (error) {
+      console.error('Error eliminando infracciones:', error);
+      toast.error('Error al eliminar infracciones');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const formatTime = (timestamp: number) => {
     const date = new Date(timestamp);
@@ -210,9 +315,10 @@ export default function InfraccionesLogs() {
       doc.text(`Reporte de Infracciones - Sede ${institutionId}`, 14, 22);
       doc.setFontSize(10);
       doc.text(`Generado: ${new Date().toLocaleString('es-ES')}`, 14, 30);
-      doc.text(`Total de registros: ${allLogs.length}`, 14, 38);
+      doc.text(`Período: ${getTimeRangeLabel(timeRange)}`, 14, 38);
+      doc.text(`Total de registros: ${filteredLogs.length}`, 14, 46);
 
-      const tableData = allLogs.map(log => [
+      const tableData = filteredLogs.map(log => [
         getTipoLabel(log.tipo),
         getDescripcion(log),
         log.dispositivoNombre || log.deviceId.substring(0, 12),
@@ -222,7 +328,7 @@ export default function InfraccionesLogs() {
       autoTable(doc, {
         head: [['Tipo', 'Detalle', 'Dispositivo', 'Fecha']],
         body: tableData,
-        startY: 45,
+        startY: 52,
         styles: { fontSize: 7 },
         headStyles: { fillColor: [249, 115, 22] }
       });
@@ -286,7 +392,7 @@ export default function InfraccionesLogs() {
   return (
     <div className="bg-[#0b0d12] rounded-[2rem] p-6 mt-4 overflow-hidden border border-white/5 shadow-2xl relative">
       {/* Header con botones de acción */}
-      <div className="flex items-center justify-between mb-4 border-b border-white/5 pb-4">
+      <div className="flex items-center justify-between mb-4 border-b border-white/5 pb-4 flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <div className="bg-red-500/10 p-2 rounded-lg border border-red-500/20">
             <Activity className="w-3 h-3 text-red-500 animate-pulse" />
@@ -296,14 +402,48 @@ export default function InfraccionesLogs() {
               Log de <span className="text-red-500">Infracciones</span>
             </p>
             <p className="text-[7px] text-slate-600 font-bold uppercase tracking-widest mt-1">
-              Realtime Feed • {allLogs.length} registros totales
+              {getTimeRangeLabel(timeRange)} • {filteredLogs.length} registros
             </p>
           </div>
         </div>
+        
+        {/* FILTROS */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Rango de tiempo */}
+          <div className="flex items-center gap-2 bg-slate-900/50 rounded-xl px-3 py-1.5 border border-slate-700">
+            <Filter size={12} className="text-orange-500" />
+            <select
+              value={timeRange}
+              onChange={(e) => setTimeRange(e.target.value)}
+              className="bg-transparent text-[9px] font-black text-white uppercase tracking-wider focus:outline-none cursor-pointer"
+            >
+              <option value="24h">ÚLTIMAS 24 HORAS</option>
+              <option value="72h">ÚLTIMAS 72 HORAS</option>
+            </select>
+          </div>
+
+          {/* Selector de dispositivo */}
+          <div className="flex items-center gap-2 bg-slate-900/50 rounded-xl px-3 py-1.5 border border-slate-700">
+            <Smartphone size={12} className="text-orange-500" />
+            <select
+              value={selectedDevice}
+              onChange={(e) => setSelectedDevice(e.target.value)}
+              className="bg-transparent text-[9px] font-black text-white uppercase tracking-wider focus:outline-none cursor-pointer max-w-[180px]"
+            >
+              {availableDevices.map(device => (
+                <option key={device.id} value={device.id}>
+                  {device.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        
+        {/* BOTONES DE ACCIÓN */}
         <div className="flex gap-2">
           <Button
             onClick={exportToPDF}
-            disabled={allLogs.length === 0}
+            disabled={filteredLogs.length === 0}
             variant="outline"
             className="h-7 text-[9px] border-slate-700 text-slate-400 hover:text-green-500"
           >
@@ -319,27 +459,63 @@ export default function InfraccionesLogs() {
           <Button
             onClick={limpiarVisual}
             variant="outline"
-            className="h-7 text-[9px] border-slate-700 text-slate-400 hover:text-red-500"
+            className="h-7 text-[9px] border-slate-700 text-slate-400 hover:text-yellow-500"
           >
-            <Trash2 className="w-3 h-3 mr-1" /> LIMPIAR
+            <Trash2 className="w-3 h-3 mr-1" /> LIMPIAR VISTA
+          </Button>
+          <Button
+            onClick={limpiarTodoFirebase}
+            disabled={isDeleting}
+            variant="outline"
+            className="h-7 text-[9px] border-red-800 text-red-500 hover:bg-red-500/10 hover:text-red-400"
+          >
+            <Trash2 className="w-3 h-3 mr-1" /> LIMPIAR TODO
           </Button>
         </div>
       </div>
 
-      {/* Lista de alertas (solo últimas 10) */}
+      {/* CONTADOR Y PAGINACIÓN */}
+      <div className="flex justify-between items-center mb-3">
+        <p className="text-[8px] text-slate-500">
+          Mostrando {paginatedLogs.length} de {filteredLogs.length} infracciones
+        </p>
+        {totalPages > 1 && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="p-1 rounded-lg bg-slate-800/50 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+            >
+              <ChevronLeft size={12} className="text-white" />
+            </button>
+            <span className="text-[8px] text-slate-400 font-mono">
+              {currentPage} / {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="p-1 rounded-lg bg-slate-800/50 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+            >
+              <ChevronRight size={12} className="text-white" />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Lista de alertas */}
       <div className="space-y-3 max-h-64 overflow-y-auto pr-2 custom-scrollbar min-h-[100px]">
-        {logs.length === 0 ? (
+        {paginatedLogs.length === 0 ? (
           <div className="py-12 flex flex-col items-center justify-center opacity-30 grayscale">
             <ShieldAlert className="w-8 h-8 text-slate-700 mb-3" />
             <p className="text-[9px] font-black text-slate-500 uppercase italic tracking-[0.2em]">
               Sin actividad fuera de protocolo
             </p>
             <p className="text-[7px] text-slate-600 mt-2">
-              Sede: {institutionId}
+              {selectedDevice !== 'all' ? 'Este dispositivo no tiene infracciones en el período seleccionado' : `Sede: ${institutionId} • ${getTimeRangeLabel(timeRange)}`}
             </p>
           </div>
         ) : (
-          logs.map((log) => (
+          paginatedLogs.map((log) => (
             <div 
               key={log.id} 
               className="flex justify-between items-center bg-white/[0.02] p-3 rounded-2xl border border-white/5 hover:border-red-500/20 hover:bg-red-500/[0.02] transition-all group"
@@ -373,16 +549,6 @@ export default function InfraccionesLogs() {
             </div>
           ))
         )}
-        {allLogs.length > 10 && (
-          <div className="text-center pt-2">
-            <button
-              onClick={() => setShowAllDialog(true)}
-              className="text-[9px] text-orange-500 hover:text-orange-400"
-            >
-              + Ver {allLogs.length - 10} registros más...
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Modal con lista completa */}
@@ -390,7 +556,10 @@ export default function InfraccionesLogs() {
         <DialogContent className="bg-slate-900 border-slate-800 text-white max-w-4xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-white">Lista Completa de Infracciones</DialogTitle>
-            <p className="text-[10px] text-slate-500">Total: {allLogs.length} registros | Sede: {institutionId}</p>
+            <p className="text-[10px] text-slate-500">
+              Total: {filteredLogs.length} registros | Sede: {institutionId} | {getTimeRangeLabel(timeRange)}
+              {selectedDevice !== 'all' && ` | Dispositivo filtrado`}
+            </p>
           </DialogHeader>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
@@ -403,7 +572,7 @@ export default function InfraccionesLogs() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/50">
-                {allLogs.map((log) => (
+                {filteredLogs.map((log) => (
                   <tr key={log.id} className="hover:bg-slate-800/30">
                     <td className="py-2">
                       <div className="flex items-center gap-2">
