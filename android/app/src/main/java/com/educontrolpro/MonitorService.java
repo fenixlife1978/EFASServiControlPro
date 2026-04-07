@@ -58,23 +58,17 @@ public class MonitorService extends AccessibilityService {
     
     // Control de spam para reportes
     private Map<String, Long> lastReportTime = new HashMap<>();
-    private static final long MIN_REPORT_INTERVAL = 3000; // 3 segundos entre reportes del mismo tipo
+    private static final long MIN_REPORT_INTERVAL = 3000;
     
+    // Lista de paquetes de ajustes del sistema (SOLO los reales)
     private final Set<String> settingsPackages = new HashSet<>(Arrays.asList(
         "com.android.settings",
-        "com.android.systemui",
-        "com.android.systemui.settings",
-        "com.google.android.gms",
-        "com.google.android.gsf",
-        "com.android.phone",
-        "com.android.contacts",
-        "com.android.providers.settings",
         "com.android.settings.intelligence",
-        "com.google.android.setupwizard",
-        "com.android.wifi",
-        "com.android.bluetooth"
+        "com.android.systemui",
+        "com.android.systemui.settings"
     ));
     
+    // Apps prohibidas
     private final Set<String> forbiddenPackages = new HashSet<>(Arrays.asList(
         "com.instagram.android",
         "com.facebook.katana",
@@ -121,6 +115,7 @@ public class MonitorService extends AccessibilityService {
         "com.google.android.play.games"
     ));
     
+    // Navegadores
     private final List<String> browserPackages = Arrays.asList(
         "com.android.chrome", 
         "org.mozilla.firefox", 
@@ -157,87 +152,65 @@ public class MonitorService extends AccessibilityService {
             return;
         }
         
-        // BLOQUEO DE AJUSTES DEL SISTEMA
-        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
-            eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+        // ============================================================
+        // BLOQUEO DE AJUSTES DEL SISTEMA - SOLO cuando hay CLICK REAL
+        // ============================================================
+        if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            String className = event.getClassName() != null ? event.getClassName().toString() : "";
             
-            boolean isSettings = settingsPackages.contains(pkg) || 
-                                 pkg.contains("settings") || 
-                                 pkg.contains("Settings") ||
-                                 pkg.contains("config") ||
-                                 pkg.equals("com.android.systemui");
+            // Verificar si el clic fue en un elemento de configuración
+            boolean isSettingsClick = className.contains("Settings") ||
+                                      className.contains("Preference") ||
+                                      className.contains("Tile");
             
-            boolean isAccessibilitySettings = false;
-            if (event.getClassName() != null) {
-                String className = event.getClassName().toString();
-                isAccessibilitySettings = className.contains("Accessibility") ||
-                                          className.contains("accessibility") ||
-                                          className.contains("Settings");
-            }
-            
-            if (isSettings || isAccessibilitySettings) {
-                Log.w(TAG, "🔒 BLOQUEO INMEDIATO: " + pkg);
+            if (isSettingsClick && settingsPackages.contains(pkg)) {
+                Log.w(TAG, "🔒 CLICK EN CONFIGURACIÓN DETECTADO: " + pkg);
                 expulsarInmediato("ajustes_sistema");
                 return;
             }
         }
         
-        // BLOQUEO DE APPS PROHIBIDAS
+        // ============================================================
+        // BLOQUEO DE APPS PROHIBIDAS - SOLO cuando hay CLICK o la app se abre
+        // ============================================================
         if (forbiddenPackages.contains(pkg) && 
             (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
-             eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED)) {
+             eventType == AccessibilityEvent.TYPE_VIEW_CLICKED)) {
             Log.w(TAG, "🔒 APP PROHIBIDA DETECTADA: " + pkg);
             expulsarInmediato("app_prohibida");
             return;
         }
         
         // ============================================================
-        // 🔒 CONFIGURACIÓN DEL NAVEGADOR - CORREGIDO
-        // SOLO bloquea cuando el título de la ventana es "Configuración" o "Ajustes"
-        // NO bloquea la navegación normal, la barra de direcciones, ni el teclado
+        // BLOQUEO DE MENÚ DEL NAVEGADOR - SOLO cuando hay CLICK en el botón de menú
         // ============================================================
-        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+        if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             if (browserPackages.contains(pkg)) {
-                String windowTitle = "";
+                String className = event.getClassName() != null ? event.getClassName().toString().toLowerCase() : "";
+                String contentDesc = event.getContentDescription() != null ? event.getContentDescription().toString().toLowerCase() : "";
                 
-                // Obtener el título del evento
-                if (event.getText() != null && !event.getText().isEmpty()) {
-                    windowTitle = event.getText().toString().toLowerCase();
-                }
+                boolean isMenuButton = className.contains("menu") ||
+                                       className.contains("more") ||
+                                       contentDesc.contains("más") ||
+                                       contentDesc.contains("menu") ||
+                                       contentDesc.contains("opciones");
                 
-                // También verificar contentDescription
-                if (event.getContentDescription() != null) {
-                    String desc = event.getContentDescription().toString().toLowerCase();
-                    if (desc.contains("configuración") || desc.contains("ajustes") || desc.contains("settings")) {
-                        windowTitle = desc;
-                    }
-                }
-                
-                // Verificar si el título indica pantalla de configuración
-                boolean isSettingsScreen = windowTitle.contains("configuración") ||
-                                           windowTitle.contains("ajustes") ||
-                                           windowTitle.contains("settings") ||
-                                           windowTitle.contains("preferences");
-                
-                if (isSettingsScreen) {
-                    Log.w(TAG, "🔒 CONFIGURACIÓN DEL NAVEGADOR DETECTADA: " + windowTitle);
+                if (isMenuButton) {
+                    Log.w(TAG, "🔒 CLICK EN MENÚ DEL NAVEGADOR DETECTADO");
                     expulsarInmediato("configuracion_navegador");
                     return;
-                } else {
-                    Log.d(TAG, "🌐 Navegación normal - Permitir: " + windowTitle);
                 }
             }
         }
     }
     
     /**
-     * Expulsión inmediata y agresiva - CORREGIDO
-     * Ahora reporta SOLO una vez por evento
+     * Expulsión inmediata y agresiva
      */
     private void expulsarInmediato(String tipo) {
         long now = System.currentTimeMillis();
         
-        // Control anti-spam - PRIMERO (evita múltiples ejecuciones)
+        // Control anti-spam
         if (now - lastBlockTime < MIN_BLOCK_INTERVAL) {
             Log.d(TAG, "⏱️ Expulsión ignorada por spam: " + tipo);
             return;
@@ -246,21 +219,17 @@ public class MonitorService extends AccessibilityService {
         
         Log.w(TAG, "🚫 EXPULSIÓN INMEDIATA: " + tipo);
         
-        // 1. Reportar evento UNA SOLA VEZ (después del control anti-spam)
+        // Reportar evento
         reportarEvento(tipo);
         
-        // 2. Enviar al home (expulsión inmediata)
+        // Expulsión: HOME + BACK
         performGlobalAction(GLOBAL_ACTION_HOME);
-        
-        // 3. Enviar BACK para asegurar
         performGlobalAction(GLOBAL_ACTION_BACK);
         
-        // 4. Pequeña pausa y otro HOME por si acaso
         mainHandler.postDelayed(() -> {
             performGlobalAction(GLOBAL_ACTION_HOME);
         }, 50);
         
-        // 5. Bloquear temporalmente para no saturar
         isBlocking = true;
         mainHandler.postDelayed(() -> isBlocking = false, 300);
     }
@@ -383,19 +352,13 @@ public class MonitorService extends AccessibilityService {
         reportarEvento("mensaje_director");
     }
     
-    /**
-     * Reportar evento a Firebase - CORREGIDO
-     * Ahora controla spam para evitar múltiples reportes del mismo tipo
-     */
     private void reportarEvento(String tipo) {
         if (rtdb == null || deviceId == null) return;
         
-        // Control de spam para reportes
         String key = tipo + "_" + deviceId;
         Long lastReport = lastReportTime.get(key);
         long now = System.currentTimeMillis();
         
-        // 3 segundos entre reportes del mismo tipo
         if (lastReport != null && (now - lastReport) < MIN_REPORT_INTERVAL) {
             Log.d(TAG, "📊 Reporte ignorado por spam: " + tipo);
             return;
@@ -602,7 +565,8 @@ public class MonitorService extends AccessibilityService {
             
             AccessibilityServiceInfo info = new AccessibilityServiceInfo();
             info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED | 
-                              AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED;
+                              AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED |
+                              AccessibilityEvent.TYPE_VIEW_CLICKED;
             info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
             info.flags = AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS |
                          AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
