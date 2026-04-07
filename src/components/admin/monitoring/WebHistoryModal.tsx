@@ -3,8 +3,8 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { db, rtdb, auth } from '@/firebase/config';
 import { collection, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
-import { ref, onValue, set, serverTimestamp as rtdbTimestamp, push, get } from 'firebase/database';
-import { X, Globe, Clock, ExternalLink, ShieldAlert, Download, Calendar, Search, Shield, AlertTriangle, CheckCircle } from 'lucide-react';
+import { ref, onValue, set, serverTimestamp as rtdbTimestamp, push, get, off } from 'firebase/database';
+import { X, Globe, Clock, ExternalLink, ShieldAlert, Download, Calendar, Search, Shield, AlertTriangle, CheckCircle, RefreshCw } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { getAuth } from 'firebase/auth';
@@ -37,20 +37,23 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
   const [history, setHistory] = useState<WebHistory[]>([]);
   const [alertas, setAlertas] = useState<SecurityAlert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [blockingUrl, setBlockingUrl] = useState<string | null>(null);
   const [showAllHistory, setShowAllHistory] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   
   const [tempFechaInicio, setTempFechaInicio] = useState<string>('');
   const [tempFechaFin, setTempFechaFin] = useState<string>('');
   const [fechaInicio, setFechaInicio] = useState<string>('');
   const [fechaFin, setFechaFin] = useState<string>('');
 
-  // 1. Escuchar historial de navegación COMPLETO desde RTDB (todas las URLs, bloqueadas o no)
+  // 1. Escuchar historial de navegación EN TIEMPO REAL desde RTDB
   useEffect(() => {
     if (!isOpen || !deviceId) return;
     setLoading(true);
+    setError(null);
 
     const historialRef = ref(rtdb, `historial_navegacion/${deviceId}`);
     
@@ -70,6 +73,7 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
           .sort((a, b) => b.timestamp - a.timestamp);
         
         setHistory(historyList);
+        setLastUpdate(new Date());
       } else {
         setHistory([]);
       }
@@ -80,10 +84,12 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      off(historialRef);
+    };
   }, [isOpen, deviceId]);
 
-  // 2. Escuchar alertas de seguridad para complementar
+  // 2. Escuchar alertas de seguridad EN TIEMPO REAL
   useEffect(() => {
     if (!isOpen || !deviceId) return;
 
@@ -112,8 +118,28 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
       console.error("Error cargando alertas:", err);
     });
 
-    return () => unsubscribe();
+    return () => {
+      off(alertasRef);
+    };
   }, [isOpen, deviceId]);
+
+  // Refrescar manualmente
+  const handleRefresh = () => {
+    setRefreshing(true);
+    // Forzar actualización cerrando y reabriendo la escucha
+    const historialRef = ref(rtdb, `historial_navegacion/${deviceId}`);
+    const alertasRef = ref(rtdb, `alertas_seguridad`);
+    
+    Promise.all([
+      get(historialRef),
+      get(alertasRef)
+    ]).then(() => {
+      setRefreshing(false);
+      setLastUpdate(new Date());
+    }).catch(() => {
+      setRefreshing(false);
+    });
+  };
 
   // Filtrar por fechas
   const filteredHistory = useMemo(() => {
@@ -209,12 +235,24 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
     setFechaFin(tempFechaFin);
   };
 
+  const limpiarFiltros = () => {
+    setTempFechaInicio('');
+    setTempFechaFin('');
+    setFechaInicio('');
+    setFechaFin('');
+  };
+
   const generatePDF = () => {
     const docPdf = new jsPDF();
     docPdf.setFillColor(15, 17, 23);
-    docPdf.rect(0, 0, 210, 20, 'F');
+    docPdf.rect(0, 0, 210, 30, 'F');
     docPdf.setTextColor(255, 255, 255);
-    docPdf.text('REPORTE DE NAVEGACIÓN - EDUControlPro', 14, 13);
+    docPdf.setFontSize(16);
+    docPdf.text('EDUCONTROLPRO - REPORTE DE NAVEGACIÓN', 14, 13);
+    docPdf.setFontSize(8);
+    docPdf.setTextColor(249, 115, 22);
+    docPdf.text(`ALUMNO: ${alumnoNombre.toUpperCase()}`, 14, 22);
+    docPdf.text(`FECHA REPORTE: ${new Date().toLocaleString()}`, 14, 28);
     docPdf.setTextColor(0, 0, 0);
     
     const tableData = filteredHistory.map(h => [
@@ -223,7 +261,7 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
       h.bloqueada ? 'BLOQUEADA' : 'PERMITIDA'
     ]);
 
-    let finalY = 50;
+    let finalY = 45;
     
     autoTable(docPdf, {
       startY: finalY,
@@ -239,90 +277,149 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
     const alertCount = alertas.length;
     const blockCount = history.filter(h => h.bloqueada).length;
     
-    docPdf.text(`Resumen: ${blockCount} URLs bloqueadas, ${history.length} URLs totales, ${alertCount} alertas`, 14, finalY + 10);
+    docPdf.text(`Resumen: ${blockCount} URLs bloqueadas, ${history.length} URLs totales, ${alertCount} alertas de seguridad`, 14, finalY + 10);
     
     docPdf.save(`Historial_${alumnoNombre}_${new Date().toISOString().slice(0,10)}.pdf`);
-    alert("✅ PDF generado correctamente");
   };
 
   if (!isOpen) return null;
 
+  const totalBloqueadas = history.filter(h => h.bloqueada).length;
+  const totalPermitidas = history.filter(h => !h.bloqueada).length;
+
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-      <div className="bg-[#0f1117] border border-slate-800 w-full max-w-3xl rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
+      <div className="bg-[#0f1117] border border-slate-800 w-full max-w-4xl rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         
         {/* Header */}
-        <div className="p-8 border-b border-slate-800 flex items-center justify-between bg-gradient-to-br from-slate-900 to-transparent">
-          <div className="flex items-center gap-5">
+        <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-gradient-to-r from-orange-500/10 to-transparent">
+          <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-2xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center">
               <Globe className="text-orange-500 w-6 h-6" />
             </div>
             <div>
-              <h3 className="text-white font-black italic uppercase tracking-tighter text-xl">Historial <span className="text-orange-500">Web</span></h3>
-              <p className="text-[10px] uppercase font-black text-slate-500 tracking-widest mt-1">Agente: {alumnoNombre}</p>
-              <p className="text-[8px] text-slate-600 mt-1">
-                {history.length} URLs visitadas | {history.filter(h => h.bloqueada).length} bloqueadas | {alertas.length} alertas
+              <h3 className="text-white font-black italic uppercase tracking-tighter text-xl">
+                Historial <span className="text-orange-500">Web</span>
+              </h3>
+              <p className="text-[10px] uppercase font-black text-slate-500 tracking-widest mt-1">
+                {alumnoNombre}
               </p>
+              <div className="flex gap-3 mt-1">
+                <p className="text-[8px] text-green-500">
+                  ✅ {totalPermitidas} permitidas
+                </p>
+                <p className="text-[8px] text-red-500">
+                  🚫 {totalBloqueadas} bloqueadas
+                </p>
+                <p className="text-[8px] text-yellow-500">
+                  ⚠️ {alertas.length} alertas
+                </p>
+              </div>
             </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => setShowFilters(!showFilters)} className={`p-3 rounded-xl transition-all ${showFilters ? 'bg-orange-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
-              <Calendar size={20} />
+            <button 
+              onClick={handleRefresh} 
+              disabled={refreshing}
+              className="p-3 rounded-xl bg-slate-800 text-slate-400 hover:text-orange-500 transition-all"
+              title="Actualizar en tiempo real"
+            >
+              <RefreshCw size={18} className={refreshing ? 'animate-spin' : ''} />
+            </button>
+            <button 
+              onClick={() => setShowFilters(!showFilters)} 
+              className={`p-3 rounded-xl transition-all ${showFilters ? 'bg-orange-500 text-white' : 'bg-slate-800 text-slate-400'}`}
+            >
+              <Calendar size={18} />
             </button>
             <button onClick={onClose} className="p-3 bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-all">
-              <X size={20} />
+              <X size={18} />
             </button>
           </div>
         </div>
 
         {/* Panel de Filtros */}
         {showFilters && (
-          <div className="p-6 bg-slate-900/50 border-b border-slate-800 animate-in slide-in-from-top duration-300">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-white">
-              <input type="date" className="bg-slate-950 border border-slate-800 rounded-xl py-2 px-3 text-xs" value={tempFechaInicio} onChange={(e) => setTempFechaInicio(e.target.value)} />
-              <input type="date" className="bg-slate-950 border border-slate-800 rounded-xl py-2 px-3 text-xs" value={tempFechaFin} onChange={(e) => setTempFechaFin(e.target.value)} />
-              <button onClick={handleBuscar} className="bg-orange-500 hover:bg-orange-600 py-2 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2">
-                <Search size={14} /> Filtrar
+          <div className="p-5 bg-slate-900/50 border-b border-slate-800">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <input 
+                type="date" 
+                className="bg-slate-950 border border-slate-700 rounded-xl py-2.5 px-3 text-xs text-white" 
+                value={tempFechaInicio} 
+                onChange={(e) => setTempFechaInicio(e.target.value)} 
+              />
+              <input 
+                type="date" 
+                className="bg-slate-950 border border-slate-700 rounded-xl py-2.5 px-3 text-xs text-white" 
+                value={tempFechaFin} 
+                onChange={(e) => setTempFechaFin(e.target.value)} 
+              />
+              <button 
+                onClick={handleBuscar} 
+                className="bg-orange-500 hover:bg-orange-600 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2"
+              >
+                <Search size={14} /> BUSCAR
+              </button>
+              <button 
+                onClick={limpiarFiltros} 
+                className="bg-slate-800 hover:bg-slate-700 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2"
+              >
+                LIMPIAR
               </button>
             </div>
           </div>
         )}
 
+        {/* Info de última actualización */}
+        <div className="px-6 pt-3 pb-1 flex justify-end">
+          <p className="text-[7px] text-slate-600 font-mono">
+            Última actualización: {lastUpdate.toLocaleTimeString()}
+          </p>
+        </div>
+
         {/* Lista de Historial */}
-        <div className="p-6 overflow-y-auto flex-1 max-h-[60vh] custom-scrollbar">
+        <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
           {loading ? (
             <div className="flex flex-col items-center py-20 gap-4">
               <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
-              <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest">Cargando historial...</p>
+              <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest">Cargando historial en tiempo real...</p>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center py-20 gap-4">
+              <AlertTriangle className="text-red-500" size={32} />
+              <p className="text-red-400 text-[10px] font-black uppercase tracking-widest">Error: {error}</p>
+              <button onClick={handleRefresh} className="bg-orange-500 px-4 py-2 rounded-xl text-[9px] font-black uppercase">
+                Reintentar
+              </button>
             </div>
           ) : displayHistory.length > 0 ? (
-            <div className="space-y-3">
+            <div className="space-y-2">
               {displayHistory.map((item) => (
                 <div 
                   key={item.id} 
-                  className={`group p-4 rounded-2xl border transition-all flex items-center justify-between ${
+                  className={`group p-4 rounded-xl border transition-all flex items-center justify-between ${
                     item.bloqueada 
                       ? 'bg-red-500/5 border-red-500/30 hover:border-red-500/60' 
                       : 'bg-slate-900/40 border-slate-800/50 hover:border-orange-500/40'
                   }`}
                 >
-                  <div className="flex items-center gap-5 overflow-hidden flex-1">
-                    <div className={`p-3 rounded-xl transition-all ${
-                      item.bloqueada ? 'bg-red-500/20 text-red-500' : 'bg-slate-950 text-slate-500 group-hover:text-orange-500'
+                  <div className="flex items-center gap-4 overflow-hidden flex-1">
+                    <div className={`p-2 rounded-xl transition-all ${
+                      item.bloqueada ? 'bg-red-500/20 text-red-500' : 'bg-slate-800 text-slate-500 group-hover:text-orange-500'
                     }`}>
-                      {item.bloqueada ? <ShieldAlert size={16} /> : <Globe size={16} />}
+                      {item.bloqueada ? <ShieldAlert size={14} /> : <Globe size={14} />}
                     </div>
                     <div className="overflow-hidden flex-1">
-                      <p className={`text-sm font-bold truncate italic tracking-tight ${
+                      <p className={`text-xs font-bold truncate italic tracking-tight ${
                         item.bloqueada ? 'text-red-400' : 'text-slate-200'
                       }`}>
                         {item.url}
                       </p>
                       <div className="flex items-center gap-3 mt-1">
-                        <p className="text-[10px] text-slate-500 font-mono">
+                        <p className="text-[9px] text-slate-500 font-mono">
                           {new Date(item.timestamp).toLocaleString()}
                         </p>
-                        <span className={`text-[8px] px-2 py-0.5 rounded-full ${
+                        <span className={`text-[7px] px-2 py-0.5 rounded-full ${
                           item.bloqueada 
                             ? 'bg-red-500/20 text-red-400' 
                             : 'bg-green-500/20 text-green-400'
@@ -334,16 +431,17 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
                   </div>
                   
                   {!item.bloqueada && (
-                    <div className="flex items-center gap-2">
-                      <button 
-                        onClick={() => handleBlockDomain(item.url)}
-                        disabled={blockingUrl === item.url}
-                        className="p-2.5 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/20 rounded-xl transition-all"
-                        title="Bloquear este sitio"
-                      >
-                        {blockingUrl === item.url ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Shield size={16} />}
-                      </button>
-                    </div>
+                    <button 
+                      onClick={() => handleBlockDomain(item.url)}
+                      disabled={blockingUrl === item.url}
+                      className="p-2 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/20 rounded-lg transition-all ml-2 shrink-0"
+                      title="Bloquear este sitio"
+                    >
+                      {blockingUrl === item.url ? 
+                        <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 
+                        <Shield size={14} />
+                      }
+                    </button>
                   )}
                 </div>
               ))}
@@ -361,7 +459,7 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
             <div className="text-center mt-4">
               <button
                 onClick={() => setShowAllHistory(true)}
-                className="text-[10px] text-orange-500 hover:text-orange-400 font-black uppercase"
+                className="text-[9px] text-orange-500 hover:text-orange-400 font-black uppercase"
               >
                 + Ver {filteredHistory.length - 20} registros más...
               </button>
@@ -372,7 +470,7 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
             <div className="text-center mt-4">
               <button
                 onClick={() => setShowAllHistory(false)}
-                className="text-[10px] text-slate-500 hover:text-white font-black uppercase"
+                className="text-[9px] text-slate-500 hover:text-white font-black uppercase"
               >
                 Mostrar menos
               </button>
@@ -381,13 +479,37 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
         </div>
 
         {/* Footer */}
-        <div className="p-6 bg-slate-950 border-t border-slate-800 flex justify-between items-center">
-          <p className="text-[9px] text-slate-600 font-black uppercase tracking-[0.2em]">EFAS ServiControl v2.4</p>
-          <button onClick={generatePDF} disabled={filteredHistory.length === 0} className="flex items-center gap-2 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:bg-slate-700 text-white rounded-xl text-[10px] font-black uppercase transition-all shadow-lg shadow-orange-500/10">
-            <Download size={14} /> Reporte PDF
-          </button>
+        <div className="p-5 bg-slate-950/50 border-t border-slate-800 flex justify-between items-center">
+          <p className="text-[8px] text-slate-600 font-black uppercase tracking-[0.2em]">
+            EFAS SERVICONTROL V2.4
+          </p>
+          <div className="flex gap-3">
+            <button 
+              onClick={generatePDF} 
+              disabled={filteredHistory.length === 0} 
+              className="flex items-center gap-2 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-xl text-[9px] font-black uppercase transition-all shadow-lg shadow-orange-500/10"
+            >
+              <Download size={14} /> EXPORTAR PDF
+            </button>
+          </div>
         </div>
       </div>
+
+      <style jsx>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #f97316;
+        }
+      `}</style>
     </div>
   );
 }
