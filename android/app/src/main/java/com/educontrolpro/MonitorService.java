@@ -60,15 +60,20 @@ public class MonitorService extends AccessibilityService {
     private Map<String, Long> lastReportTime = new HashMap<>();
     private static final long MIN_REPORT_INTERVAL = 3000;
     
-    // Lista de paquetes de ajustes del sistema (SOLO los reales)
+    // ============================================================
+    // LISTA DE PAQUETES DE AJUSTES - CORREGIDA (incluye Motorola)
+    // ============================================================
     private final Set<String> settingsPackages = new HashSet<>(Arrays.asList(
         "com.android.settings",
         "com.android.settings.intelligence",
         "com.android.systemui",
-        "com.android.systemui.settings"
+        "com.android.systemui.settings",
+        "com.motorola.settings",
+        "com.motorola.setupwizard",
+        "com.motorola.android.settings"
     ));
     
-    // Apps prohibidas
+    // Apps prohibidas (INTACTO)
     private final Set<String> forbiddenPackages = new HashSet<>(Arrays.asList(
         "com.instagram.android",
         "com.facebook.katana",
@@ -115,7 +120,7 @@ public class MonitorService extends AccessibilityService {
         "com.google.android.play.games"
     ));
     
-    // Navegadores
+    // Navegadores (INTACTO)
     private final List<String> browserPackages = Arrays.asList(
         "com.android.chrome", 
         "org.mozilla.firefox", 
@@ -133,10 +138,14 @@ public class MonitorService extends AccessibilityService {
         String pkg = event.getPackageName() != null ? event.getPackageName().toString() : "";
         int eventType = event.getEventType();
         
+        // LOG DE DEPURACIÓN - Ver qué eventos están llegando
+        Log.d(TAG, "📱 Evento: type=" + eventType + ", pkg=" + pkg);
+        
         if (pkg.equals(getPackageName())) return;
         
-        // Capturar URL actual (SIEMPRE, sin bloquear)
+        // Capturar URL actual
         if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            Log.d(TAG, "🪟 WINDOW_STATE_CHANGED detectado para: " + pkg);
             capturarUrlActual(event, pkg);
         }
         
@@ -153,25 +162,33 @@ public class MonitorService extends AccessibilityService {
         }
         
         // ============================================================
-        // BLOQUEO DE AJUSTES DEL SISTEMA - SOLO cuando hay CLICK REAL
+        // BLOQUEO DE AJUSTES DEL SISTEMA
+        // Ahora detecta por paquete (no solo por click)
         // ============================================================
+        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            if (settingsPackages.contains(pkg)) {
+                Log.w(TAG, "🔒 VENTANA DE AJUSTES DETECTADA: " + pkg);
+                expulsarInmediato("ajustes_sistema");
+                return;
+            }
+        }
+        
+        // BLOQUEO POR CLICK EN CONFIGURACIÓN
         if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             String className = event.getClassName() != null ? event.getClassName().toString() : "";
-            
-            // Verificar si el clic fue en un elemento de configuración
             boolean isSettingsClick = className.contains("Settings") ||
                                       className.contains("Preference") ||
                                       className.contains("Tile");
             
             if (isSettingsClick && settingsPackages.contains(pkg)) {
-                Log.w(TAG, "🔒 CLICK EN CONFIGURACIÓN DETECTADO: " + pkg);
+                Log.w(TAG, "🔒 CLICK EN CONFIGURACIÓN: " + pkg);
                 expulsarInmediato("ajustes_sistema");
                 return;
             }
         }
         
         // ============================================================
-        // BLOQUEO DE APPS PROHIBIDAS - SOLO cuando se ABRE la app
+        // BLOQUEO DE APPS PROHIBIDAS (INTACTO)
         // ============================================================
         if (forbiddenPackages.contains(pkg) && 
             eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
@@ -181,15 +198,13 @@ public class MonitorService extends AccessibilityService {
         }
         
         // ============================================================
-        // BLOQUEO DE MENÚ DEL NAVEGADOR - SOLO cuando hay CLICK en los tres puntos
-        // EL NAVEGADOR NORMAL NUNCA SE BLOQUEA
+        // BLOQUEO DE MENÚ DEL NAVEGADOR (INTACTO)
         // ============================================================
         if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             if (browserPackages.contains(pkg)) {
                 String className = event.getClassName() != null ? event.getClassName().toString().toLowerCase() : "";
                 String contentDesc = event.getContentDescription() != null ? event.getContentDescription().toString().toLowerCase() : "";
                 
-                // Detectar clic en el botón de menú (tres puntos)
                 boolean isMenuButton = className.contains("menu") ||
                                        className.contains("more") ||
                                        className.contains("overflow") ||
@@ -198,11 +213,10 @@ public class MonitorService extends AccessibilityService {
                                        contentDesc.contains("opciones");
                 
                 if (isMenuButton) {
-                    Log.w(TAG, "🔒 CLICK EN MENÚ DEL NAVEGADOR DETECTADO - EXPULSIÓN INMEDIATA");
+                    Log.w(TAG, "🔒 CLICK EN MENÚ DEL NAVEGADOR - EXPULSIÓN");
                     expulsarInmediato("configuracion_navegador");
                     return;
                 } else {
-                    // Navegación normal: NO HACER NADA
                     Log.d(TAG, "🌐 Navegación normal - Click permitido en: " + className);
                 }
             }
@@ -210,12 +224,11 @@ public class MonitorService extends AccessibilityService {
     }
     
     /**
-     * Expulsión inmediata y agresiva
+     * Expulsión inmediata y agresiva (INTACTO)
      */
     private void expulsarInmediato(String tipo) {
         long now = System.currentTimeMillis();
         
-        // Control anti-spam
         if (now - lastBlockTime < MIN_BLOCK_INTERVAL) {
             Log.d(TAG, "⏱️ Expulsión ignorada por spam: " + tipo);
             return;
@@ -224,10 +237,8 @@ public class MonitorService extends AccessibilityService {
         
         Log.w(TAG, "🚫 EXPULSIÓN INMEDIATA: " + tipo);
         
-        // Reportar evento
         reportarEvento(tipo);
         
-        // Expulsión: HOME + BACK
         performGlobalAction(GLOBAL_ACTION_HOME);
         performGlobalAction(GLOBAL_ACTION_BACK);
         
@@ -242,6 +253,8 @@ public class MonitorService extends AccessibilityService {
     private void capturarUrlActual(AccessibilityEvent event, String packageName) {
         if (!browserPackages.contains(packageName)) return;
         
+        Log.d(TAG, "🌐 Intentando capturar URL en: " + packageName);
+        
         try {
             AccessibilityNodeInfo source = event.getSource();
             if (source != null) {
@@ -254,6 +267,8 @@ public class MonitorService extends AccessibilityService {
                     actualizarUrlEnTiempoReal(currentUrl);
                 }
                 source.recycle();
+            } else {
+                Log.d(TAG, "🌐 Source es NULL para: " + packageName);
             }
         } catch (Exception e) {
             Log.e(TAG, "Error capturando URL: " + e.getMessage());
@@ -351,7 +366,7 @@ public class MonitorService extends AccessibilityService {
         
         if (rtdb != null && deviceId != null) {
             rtdb.child("mensajes_dispositivos").child(deviceId).child("ultimo_mensaje").child("leido").setValue(true);
-            Log.d(TAG, "✅ Mensaje marcado como leído en mensajes_dispositivos/" + deviceId + "/ultimo_mensaje");
+            Log.d(TAG, "✅ Mensaje marcado como leído");
         }
         
         reportarEvento("mensaje_director");
@@ -577,6 +592,8 @@ public class MonitorService extends AccessibilityService {
                          AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
             info.notificationTimeout = 50;
             setServiceInfo(info);
+            
+            Log.d(TAG, "✅ Servicio configurado - EventTypes: " + info.eventTypes);
             
         } catch (Exception e) {
             Log.e(TAG, "Error init: " + e.getMessage());

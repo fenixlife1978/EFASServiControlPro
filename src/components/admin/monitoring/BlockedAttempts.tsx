@@ -75,10 +75,9 @@ export function BlockedAttempts() {
     fetchDevices();
   }, [institutionId]);
 
-  // 2. Escuchar alertas
+  // 2. Escuchar alertas - CORREGIDO: Ahora muestra TODOS los bloqueos
   useEffect(() => {
     if (!institutionId) return;
-    if (validDevicesMap.size === 0 && !loading) return;
 
     const alertasRef = ref(rtdb, 'alertas_seguridad');
     const recentQuery = query(alertasRef, limitToLast(200));
@@ -104,21 +103,22 @@ export function BlockedAttempts() {
           'app_restringida', 'configuracion_navegador', 'ajustes_sistema', 'modo_blindado'
         ].includes(value.tipo);
         
-        if (isBlockAlert && deviceInfo) {
+        // CORRECCIÓN: Mostrar bloqueos incluso si el dispositivo no está registrado
+        if (isBlockAlert) {
           list.push({
             id: key,
             tipo: value.tipo || 'desconocido',
             detalle: value.detalle || '',
             timestamp: value.timestamp || 0,
             deviceId: deviceId,
-            dispositivoNombre: deviceInfo.alumnoNombre
+            dispositivoNombre: deviceInfo?.alumnoNombre || deviceInfo?.nombre || deviceId || 'Desconocido'
           });
         }
       });
       
       const sorted = list.sort((a, b) => b.timestamp - a.timestamp);
       setAllAttempts(sorted);
-      setAttempts(sorted.slice(0, 5)); // Solo últimas 5
+      setAttempts(sorted.slice(0, 5));
       setLoading(false);
     });
 
