@@ -31,16 +31,13 @@ export function StudentsTable({ institutionId, classroomId }: StudentsTableProps
     const [loading, setLoading] = useState(true);
     const [viewingLogsFor, setViewingLogsFor] = useState<{ deviceId: string; alumnoNombre: string } | null>(null);
     
-    // Estado para conteo de infracciones por dispositivo
     const [infraccionesRealtime, setInfraccionesRealtime] = useState<Record<string, number>>({});
     const [allIncidents, setAllIncidents] = useState<any[]>([]);
     
-    // Filtros
     const [timeRange, setTimeRange] = useState<string>('24h');
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage] = useState(10);
     
-    // Helper para obtener timestamp según rango (solo 24h y 72h)
     const getTimeRangeTimestamp = (range: string): number => {
         const now = Date.now();
         switch(range) {
@@ -50,7 +47,6 @@ export function StudentsTable({ institutionId, classroomId }: StudentsTableProps
         }
     };
     
-    // Helper para obtener etiqueta del rango
     const getTimeRangeLabel = (range: string): string => {
         switch(range) {
             case '24h': return 'Últimas 24 horas';
@@ -91,7 +87,7 @@ export function StudentsTable({ institutionId, classroomId }: StudentsTableProps
         return () => unsubscribe();
     }, [institutionId, classroomId]);
 
-    // 2. ESCUCHA DE INFRACCIONES DESDE alertas_seguridad (RTDB) con filtro de tiempo
+    // 2. ESCUCHA DE INFRACCIONES
     useEffect(() => {
         if (students.length === 0) return;
 
@@ -136,11 +132,10 @@ export function StudentsTable({ institutionId, classroomId }: StudentsTableProps
         return () => off(alertasRef);
     }, [students]);
 
-    // 3. Filtrar estudiantes por rango de tiempo (solo los que tienen infracciones en el período)
+    // 3. Filtrar estudiantes por rango de tiempo
     const filteredStudents = useMemo(() => {
         const timeLimit = getTimeRangeTimestamp(timeRange);
         
-        // Obtener deviceIds que tienen infracciones dentro del período
         const recentIncidentDevices = new Set<string>();
         allIncidents.forEach(incident => {
             if (incident.timestamp >= timeLimit) {
@@ -148,7 +143,6 @@ export function StudentsTable({ institutionId, classroomId }: StudentsTableProps
             }
         });
         
-        // Para cada estudiante, calcular su conteo de infracciones en el período
         return students.map(student => {
             let countInPeriod = 0;
             allIncidents.forEach(incident => {
@@ -173,7 +167,6 @@ export function StudentsTable({ institutionId, classroomId }: StudentsTableProps
         return filteredStudents.slice(start, end);
     }, [filteredStudents, currentPage, itemsPerPage]);
 
-    // Resetear página cuando cambia el filtro
     useEffect(() => {
         setCurrentPage(1);
     }, [timeRange]);
@@ -212,12 +205,13 @@ export function StudentsTable({ institutionId, classroomId }: StudentsTableProps
                     </div>
                     
                     <div className="flex items-center gap-2">
-                        <div className="flex items-center gap-2 bg-slate-900/50 rounded-xl px-3 py-1.5 border border-slate-700">
-                            <Clock size={12} className="text-orange-500" />
+                        {/* Selector de rango de tiempo - CORREGIDO */}
+                        <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-1.5 border border-slate-300 shadow-sm">
+                            <Clock size={12} className="text-slate-600" />
                             <select
                                 value={timeRange}
                                 onChange={(e) => setTimeRange(e.target.value)}
-                                className="bg-transparent text-[9px] font-black text-white uppercase tracking-wider focus:outline-none cursor-pointer"
+                                className="bg-transparent text-[9px] font-black text-slate-800 uppercase tracking-wider focus:outline-none cursor-pointer"
                             >
                                 <option value="24h">ÚLTIMAS 24 HORAS</option>
                                 <option value="72h">ÚLTIMAS 72 HORAS</option>

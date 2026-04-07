@@ -251,7 +251,6 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
 
   // 7. Limpiar pantalla (solo visual, no elimina datos)
   const limpiarPantalla = () => {
-    // No hace nada porque ahora los datos vienen de filteredAlertas
     toast.success("🧹 Filtros aplicados");
   };
 
@@ -368,13 +367,13 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
         </div>
         
         <div className="flex gap-2 flex-wrap">
-          {/* Selector de dispositivo */}
-          <div className="flex items-center gap-2 bg-slate-900/50 rounded-xl px-3 py-1.5 border border-slate-700">
-            <Smartphone size={12} className="text-orange-500" />
+          {/* Selector de dispositivo - CORREGIDO */}
+          <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-1.5 border border-slate-300 shadow-sm">
+            <Smartphone size={12} className="text-slate-600" />
             <select
               value={selectedDevice}
               onChange={(e) => setSelectedDevice(e.target.value)}
-              className="bg-transparent text-[9px] font-black text-white uppercase tracking-wider focus:outline-none cursor-pointer max-w-[180px]"
+              className="bg-transparent text-[9px] font-black text-slate-800 uppercase tracking-wider focus:outline-none cursor-pointer max-w-[180px]"
             >
               {availableDevices.map(device => (
                 <option key={device.id} value={device.id}>
@@ -384,13 +383,13 @@ export function AlertFeed({ aulaId, institutoId }: AlertFeedProps) {
             </select>
           </div>
 
-          {/* Selector de rango de tiempo */}
-          <div className="flex items-center gap-2 bg-slate-900/50 rounded-xl px-3 py-1.5 border border-slate-700">
-            <Clock size={12} className="text-orange-500" />
+          {/* Selector de rango de tiempo - CORREGIDO */}
+          <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-1.5 border border-slate-300 shadow-sm">
+            <Clock size={12} className="text-slate-600" />
             <select
               value={timeRange}
               onChange={(e) => setTimeRange(e.target.value)}
-              className="bg-transparent text-[9px] font-black text-white uppercase tracking-wider focus:outline-none cursor-pointer"
+              className="bg-transparent text-[9px] font-black text-slate-800 uppercase tracking-wider focus:outline-none cursor-pointer"
             >
               <option value="24h">ÚLTIMAS 24 HORAS</option>
               <option value="72h">ÚLTIMAS 72 HORAS</option>

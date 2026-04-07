@@ -58,7 +58,6 @@ export function IncidentsTable({ institutionId }: { institutionId: string }) {
     
     const fetchDevices = async () => {
       try {
-        // Cargar desde RTDB primero
         const dispositivosRef = ref(rtdb, 'dispositivos');
         const snapshot = await get(dispositivosRef);
         const rtdbData = snapshot.val();
@@ -134,12 +133,10 @@ export function IncidentsTable({ institutionId }: { institutionId: string }) {
   const filteredIncidents = useMemo(() => {
     let result = [...allIncidents];
     
-    // Filtrar por dispositivo
     if (selectedDevice !== 'all') {
       result = result.filter(inc => inc.deviceId === selectedDevice);
     }
     
-    // Filtrar por rango de tiempo (solo 24h o 72h)
     const timeLimit = getTimeRangeTimestamp(timeRange);
     result = result.filter(inc => inc.timestamp >= timeLimit);
     
@@ -154,7 +151,6 @@ export function IncidentsTable({ institutionId }: { institutionId: string }) {
     return filteredIncidents.slice(start, end);
   }, [filteredIncidents, currentPage, itemsPerPage]);
 
-  // Resetear página cuando cambia el filtro
   useEffect(() => {
     setCurrentPage(1);
   }, [selectedDevice, timeRange]);
@@ -212,7 +208,6 @@ export function IncidentsTable({ institutionId }: { institutionId: string }) {
     }
   };
 
-  // 7. Función para obtener el ícono según el tipo de alerta
   const getTipoIcon = (tipo: string) => {
     switch(tipo) {
       case 'busqueda_prohibida':
@@ -227,7 +222,6 @@ export function IncidentsTable({ institutionId }: { institutionId: string }) {
     }
   };
 
-  // 8. Función para obtener el label del tipo de alerta
   const getTipoLabel = (tipo: string) => {
     switch(tipo) {
       case 'busqueda_prohibida':
@@ -280,13 +274,13 @@ export function IncidentsTable({ institutionId }: { institutionId: string }) {
               </p>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
-              {/* Selector de dispositivo */}
-              <div className="flex items-center gap-2 bg-slate-900/50 rounded-xl px-3 py-2 border border-slate-700">
-                <Smartphone size={12} className="text-orange-500" />
+              {/* Selector de dispositivo - CORREGIDO */}
+              <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-2 border border-slate-300 shadow-sm">
+                <Smartphone size={12} className="text-slate-600" />
                 <select
                   value={selectedDevice}
                   onChange={(e) => setSelectedDevice(e.target.value)}
-                  className="bg-transparent text-[9px] font-black text-white uppercase tracking-wider focus:outline-none cursor-pointer max-w-[180px]"
+                  className="bg-transparent text-[9px] font-black text-slate-800 uppercase tracking-wider focus:outline-none cursor-pointer max-w-[180px]"
                 >
                   {availableDevices.map(device => (
                     <option key={device.id} value={device.id}>
@@ -296,13 +290,13 @@ export function IncidentsTable({ institutionId }: { institutionId: string }) {
                 </select>
               </div>
 
-              {/* Selector de rango de tiempo */}
-              <div className="flex items-center gap-2 bg-slate-900/50 rounded-xl px-3 py-2 border border-slate-700">
-                <Clock size={12} className="text-orange-500" />
+              {/* Selector de rango de tiempo - CORREGIDO */}
+              <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-2 border border-slate-300 shadow-sm">
+                <Clock size={12} className="text-slate-600" />
                 <select
                   value={timeRange}
                   onChange={(e) => setTimeRange(e.target.value)}
-                  className="bg-transparent text-[9px] font-black text-white uppercase tracking-wider focus:outline-none cursor-pointer"
+                  className="bg-transparent text-[9px] font-black text-slate-800 uppercase tracking-wider focus:outline-none cursor-pointer"
                 >
                   <option value="24h">ÚLTIMAS 24 HORAS</option>
                   <option value="72h">ÚLTIMAS 72 HORAS</option>
@@ -423,7 +417,6 @@ export function IncidentsTable({ institutionId }: { institutionId: string }) {
          </p>
       </div>
 
-      {/* Estilos de Scrollbar Personalizados */}
       <style jsx>{`
         .custom-scrollbar::-webkit-scrollbar {
           width: 4px;

@@ -113,7 +113,6 @@ export function SecurityLogsTable({ institutionId }: { institutionId: string }) 
     const alertasRef = ref(rtdb, 'alertas_seguridad');
     const timeLimit = getTimeRangeTimestamp(timeRange);
     
-    // Traer eventos desde el timestamp límite (últimas 24h o 72h)
     const alertsQuery = rtdbQuery(alertasRef, orderByChild('timestamp'), startAt(timeLimit));
     console.log(`📅 Consultando alertas ${getTimeRangeLabel(timeRange)} desde: ${new Date(timeLimit).toLocaleString()}`);
     
@@ -183,7 +182,6 @@ export function SecurityLogsTable({ institutionId }: { institutionId: string }) 
     return filteredLogs.slice(start, end);
   }, [filteredLogs, currentPage, itemsPerPage]);
 
-  // Resetear página cuando cambia el filtro
   useEffect(() => {
     setCurrentPage(1);
   }, [selectedDevice, timeRange]);
@@ -312,12 +310,12 @@ export function SecurityLogsTable({ institutionId }: { institutionId: string }) 
         
         <div className="flex items-center gap-3 flex-wrap">
           {/* FILTRO POR RANGO DE TIEMPO */}
-          <div className="flex items-center gap-2 bg-slate-900/50 rounded-xl px-3 py-1.5 border border-slate-700">
-            <Clock size={12} className="text-orange-500" />
+          <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-1.5 border border-slate-300 shadow-sm">
+            <Clock size={12} className="text-slate-600" />
             <select
               value={timeRange}
               onChange={(e) => setTimeRange(e.target.value)}
-              className="bg-transparent text-[10px] font-black text-white uppercase tracking-wider focus:outline-none cursor-pointer"
+              className="bg-transparent text-[10px] font-black text-slate-800 uppercase tracking-wider focus:outline-none cursor-pointer"
             >
               <option value="24h">ÚLTIMAS 24 HORAS</option>
               <option value="72h">ÚLTIMAS 72 HORAS</option>
@@ -325,12 +323,12 @@ export function SecurityLogsTable({ institutionId }: { institutionId: string }) 
           </div>
 
           {/* FILTRO POR DISPOSITIVO */}
-          <div className="flex items-center gap-2 bg-slate-900/50 rounded-xl px-3 py-1.5 border border-slate-700">
-            <Filter size={12} className="text-orange-500" />
+          <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-1.5 border border-slate-300 shadow-sm">
+            <Filter size={12} className="text-slate-600" />
             <select
               value={selectedDevice}
               onChange={(e) => setSelectedDevice(e.target.value)}
-              className="bg-transparent text-[10px] font-black text-white uppercase tracking-wider focus:outline-none cursor-pointer max-w-[200px]"
+              className="bg-transparent text-[10px] font-black text-slate-800 uppercase tracking-wider focus:outline-none cursor-pointer max-w-[200px]"
             >
               {availableDevices.map(device => (
                 <option key={device.id} value={device.id}>
