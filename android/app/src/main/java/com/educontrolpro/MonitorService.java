@@ -56,6 +56,10 @@ public class MonitorService extends AccessibilityService {
     private String currentUrl = "Esperando navegación...";
     private long lastUrlUpdate = 0;
     
+    // Control de spam para reportes
+    private Map<String, Long> lastReportTime = new HashMap<>();
+    private static final long MIN_REPORT_INTERVAL = 3000; // 3 segundos entre reportes del mismo tipo
+    
     private final Set<String> settingsPackages = new HashSet<>(Arrays.asList(
         "com.android.settings",
         "com.android.systemui",
@@ -126,16 +130,6 @@ public class MonitorService extends AccessibilityService {
         "com.microsoft.emmx",
         "com.sec.android.app.sbrowser"
     );
-    
-    private final List<String> configClasses = Arrays.asList(
-        "Settings", 
-        "Preference", 
-        "SettingsActivity", 
-        "BrowserPreferences",
-        "ChromeSettings",
-        "PreferenceFragment",
-        "SettingsFragment"
-    );
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
@@ -163,7 +157,7 @@ public class MonitorService extends AccessibilityService {
             return;
         }
         
-        // 🔥 BLOQUEO DE AJUSTES DEL SISTEMA
+        // BLOQUEO DE AJUSTES DEL SISTEMA
         if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
             eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
             
@@ -188,7 +182,7 @@ public class MonitorService extends AccessibilityService {
             }
         }
         
-        // 🔥 BLOQUEO DE APPS PROHIBIDAS
+        // BLOQUEO DE APPS PROHIBIDAS
         if (forbiddenPackages.contains(pkg) && 
             (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
              eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED)) {
@@ -199,80 +193,72 @@ public class MonitorService extends AccessibilityService {
         
         // ============================================================
         // 🔒 CONFIGURACIÓN DEL NAVEGADOR - CORREGIDO
-        // Solo bloquea cuando es pantalla de ajustes REAL
-        // NO bloquea la barra de direcciones ni el teclado
+        // SOLO bloquea cuando el título de la ventana es "Configuración" o "Ajustes"
+        // NO bloquea la navegación normal, la barra de direcciones, ni el teclado
         // ============================================================
         if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            if (browserPackages.contains(pkg) && event.getClassName() != null) {
-                String className = event.getClassName().toString();
+            if (browserPackages.contains(pkg)) {
+                String windowTitle = "";
                 
-                // Clases que SÍ son configuración real (deben bloquearse)
-                boolean isRealSettings = className.equals("Settings") ||
-                                         className.equals("SettingsActivity") ||
-                                         className.equals("BrowserPreferences") ||
-                                         className.equals("ChromeSettings") ||
-                                         className.contains("PreferenceFragment") ||
-                                         (className.contains("Settings") && className.contains("Preference"));
+                // Obtener el título del evento
+                if (event.getText() != null && !event.getText().isEmpty()) {
+                    windowTitle = event.getText().toString().toLowerCase();
+                }
                 
-                // Clases que NO deben bloquearse (barra de direcciones, teclado, navegación normal)
-                boolean isAddressBar = className.contains("LocationBar") ||
-                                       className.contains("UrlBar") ||
-                                       className.contains("Omnibox") ||
-                                       className.contains("AddressBar") ||
-                                       className.contains("Toolbar") ||
-                                       className.equals("ChromeTabActivity") ||
-                                       className.equals("BrowserActivity") ||
-                                       className.contains("WebView") ||
-                                       className.contains("FindInPageBar");
+                // También verificar contentDescription
+                if (event.getContentDescription() != null) {
+                    String desc = event.getContentDescription().toString().toLowerCase();
+                    if (desc.contains("configuración") || desc.contains("ajustes") || desc.contains("settings")) {
+                        windowTitle = desc;
+                    }
+                }
                 
-                // Solo bloquear si es configuración REAL y NO es barra de direcciones
-                if (isRealSettings && !isAddressBar) {
-                    Log.w(TAG, "🔒 CONFIGURACIÓN REAL DEL NAVEGADOR: " + className);
+                // Verificar si el título indica pantalla de configuración
+                boolean isSettingsScreen = windowTitle.contains("configuración") ||
+                                           windowTitle.contains("ajustes") ||
+                                           windowTitle.contains("settings") ||
+                                           windowTitle.contains("preferences");
+                
+                if (isSettingsScreen) {
+                    Log.w(TAG, "🔒 CONFIGURACIÓN DEL NAVEGADOR DETECTADA: " + windowTitle);
                     expulsarInmediato("configuracion_navegador");
                     return;
-                } else if (isAddressBar) {
-                    Log.d(TAG, "🌐 Barra de direcciones - Permitir: " + className);
-                    // No bloquear, permitir escribir
                 } else {
-                    // Verificar también con la lista original como respaldo
-                    for (String configClass : configClasses) {
-                        if (className.contains(configClass)) {
-                            // Asegurar que no es barra de direcciones
-                            if (!className.contains("UrlBar") && !className.contains("Omnibox") && !className.contains("AddressBar")) {
-                                Log.w(TAG, "🔒 CONFIGURACIÓN NAVEGADOR: " + className);
-                                expulsarInmediato("configuracion_navegador");
-                                return;
-                            }
-                        }
-                    }
+                    Log.d(TAG, "🌐 Navegación normal - Permitir: " + windowTitle);
                 }
             }
         }
     }
     
     /**
-     * Expulsión inmediata y agresiva
+     * Expulsión inmediata y agresiva - CORREGIDO
+     * Ahora reporta SOLO una vez por evento
      */
     private void expulsarInmediato(String tipo) {
         long now = System.currentTimeMillis();
-        if (now - lastBlockTime < MIN_BLOCK_INTERVAL) return;
+        
+        // Control anti-spam - PRIMERO (evita múltiples ejecuciones)
+        if (now - lastBlockTime < MIN_BLOCK_INTERVAL) {
+            Log.d(TAG, "⏱️ Expulsión ignorada por spam: " + tipo);
+            return;
+        }
         lastBlockTime = now;
         
         Log.w(TAG, "🚫 EXPULSIÓN INMEDIATA: " + tipo);
         
-        // 1. Enviar al home
+        // 1. Reportar evento UNA SOLA VEZ (después del control anti-spam)
+        reportarEvento(tipo);
+        
+        // 2. Enviar al home (expulsión inmediata)
         performGlobalAction(GLOBAL_ACTION_HOME);
         
-        // 2. Enviar BACK varias veces para asegurar
+        // 3. Enviar BACK para asegurar
         performGlobalAction(GLOBAL_ACTION_BACK);
         
-        // 3. Pequeña pausa y otro HOME por si acaso
+        // 4. Pequeña pausa y otro HOME por si acaso
         mainHandler.postDelayed(() -> {
             performGlobalAction(GLOBAL_ACTION_HOME);
         }, 50);
-        
-        // 4. Reportar evento
-        reportarEvento(tipo);
         
         // 5. Bloquear temporalmente para no saturar
         isBlocking = true;
@@ -367,10 +353,6 @@ public class MonitorService extends AccessibilityService {
         reportarEvento(tipo);
     }
     
-    // ============================================================
-    // MÉTODO CORREGIDO: mostrarMensajeDirector
-    // Ahora marca como leído en la ruta correcta
-    // ============================================================
     private void mostrarMensajeDirector(String texto, String remitente, String idMsg, String titulo) {
         long now = System.currentTimeMillis();
         if (now - lastBlockTime < MIN_BLOCK_INTERVAL) return;
@@ -393,7 +375,6 @@ public class MonitorService extends AccessibilityService {
         }
         startActivity(intent);
         
-        // Marcar como leído en la ruta CORRECTA: mensajes_dispositivos/{deviceId}/ultimo_mensaje
         if (rtdb != null && deviceId != null) {
             rtdb.child("mensajes_dispositivos").child(deviceId).child("ultimo_mensaje").child("leido").setValue(true);
             Log.d(TAG, "✅ Mensaje marcado como leído en mensajes_dispositivos/" + deviceId + "/ultimo_mensaje");
@@ -402,8 +383,26 @@ public class MonitorService extends AccessibilityService {
         reportarEvento("mensaje_director");
     }
     
+    /**
+     * Reportar evento a Firebase - CORREGIDO
+     * Ahora controla spam para evitar múltiples reportes del mismo tipo
+     */
     private void reportarEvento(String tipo) {
         if (rtdb == null || deviceId == null) return;
+        
+        // Control de spam para reportes
+        String key = tipo + "_" + deviceId;
+        Long lastReport = lastReportTime.get(key);
+        long now = System.currentTimeMillis();
+        
+        // 3 segundos entre reportes del mismo tipo
+        if (lastReport != null && (now - lastReport) < MIN_REPORT_INTERVAL) {
+            Log.d(TAG, "📊 Reporte ignorado por spam: " + tipo);
+            return;
+        }
+        
+        lastReportTime.put(key, now);
+        
         Map<String, Object> e = new HashMap<>();
         e.put("tipo", tipo);
         e.put("timestamp", System.currentTimeMillis());
@@ -413,6 +412,8 @@ public class MonitorService extends AccessibilityService {
             e.put("url_actual", currentUrl);
         }
         rtdb.child("alertas_seguridad").push().setValue(e);
+        
+        Log.d(TAG, "📊 Reporte guardado: " + tipo);
     }
     
     private void startForegroundService() {
@@ -524,13 +525,9 @@ public class MonitorService extends AccessibilityService {
         });
     }
     
-    // ============================================================
-    // syncModes CORREGIDO - Escucha en la ruta correcta de mensajes
-    // ============================================================
     private void syncModes() {
         if (deviceId == null) return;
         
-        // Modo técnico (admin_mode)
         rtdb.child("status_dispositivos").child(deviceId).child("admin_mode_enable")
             .addValueEventListener(new ValueEventListener() {
                 @Override public void onDataChange(DataSnapshot s) {
@@ -540,7 +537,6 @@ public class MonitorService extends AccessibilityService {
                 @Override public void onCancelled(DatabaseError e) {}
             });
         
-        // Blindaje total (shield_mode)
         rtdb.child("status_dispositivos").child(deviceId).child("shield_mode_enable")
             .addValueEventListener(new ValueEventListener() {
                 @Override public void onDataChange(DataSnapshot s) {
@@ -553,10 +549,6 @@ public class MonitorService extends AccessibilityService {
                 @Override public void onCancelled(DatabaseError e) {}
             });
         
-        // ============================================================
-        // ESCUCHAR MENSAJES DEL DIRECTOR - RUTA CORREGIDA
-        // Ahora escucha en: mensajes_dispositivos/{deviceId}/ultimo_mensaje
-        // ============================================================
         rtdb.child("mensajes_dispositivos").child(deviceId).child("ultimo_mensaje")
             .addValueEventListener(new ValueEventListener() {
                 @Override
