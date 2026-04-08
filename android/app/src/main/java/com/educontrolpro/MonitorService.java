@@ -588,52 +588,91 @@ public class MonitorService extends AccessibilityService {
     }
     
     private void syncModes() {
-        if (deviceId == null) return;
+        if (rtdb == null || deviceId == null) return;
         
+        // Escucha para admin_mode_enable (Modo técnico)
         rtdb.child("status_dispositivos").child(deviceId).child("admin_mode_enable")
             .addValueEventListener(new ValueEventListener() {
-                @Override public void onDataChange(DataSnapshot s) {
-                    allowAccess = s.exists() && Boolean.TRUE.equals(s.getValue(Boolean.class));
-                    Log.d(TAG, "Modo técnico: " + (allowAccess ? "ACTIVADO" : "DESACTIVADO"));
-                }
-                @Override public void onCancelled(DatabaseError e) {}
-            });
-        
-        rtdb.child("status_dispositivos").child(deviceId).child("shield_mode_enable")
-            .addValueEventListener(new ValueEventListener() {
-                @Override public void onDataChange(DataSnapshot s) {
-                    modoBlindadoActivo = s.exists() && Boolean.TRUE.equals(s.getValue(Boolean.class));
-                    Log.d(TAG, "Blindaje total: " + (modoBlindadoActivo ? "ACTIVADO" : "DESACTIVADO"));
-                    if (modoBlindadoActivo && !allowAccess) {
-                        mostrarBloqueo("blindaje_total", "⚠️ BLOQUEO TOTAL ACTIVADO ⚠️\nEl dispositivo ha sido bloqueado por seguridad.\nContacta a tu profesor para desbloquear.");
+                @Override 
+                public void onDataChange(DataSnapshot s) {
+                    try {
+                        boolean value = false;
+                        if (s.exists()) {
+                            Object rawValue = s.getValue();
+                            if (rawValue instanceof Boolean) {
+                                value = (Boolean) rawValue;
+                            } else if (rawValue instanceof String) {
+                                value = "true".equalsIgnoreCase((String) rawValue);
+                            } else if (rawValue instanceof Long) {
+                                value = ((Long) rawValue) == 1;
+                            }
+                        }
+                        allowAccess = value;
+                        Log.d(TAG, "Modo técnico: " + (allowAccess ? "ACTIVADO" : "DESACTIVADO"));
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error en admin_mode_enable: " + e.getMessage());
                     }
                 }
-                @Override public void onCancelled(DatabaseError e) {}
+                @Override 
+                public void onCancelled(DatabaseError e) {
+                    Log.e(TAG, "Error en admin_mode_enable: " + e.getMessage());
+                }
             });
         
+        // Escucha para shield_mode_enable (Blindaje total)
+        rtdb.child("status_dispositivos").child(deviceId).child("shield_mode_enable")
+            .addValueEventListener(new ValueEventListener() {
+                @Override 
+                public void onDataChange(DataSnapshot s) {
+                    try {
+                        boolean value = false;
+                        if (s.exists()) {
+                            Object rawValue = s.getValue();
+                            if (rawValue instanceof Boolean) {
+                                value = (Boolean) rawValue;
+                            } else if (rawValue instanceof String) {
+                                value = "true".equalsIgnoreCase((String) rawValue);
+                            } else if (rawValue instanceof Long) {
+                                value = ((Long) rawValue) == 1;
+                            }
+                        }
+                        modoBlindadoActivo = value;
+                        Log.d(TAG, "Blindaje total: " + (modoBlindadoActivo ? "ACTIVADO" : "DESACTIVADO"));
+                        if (modoBlindadoActivo && !allowAccess) {
+                            mostrarBloqueo("blindaje_total", "⚠️ BLOQUEO TOTAL ACTIVADO ⚠️\nEl dispositivo ha sido bloqueado por seguridad.\nContacta a tu profesor para desbloquear.");
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error en shield_mode_enable: " + e.getMessage());
+                    }
+                }
+                @Override 
+                public void onCancelled(DatabaseError e) {
+                    Log.e(TAG, "Error en shield_mode_enable: " + e.getMessage());
+                }
+            });
+        
+        // Escucha para mensajes del director
         rtdb.child("mensajes_dispositivos").child(deviceId).child("ultimo_mensaje")
             .addValueEventListener(new ValueEventListener() {
                 @Override
                 public void onDataChange(DataSnapshot snapshot) {
-                    if (snapshot.exists()) {
-                        String texto = snapshot.child("texto").getValue(String.class);
-                        Boolean leido = snapshot.child("leido").getValue(Boolean.class);
-                        String idMsg = snapshot.child("id").getValue(String.class);
-                        String remitente = snapshot.child("remitente").getValue(String.class);
-                        String titulo = snapshot.child("titulo").getValue(String.class);
-                        
-                        Log.d(TAG, "📨 Mensaje detectado en mensajes_dispositivos:");
-                        Log.d(TAG, "   - texto: " + texto);
-                        Log.d(TAG, "   - leido: " + leido);
-                        Log.d(TAG, "   - idMsg: " + idMsg);
-                        Log.d(TAG, "   - remitente: " + remitente);
-                        Log.d(TAG, "   - titulo: " + titulo);
-                        
-                        if (texto != null && !texto.isEmpty() && (leido == null || !leido)) {
-                            mostrarMensajeDirector(texto, remitente, idMsg, titulo);
-                        } else if (texto != null && !texto.isEmpty()) {
-                            Log.d(TAG, "📨 Mensaje ya fue leído, ignorando");
+                    try {
+                        if (snapshot.exists()) {
+                            String texto = snapshot.child("texto").getValue(String.class);
+                            Boolean leido = snapshot.child("leido").getValue(Boolean.class);
+                            String idMsg = snapshot.child("id").getValue(String.class);
+                            String remitente = snapshot.child("remitente").getValue(String.class);
+                            String titulo = snapshot.child("titulo").getValue(String.class);
+                            
+                            Log.d(TAG, "📨 Mensaje detectado en mensajes_dispositivos:");
+                            Log.d(TAG, "   - texto: " + texto);
+                            
+                            if (texto != null && !texto.isEmpty() && (leido == null || !leido)) {
+                                mostrarMensajeDirector(texto, remitente, idMsg, titulo);
+                            }
                         }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error procesando mensaje: " + e.getMessage());
                     }
                 }
                 @Override
