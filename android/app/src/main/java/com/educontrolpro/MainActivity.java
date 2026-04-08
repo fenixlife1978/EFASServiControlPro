@@ -5,6 +5,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -14,6 +15,9 @@ import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Log;
 import android.widget.Toast;
+
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 
 import com.getcapacitor.BridgeActivity;
 import com.capacitorjs.plugins.device.DevicePlugin;
@@ -37,6 +41,7 @@ public class MainActivity extends BridgeActivity
     private static final int DEVICE_ADMIN_REQUEST = 101;
     private static final int WRITE_SETTINGS_REQUEST = 102;
     private static final int IGNORE_BATTERY_REQUEST = 103;
+    private static final int POST_NOTIFICATIONS_REQUEST = 104; // NUEVO
     private static final String CAPACITOR_PREFS = "CapacitorStorage";
     private static final String KEY_DEVICE_ID = "deviceId";
     private static final String KEY_INSTITUTO_ID = "InstitutoId";
@@ -79,6 +84,11 @@ public class MainActivity extends BridgeActivity
         
         // ✅ También inicializar scheduler temprano
         scheduler = Executors.newSingleThreadScheduledExecutor();
+        
+        // ============================================================
+        // NUEVO: Solicitar permiso de notificación para Android 14+ (API 34)
+        // ============================================================
+        solicitarPermisoNotificacion();
         
         mostrarToast("🚀 Iniciando EDUControlPro...");
         
@@ -126,8 +136,6 @@ public class MainActivity extends BridgeActivity
             mostrarToast("❌ Error plugins: " + e.getMessage());
         }
         
-        // Ya no verificamos permiso WRITE_SETTINGS porque no configuramos DNS automáticamente
-        // verificarPermisoWriteSettings();
         requestIgnoreBatteryOptimizations();
         cargarCacheLocal();
         
@@ -170,6 +178,26 @@ public class MainActivity extends BridgeActivity
         checkSecurityPrivileges();
         
         mostrarLog("✅ MainActivity iniciada");
+    }
+    
+    // ============================================================
+    // NUEVO MÉTODO: Solicitar permiso de notificación para Android 14+
+    // ============================================================
+    private void solicitarPermisoNotificacion() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) { // API 33+
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED) {
+                mostrarLog("📢 Solicitando permiso POST_NOTIFICATIONS para Android 14+");
+                mostrarToast("🔔 Se necesita permiso para enviar notificaciones");
+                ActivityCompat.requestPermissions(this,
+                        new String[]{android.Manifest.permission.POST_NOTIFICATIONS},
+                        POST_NOTIFICATIONS_REQUEST);
+            } else {
+                mostrarLog("✅ Permiso POST_NOTIFICATIONS ya concedido");
+            }
+        } else {
+            mostrarLog("📢 Android < 13, no requiere permiso POST_NOTIFICATIONS");
+        }
     }
     
     private void mostrarToast(String mensaje) {
@@ -259,24 +287,6 @@ public class MainActivity extends BridgeActivity
             updates.put("accesibilidad_activa", activo);
             updates.put("ultima_verificacion_accesibilidad", System.currentTimeMillis());
             rtdb.child("status_dispositivos").child(deviceId).updateChildren(updates);
-        }
-    }
-    
-    private void verificarPermisoWriteSettings() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (!Settings.System.canWrite(this)) {
-                mostrarLog("⚠️ Se necesita permiso WRITE_SETTINGS para configurar DNS");
-                mostrarToast("🔒 Se necesita permiso para modificar la configuración de DNS");
-                Intent intent = new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS);
-                intent.setData(Uri.parse("package:" + getPackageName()));
-                startActivityForResult(intent, WRITE_SETTINGS_REQUEST);
-            } else {
-                mostrarLog("✅ Permiso WRITE_SETTINGS ya concedido");
-                verificarDNSManual();
-            }
-        } else {
-            mostrarLog("✅ Android < 6.0, no requiere permiso WRITE_SETTINGS");
-            verificarDNSManual();
         }
     }
     
@@ -380,11 +390,6 @@ public class MainActivity extends BridgeActivity
         }
         
         actualizarEstadoNextDNS(isActive, currentHost);
-    }
-    
-    private void configurarDNSPrivado() {
-        // Esta función ya no se usa para configurar, solo para compatibilidad
-        verificarDNSManual();
     }
     
     private void actualizarEstadoNextDNS(boolean activo, String hostname) {
@@ -623,6 +628,21 @@ public class MainActivity extends BridgeActivity
         } catch (Exception e) {
             Log.e("EDU_Status", "Error MonitorService: " + e.getMessage());
             mostrarToast("❌ Error MonitorService: " + e.getMessage());
+        }
+    }
+    
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        
+        if (requestCode == POST_NOTIFICATIONS_REQUEST) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                mostrarLog("✅ Permiso POST_NOTIFICATIONS concedido");
+                mostrarToast("✅ Permiso de notificaciones concedido");
+            } else {
+                mostrarLog("⚠️ Permiso POST_NOTIFICATIONS denegado");
+                mostrarToast("⚠️ Permiso de notificaciones denegado. Algunas alertas no se mostrarán.");
+            }
         }
     }
     

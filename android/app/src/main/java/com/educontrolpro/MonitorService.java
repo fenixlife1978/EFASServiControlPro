@@ -135,6 +135,19 @@ public class MonitorService extends AccessibilityService {
         "com.sec.android.app.sbrowser"
     );
 
+    // ============================================================
+    // NUEVO MÉTODO onStartCommand PARA ANDROID 14+
+    // ============================================================
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        Log.d(TAG, "onStartCommand llamado - Iniciando servicio foreground");
+        
+        // Llamar startForeground INMEDIATAMENTE (requerido en Android 14+)
+        startForegroundService();
+        
+        return START_STICKY;
+    }
+
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (!isServiceActive || isBlocking) return;
@@ -454,26 +467,38 @@ public class MonitorService extends AccessibilityService {
     }
     
     private void startForegroundService() {
+        // Crear canal de notificación para Android 8+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID, "EduControlPro", NotificationManager.IMPORTANCE_LOW);
+                CHANNEL_ID, 
+                "EduControlPro", 
+                NotificationManager.IMPORTANCE_HIGH); // HIGH para Android 14+
+            channel.setDescription("Mantiene el servicio de protección activo");
+            channel.setAllowBubbles(false);
+            channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+            
             NotificationManager manager = getSystemService(NotificationManager.class);
-            if (manager != null) manager.createNotificationChannel(channel);
+            if (manager != null) {
+                manager.createNotificationChannel(channel);
+            }
         }
         
         Intent intent = new Intent(this, MainActivity.class);
         PendingIntent pi = PendingIntent.getActivity(this, 0, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         
-        Notification notif = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("EduControlPro Activo")
-                .setContentText("Protección funcionando - No cerrar esta app")
+        Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("🔒 EduControlPro Protegiendo")
+                .setContentText("Monitor activo - No cerrar esta app")
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
                 .setContentIntent(pi)
                 .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .build();
         
-        startForeground(1001, notif);
+        startForeground(1001, notification);
+        Log.d(TAG, "✅ startForeground ejecutado correctamente en Android " + Build.VERSION.SDK_INT);
     }
     
     private void startHeartbeat() {
@@ -632,7 +657,7 @@ public class MonitorService extends AccessibilityService {
                 syncModes();
                 startHeartbeat();
                 startWatchdog();
-                startForegroundService();
+                // startForegroundService() - ELIMINADA: ahora se llama en onStartCommand
                 acquireWakeLock();
                 Log.d(TAG, "✅ MonitorService conectado: " + deviceId);
             }
