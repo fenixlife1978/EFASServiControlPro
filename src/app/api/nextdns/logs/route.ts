@@ -123,10 +123,8 @@ export async function POST(request: NextRequest) {
     // LOG PARA VER QUÉ DEVUELVE LA API
     if (data.length > 0) {
       console.log('🔍 Primer log COMPLETO:', JSON.stringify(data[0], null, 2));
-      console.log('🔍 device:', data[0].device);
+      console.log('🔍 device?.name:', data[0].device?.name);
       console.log('🔍 device?.id:', data[0].device?.id);
-      console.log('🔍 device_id:', data[0].device_id);
-      console.log('🔍 device_name:', data[0].device_name);
     }
     
     const blockedLogs = data.filter((log: any) => log.status === 'blocked');
@@ -143,10 +141,10 @@ export async function POST(request: NextRequest) {
       }
       
       for (const log of blockedLogs) {
-        // PRIORIDAD: device?.id (de la API de NextDNS)
-        let deviceId = log.device?.id || log.device_id || log.device_name || 'desconocido';
+        // ✅ CORREGIDO: Priorizar device.name sobre device.id
+        let deviceId = log.device?.name || log.device?.id || log.device_name || log.device_id || 'desconocido';
         
-        console.log(`🔍 Extrayendo deviceId: log.device?.id=${log.device?.id}, log.device_id=${log.device_id}, log.device_name=${log.device_name}, resultado=${deviceId}`);
+        console.log(`📱 Dispositivo: ${deviceId} (device.name=${log.device?.name}, device.id=${log.device?.id})`);
         
         const reasons = log.reasons?.map((r: any) => r.name || r.id).join(', ') || 'NextDNS';
         const alertId = `nextdns_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
