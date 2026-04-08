@@ -60,6 +60,10 @@ public class MonitorService extends AccessibilityService {
     private Map<String, Long> lastReportTime = new HashMap<>();
     private static final long MIN_REPORT_INTERVAL = 3000;
     
+    // Control para evitar múltiples expulsiones seguidas
+    private long lastExpulsionTime = 0;
+    private static final long MIN_EXPULSION_INTERVAL = 500;
+    
     // ============================================================
     // LISTA DE PAQUETES DE AJUSTES - CORREGIDA (incluye Motorola)
     // ============================================================
@@ -143,9 +147,11 @@ public class MonitorService extends AccessibilityService {
         
         if (pkg.equals(getPackageName())) return;
         
-        // Capturar URL actual
-        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            Log.d(TAG, "🪟 WINDOW_STATE_CHANGED detectado para: " + pkg);
+        // Capturar URL actual (MEJORADO - también en TYPE_VIEW_TEXT_CHANGED)
+        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+            eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
+            eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
+            Log.d(TAG, "🌐 Capturando URL en evento: " + eventType + " para: " + pkg);
             capturarUrlActual(event, pkg);
         }
         
@@ -198,47 +204,81 @@ public class MonitorService extends AccessibilityService {
         }
         
         // ============================================================
-        // BLOQUEO DE MENÚ DEL NAVEGADOR (INTACTO)
+        // BLOQUEO DE MENÚ DEL NAVEGADOR Y CONFIGURACIÓN DEL NAVEGADOR
+        // Ahora detecta: click, enter, pulsar en opciones de configuración
         // ============================================================
-        if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
-            if (browserPackages.contains(pkg)) {
+        if (browserPackages.contains(pkg)) {
+            // Detectar por tipo de evento
+            boolean isClickOrEnter = eventType == AccessibilityEvent.TYPE_VIEW_CLICKED ||
+                                     eventType == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED ||
+                                     (eventType == AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED);
+            
+            if (isClickOrEnter) {
                 String className = event.getClassName() != null ? event.getClassName().toString().toLowerCase() : "";
                 String contentDesc = event.getContentDescription() != null ? event.getContentDescription().toString().toLowerCase() : "";
                 
-                boolean isMenuButton = className.contains("menu") ||
-                                       className.contains("more") ||
-                                       className.contains("overflow") ||
-                                       contentDesc.contains("más") ||
-                                       contentDesc.contains("menu") ||
-                                       contentDesc.contains("opciones");
+                // Palabras clave de configuración/menú del navegador
+                boolean isSettingsMenu = className.contains("menu") ||
+                                         className.contains("more") ||
+                                         className.contains("overflow") ||
+                                         className.contains("settings") ||
+                                         className.contains("preference") ||
+                                         className.contains("options") ||
+                                         className.contains("three_dot") ||
+                                         contentDesc.contains("más") ||
+                                         contentDesc.contains("menu") ||
+                                         contentDesc.contains("opciones") ||
+                                         contentDesc.contains("configuración") ||
+                                         contentDesc.contains("settings") ||
+                                         contentDesc.contains("chrome_settings");
                 
-                if (isMenuButton) {
-                    Log.w(TAG, "🔒 CLICK EN MENÚ DEL NAVEGADOR - EXPULSIÓN");
+                if (isSettingsMenu) {
+                    Log.w(TAG, "🔒 INTENTO DE ENTRAR A CONFIGURACIÓN DEL NAVEGADOR");
+                    Log.d(TAG, "   - className: " + className);
+                    Log.d(TAG, "   - contentDesc: " + contentDesc);
                     expulsarInmediato("configuracion_navegador");
                     return;
-                } else {
-                    Log.d(TAG, "🌐 Navegación normal - Click permitido en: " + className);
+                }
+            }
+            
+            // DETECCIÓN ADICIONAL: Tecla Enter en campo de URL (podría intentar acceder a config)
+            if (eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
+                AccessibilityNodeInfo source = event.getSource();
+                if (source != null) {
+                    String className = source.getClassName() != null ? source.getClassName().toString().toLowerCase() : "";
+                    if (className.contains("url") || className.contains("address") || className.contains("omnibox")) {
+                        Log.d(TAG, "🌐 Campo de URL detectado, permitiendo navegación normal");
+                    }
+                    source.recycle();
                 }
             }
         }
     }
     
     /**
-     * Expulsión inmediata y agresiva (INTACTO)
+     * Expulsión inmediata y agresiva (MEJORADA)
      */
     private void expulsarInmediato(String tipo) {
         long now = System.currentTimeMillis();
+        
+        // Evitar expulsiones muy seguidas
+        if (now - lastExpulsionTime < MIN_EXPULSION_INTERVAL) {
+            Log.d(TAG, "⏱️ Expulsión ignorada por intervalo mínimo: " + tipo);
+            return;
+        }
         
         if (now - lastBlockTime < MIN_BLOCK_INTERVAL) {
             Log.d(TAG, "⏱️ Expulsión ignorada por spam: " + tipo);
             return;
         }
         lastBlockTime = now;
+        lastExpulsionTime = now;
         
         Log.w(TAG, "🚫 EXPULSIÓN INMEDIATA: " + tipo);
         
         reportarEvento(tipo);
         
+        // Expulsión agresiva: HOME + BACK múltiples veces
         performGlobalAction(GLOBAL_ACTION_HOME);
         performGlobalAction(GLOBAL_ACTION_BACK);
         
@@ -246,8 +286,12 @@ public class MonitorService extends AccessibilityService {
             performGlobalAction(GLOBAL_ACTION_HOME);
         }, 50);
         
+        mainHandler.postDelayed(() -> {
+            performGlobalAction(GLOBAL_ACTION_HOME);
+        }, 150);
+        
         isBlocking = true;
-        mainHandler.postDelayed(() -> isBlocking = false, 300);
+        mainHandler.postDelayed(() -> isBlocking = false, 500);
     }
     
     private void capturarUrlActual(AccessibilityEvent event, String packageName) {
@@ -278,6 +322,7 @@ public class MonitorService extends AccessibilityService {
     private String extraerUrlDesdeNodo(AccessibilityNodeInfo node) {
         if (node == null) return null;
         
+        // Buscar en texto del nodo actual
         if (node.getText() != null) {
             String text = node.getText().toString();
             if (text.startsWith("http://") || text.startsWith("https://")) {
@@ -285,6 +330,15 @@ public class MonitorService extends AccessibilityService {
             }
         }
         
+        // Buscar en contenido descriptivo
+        if (node.getContentDescription() != null) {
+            String desc = node.getContentDescription().toString();
+            if (desc.startsWith("http://") || desc.startsWith("https://")) {
+                return desc;
+            }
+        }
+        
+        // Buscar en hijos recursivamente
         for (int i = 0; i < node.getChildCount(); i++) {
             AccessibilityNodeInfo child = node.getChild(i);
             if (child != null) {
@@ -300,6 +354,9 @@ public class MonitorService extends AccessibilityService {
         return null;
     }
     
+    /**
+     * GUARDAR EN historial_navegacion (CORREGIDO)
+     */
     private void guardarHistorial(String url) {
         if (rtdb == null || deviceId == null || url == null || url.isEmpty()) return;
         if (url.equals("Esperando navegación...")) return;
@@ -310,13 +367,10 @@ public class MonitorService extends AccessibilityService {
         historyEntry.put("deviceId", deviceId);
         if (institutoId != null) historyEntry.put("InstitutoId", institutoId);
         
-        rtdb.child("historial").child(deviceId).push().setValue(historyEntry);
+        // Guardar en historial_navegacion (NO en historial)
+        rtdb.child("historial_navegacion").child(deviceId).push().setValue(historyEntry);
         
-        if (institutoId != null) {
-            rtdb.child("historial_instituciones").child(institutoId).child(deviceId).push().setValue(historyEntry);
-        }
-        
-        Log.d(TAG, "📝 Historial guardado: " + url);
+        Log.d(TAG, "📝 Historial guardado en historial_navegacion: " + url);
     }
     
     private void actualizarUrlEnTiempoReal(String url) {
@@ -586,7 +640,10 @@ public class MonitorService extends AccessibilityService {
             AccessibilityServiceInfo info = new AccessibilityServiceInfo();
             info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED | 
                               AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED |
-                              AccessibilityEvent.TYPE_VIEW_CLICKED;
+                              AccessibilityEvent.TYPE_VIEW_CLICKED |
+                              AccessibilityEvent.TYPE_VIEW_LONG_CLICKED |
+                              AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED |
+                              AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED;
             info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
             info.flags = AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS |
                          AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;

@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { db, rtdb } from '@/firebase/config';
-import { doc, getDoc, collection, query, where, onSnapshot } from 'firebase/firestore';
+import { db, rtdb, auth } from '@/firebase/config';
+import { doc, getDoc, collection, query, where, onSnapshot, getDocs } from 'firebase/firestore';
 import { ref, onValue, off, update } from 'firebase/database';
 import { 
   ChevronLeft, Building2, User, Globe, History, ShieldCheck, 
@@ -36,6 +36,7 @@ export default function SedeMonitorClient({ institutoId }: SedeMonitorClientProp
   const { userRole, loadingPermissions } = useInstitution();
   const router = useRouter();
   const [nombreSede, setNombreSede] = useState('Cargando...');
+  const [realInstitutionId, setRealInstitutionId] = useState<string | null>(null);
   const [personal, setPersonal] = useState<UserDevice[]>([]);
   const [rtStatus, setRtStatus] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
@@ -44,25 +45,90 @@ export default function SedeMonitorClient({ institutoId }: SedeMonitorClientProp
   const [historyModal, setHistoryModal] = useState({ isOpen: false, deviceId: '', nombre: '' });
   const [messageModal, setMessageModal] = useState({ isOpen: false, deviceId: '', nombre: '' });
 
+  // ============================================
+  // VERIFICACIÓN DE PERMISOS - Director Supervisor tiene ACCESO TOTAL
+  // ============================================
   useEffect(() => {
-    if (!loadingPermissions && userRole !== 'supervisor' && userRole !== 'director-supervisor' && userRole !== 'super-admin') {
-      router.push('/dashboard/unauthorized');
+    if (!loadingPermissions) {
+      // Director-Supervisor tiene privilegios de SUPER ADMIN - sin restricciones
+      const hasAccess = userRole === 'super-admin' || 
+                       userRole === 'director-supervisor' || 
+                       userRole === 'supervisor';
+      
+      console.log('Verificando permisos en SedeMonitorClient:', {
+        userRole,
+        hasAccess,
+        institutoId
+      });
+      
+      if (!hasAccess) {
+        toast.error('No tienes permisos para acceder a esta sección');
+        router.push('/dashboard/unauthorized');
+      }
     }
-  }, [userRole, loadingPermissions, router]);
+  }, [userRole, loadingPermissions, router, institutoId]);
 
-  useEffect(() => {
-    if (!institutoId) return;
-    getDoc(doc(db, "institutions", institutoId)).then(snap => {
-      if (snap.exists()) setNombreSede(snap.data().nombre);
-    });
-  }, [institutoId]);
-
+  // Buscar la institución por InstitutoId o por ID real
   useEffect(() => {
     if (!institutoId) return;
     
+    const findInstitution = async () => {
+      try {
+        console.log('Buscando institución con ID:', institutoId);
+        
+        // Primero, intentar buscar por ID real (Firestore ID)
+        const docRef = doc(db, "institutions", institutoId);
+        const docSnap = await getDoc(docRef);
+        
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setNombreSede(data.nombre || data.InstitutoId || 'Sede');
+          setRealInstitutionId(institutoId);
+          console.log('Institución encontrada por ID real:', realInstitutionId);
+          return;
+        }
+        
+        // Si no se encontró por ID real, buscar por campo InstitutoId
+        const q = query(collection(db, "institutions"), where("InstitutoId", "==", institutoId));
+        const querySnapshot = await getDocs(q);
+        
+        if (!querySnapshot.empty) {
+          const institutionDoc = querySnapshot.docs[0];
+          const data = institutionDoc.data();
+          setNombreSede(data.nombre || data.InstitutoId || 'Sede');
+          setRealInstitutionId(institutionDoc.id);
+          console.log('Institución encontrada por campo InstitutoId:', {
+            institutoId,
+            realId: institutionDoc.id
+          });
+          return;
+        }
+        
+        // No se encontró la institución
+        console.error('Institución no encontrada:', institutoId);
+        setNombreSede('Sede no encontrada');
+        toast.error('No se encontró la institución');
+        setTimeout(() => router.push('/dashboard'), 2000);
+        
+      } catch (error) {
+        console.error('Error al buscar institución:', error);
+        setNombreSede('Error al cargar');
+        toast.error('Error al cargar la información de la sede');
+      }
+    };
+    
+    findInstitution();
+  }, [institutoId, router]);
+
+  // Cargar personal usando el ID real de Firestore
+  useEffect(() => {
+    if (!realInstitutionId) return;
+    
+    console.log('Cargando personal para institución:', realInstitutionId);
+    
     const q = query(
       collection(db, "usuarios"), 
-      where("InstitutoId", "==", institutoId),
+      where("InstitutoId", "==", realInstitutionId),
       where("role", "in", ["director", "profesor"])
     );
 
@@ -73,11 +139,13 @@ export default function SedeMonitorClient({ institutoId }: SedeMonitorClientProp
       })) as UserDevice[];
       setPersonal(list);
       setLoading(false);
+      console.log('Personal cargado:', list.length);
     });
 
     return () => unsub();
-  }, [institutoId]);
+  }, [realInstitutionId]);
 
+  // Cargar estado en tiempo real de dispositivos
   useEffect(() => {
     const statusRef = ref(rtdb, 'status_dispositivos');
     const unsubscribe = onValue(statusRef, (snapshot) => {
@@ -113,6 +181,7 @@ export default function SedeMonitorClient({ institutoId }: SedeMonitorClientProp
       await update(ref(rtdb), updates);
       toast.success(nuevoEstado ? "🛡️ Dispositivo BLOQUEADO" : "🔓 Dispositivo LIBERADO");
     } catch (e) {
+      console.error('Error al bloquear dispositivo:', e);
       toast.error("Error al enviar comando");
     }
   };
@@ -122,7 +191,13 @@ export default function SedeMonitorClient({ institutoId }: SedeMonitorClientProp
     return (Date.now() - lastSeen) < 45000;
   };
 
-  if (loadingPermissions) return null;
+  if (loadingPermissions) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#0a0c10]">
+        <Loader2 className="animate-spin text-orange-500 w-10 h-10" />
+      </div>
+    );
+  }
 
   return (
     <div className="p-8 space-y-10 animate-in fade-in duration-700">
@@ -271,7 +346,7 @@ export default function SedeMonitorClient({ institutoId }: SedeMonitorClientProp
         onClose={() => setHistoryModal({ ...historyModal, isOpen: false })}
         deviceId={historyModal.deviceId}
         alumnoNombre={historyModal.nombre}
-        institutoId={institutoId}
+        institutoId={realInstitutionId || institutoId}
       />
 
       {messageModal.isOpen && (

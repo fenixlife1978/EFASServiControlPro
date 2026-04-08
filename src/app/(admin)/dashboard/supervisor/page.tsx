@@ -24,11 +24,15 @@ export default function SupervisorPanel() {
     }
   }, [userRole, loadingPermissions, router]);
 
-  // 1. Cargar Instituciones
+  // 1. Cargar Instituciones - Ordenar por InstitutoId
   useEffect(() => {
-    const q = query(collection(db, "institutions"), orderBy("nombre", "asc"));
+    const q = query(collection(db, "institutions"), orderBy("InstitutoId", "asc"));
     const unsub = onSnapshot(q, (snapshot) => {
-      setInstitutions(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+      const institutionsData = snapshot.docs.map(d => ({ 
+        id: d.id,  // ID real de Firestore
+        ...d.data() 
+      }));
+      setInstitutions(institutionsData);
       setLoading(false);
     });
     return () => unsub();
@@ -62,8 +66,8 @@ export default function SupervisorPanel() {
   }, []);
 
   const filtered = institutions.filter(inst => 
-    inst.nombre?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    inst.id?.toLowerCase().includes(searchTerm.toLowerCase())
+    inst.InstitutoId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    inst.nombre?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   if (loadingPermissions) {
@@ -111,11 +115,11 @@ export default function SupervisorPanel() {
           </div>
         ) : (
           filtered.map((inst) => {
-            const stats = deviceStats[inst.id] || { total: 0, online: 0 };
+            const stats = deviceStats[inst.InstitutoId] || { total: 0, online: 0 };
             return (
               <Link 
                 key={inst.id} 
-                href={`/dashboard/supervisor/${inst.id}`}
+                href={`/dashboard/supervisor/${inst.InstitutoId}`}  // ← Usamos InstitutoId para la navegación
                 className="group bg-[#0f1117] border border-slate-800 p-8 rounded-[3rem] hover:border-orange-500/50 transition-all shadow-2xl relative overflow-hidden"
               >
                 <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
@@ -133,9 +137,11 @@ export default function SupervisorPanel() {
                 </div>
 
                 <h3 className="text-2xl font-black italic uppercase text-white mb-2 tracking-tighter truncate leading-none">
-                  {inst.nombre}
+                  {inst.InstitutoId || inst.nombre || 'Sede sin nombre'}  {/* Muestra P1-001 */}
                 </h3>
-                <p className="text-[9px] font-bold text-orange-500 uppercase tracking-widest mb-8">ID: {inst.id}</p>
+                <p className="text-[9px] font-bold text-orange-500 uppercase tracking-widest mb-8">
+                  ID: {inst.InstitutoId}
+                </p>
 
                 <div className="grid grid-cols-2 gap-4 pt-6 border-t border-white/5">
                   <div>

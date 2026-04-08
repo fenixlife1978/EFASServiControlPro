@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { db, rtdb, auth } from '@/firebase/config';
 import { collection, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { ref, onValue, set, serverTimestamp as rtdbTimestamp, push, get, off } from 'firebase/database';
-import { X, Globe, Clock, ExternalLink, ShieldAlert, Download, Calendar, Search, Shield, AlertTriangle, CheckCircle, RefreshCw } from 'lucide-react';
+import { X, Globe, Clock, ExternalLink, ShieldAlert, Download, Calendar, Search, Shield, AlertTriangle, CheckCircle, RefreshCw, Trash2, Eye } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { getAuth } from 'firebase/auth';
@@ -15,6 +15,7 @@ interface WebHistory {
   timestamp: number;
   bloqueada: boolean;
   tipo?: string;
+  fuente?: 'historial' | 'nextdns';
 }
 
 interface SecurityAlert {
@@ -41,15 +42,62 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
   const [error, setError] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [blockingUrl, setBlockingUrl] = useState<string | null>(null);
-  const [showAllHistory, setShowAllHistory] = useState(false);
+  const [modoVista, setModoVista] = useState<'ultimas10' | 'historialDia' | 'todas'>('ultimas10');
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  const [limpiando, setLimpiando] = useState(false);
   
   const [tempFechaInicio, setTempFechaInicio] = useState<string>('');
   const [tempFechaFin, setTempFechaFin] = useState<string>('');
   const [fechaInicio, setFechaInicio] = useState<string>('');
   const [fechaFin, setFechaFin] = useState<string>('');
 
-  // 1. Escuchar historial de navegación EN TIEMPO REAL desde RTDB
+  const ultimaUrlGuardada = useRef<string>('');
+
+  // Extraer URL del detalle de NextDNS
+  const extraerUrl = (detalle: string): string => {
+    const match = detalle?.match(/bloqueó: (\S+)/);
+    return match ? match[1] : 'desconocido';
+  };
+
+  // FUNCIÓN PARA GUARDAR URL EN HISTORIAL (evita duplicados)
+  const guardarEnHistorial = useCallback(async (url: string) => {
+    if (!deviceId || !url || url === 'Sin actividad' || url === 'null') return;
+    if (url === ultimaUrlGuardada.current) return;
+    
+    try {
+      const historialRef = ref(rtdb, `historial_navegacion/${deviceId}`);
+      const nuevaEntry = {
+        url: url,
+        timestamp: Date.now(),
+        bloqueada: false,
+        tipo: 'PERMITIDA'
+      };
+      
+      await push(historialRef, nuevaEntry);
+      ultimaUrlGuardada.current = url;
+      console.log(`✅ Historial guardado: ${url}`);
+    } catch (err) {
+      console.error('Error guardando historial:', err);
+    }
+  }, [deviceId]);
+
+  // 1. Escuchar URL actual en status_dispositivos y guardarla automáticamente
+  useEffect(() => {
+    if (!isOpen || !deviceId) return;
+
+    const statusRef = ref(rtdb, `status_dispositivos/${deviceId}/url_actual`);
+    
+    const unsubscribe = onValue(statusRef, (snapshot) => {
+      const urlActual = snapshot.val();
+      if (urlActual && urlActual !== 'Sin actividad' && urlActual !== 'null') {
+        guardarEnHistorial(urlActual);
+      }
+    });
+
+    return () => off(statusRef);
+  }, [isOpen, deviceId, guardarEnHistorial]);
+
+  // 2. Escuchar historial de navegación desde RTDB
   useEffect(() => {
     if (!isOpen || !deviceId) return;
     setLoading(true);
@@ -67,7 +115,8 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
             url: value.url || '',
             timestamp: value.timestamp || 0,
             bloqueada: value.bloqueada === true,
-            tipo: value.bloqueada ? 'BLOQUEADA' : 'PERMITIDA'
+            tipo: value.bloqueada ? 'BLOQUEADA' : 'PERMITIDA',
+            fuente: 'historial' as const
           }))
           .filter(item => item.url && !item.url.includes('busca en google') && !item.url.includes('chrome://'))
           .sort((a, b) => b.timestamp - a.timestamp);
@@ -89,7 +138,7 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
     };
   }, [isOpen, deviceId]);
 
-  // 2. Escuchar alertas de seguridad EN TIEMPO REAL
+  // 3. Escuchar alertas de seguridad (NextDNS)
   useEffect(() => {
     if (!isOpen || !deviceId) return;
 
@@ -111,8 +160,22 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
           .sort((a, b) => b.timestamp - a.timestamp);
         
         setAlertas(alertsList);
-      } else {
-        setAlertas([]);
+        
+        // También agregar alertas como historial visual
+        const nextDNSHistory: WebHistory[] = alertsList.map(alert => ({
+          id: alert.id,
+          url: extraerUrl(alert.detalle),
+          timestamp: alert.timestamp,
+          bloqueada: true,
+          tipo: 'BLOQUEADA',
+          fuente: 'nextdns' as const
+        }));
+        
+        setHistory(prev => {
+          const combinadas = [...prev, ...nextDNSHistory];
+          const unique = combinadas.filter((v, i, a) => a.findIndex(t => t.id === v.id) === i);
+          return unique.sort((a, b) => b.timestamp - a.timestamp);
+        });
       }
     }, (err) => {
       console.error("Error cargando alertas:", err);
@@ -123,10 +186,18 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
     };
   }, [isOpen, deviceId]);
 
+  // Limpiar vista local
+  const limpiarVista = () => {
+    setLimpiando(true);
+    setHistory([]);
+    setTimeout(() => {
+      setLimpiando(false);
+    }, 1000);
+  };
+
   // Refrescar manualmente
   const handleRefresh = () => {
     setRefreshing(true);
-    // Forzar actualización cerrando y reabriendo la escucha
     const historialRef = ref(rtdb, `historial_navegacion/${deviceId}`);
     const alertasRef = ref(rtdb, `alertas_seguridad`);
     
@@ -141,9 +212,11 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
     });
   };
 
-  // Filtrar por fechas
+  // Filtrar por fechas y modo vista
   const filteredHistory = useMemo(() => {
     let result = history;
+    
+    // Filtro por fechas
     if (fechaInicio) {
       const inicio = new Date(fechaInicio);
       inicio.setHours(0, 0, 0, 0);
@@ -154,11 +227,18 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
       fin.setHours(23, 59, 59, 999);
       result = result.filter(item => item.timestamp <= fin.getTime());
     }
+    
+    // Filtro por modo vista
+    if (modoVista === 'ultimas10') {
+      result = result.slice(0, 10);
+    } else if (modoVista === 'historialDia') {
+      const hoy = new Date();
+      hoy.setHours(0, 0, 0, 0);
+      result = result.filter(item => item.timestamp >= hoy.getTime());
+    }
+    
     return result;
-  }, [history, fechaInicio, fechaFin]);
-
-  // Mostrar solo últimas 20 o todas
-  const displayHistory = showAllHistory ? filteredHistory : filteredHistory.slice(0, 20);
+  }, [history, fechaInicio, fechaFin, modoVista]);
 
   // Bloquear dominio
   const handleBlockDomain = async (rawUrl: string) => {
@@ -173,8 +253,6 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
         setBlockingUrl(null);
         return;
       }
-      
-      console.log("🔒 Bloqueando dominio como:", currentUser.email);
       
       let domain = "";
       try {
@@ -196,8 +274,6 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
           instId = "P1-001";
         }
       }
-      
-      console.log("📚 InstitutoId para bloqueo:", instId);
       
       const rtdbKey = domain.replace(/\./g, '_');
       const dominioRef = ref(rtdb, `config/instituciones/${instId}/blacklist/${rtdbKey}`);
@@ -274,66 +350,100 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
       }
     });
 
-    const alertCount = alertas.length;
-    const blockCount = history.filter(h => h.bloqueada).length;
+    const blockCount = filteredHistory.filter(h => h.bloqueada).length;
     
-    docPdf.text(`Resumen: ${blockCount} URLs bloqueadas, ${history.length} URLs totales, ${alertCount} alertas de seguridad`, 14, finalY + 10);
+    docPdf.text(`Resumen: ${blockCount} URLs bloqueadas, ${filteredHistory.length} URLs totales`, 14, finalY + 10);
     
     docPdf.save(`Historial_${alumnoNombre}_${new Date().toISOString().slice(0,10)}.pdf`);
   };
 
   if (!isOpen) return null;
 
-  const totalBloqueadas = history.filter(h => h.bloqueada).length;
-  const totalPermitidas = history.filter(h => !h.bloqueada).length;
+  const totalBloqueadas = filteredHistory.filter(h => h.bloqueada).length;
+  const totalPermitidas = filteredHistory.filter(h => !h.bloqueada).length;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
       <div className="bg-[#0f1117] border border-slate-800 w-full max-w-4xl rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         
         {/* Header */}
-        <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-gradient-to-r from-orange-500/10 to-transparent">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center">
-              <Globe className="text-orange-500 w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="text-white font-black italic uppercase tracking-tighter text-xl">
-                Historial <span className="text-orange-500">Web</span>
-              </h3>
-              <p className="text-[10px] uppercase font-black text-slate-500 tracking-widest mt-1">
-                {alumnoNombre}
-              </p>
-              <div className="flex gap-3 mt-1">
-                <p className="text-[8px] text-green-500">
-                  ✅ {totalPermitidas} permitidas
-                </p>
-                <p className="text-[8px] text-red-500">
-                  🚫 {totalBloqueadas} bloqueadas
-                </p>
-                <p className="text-[8px] text-yellow-500">
-                  ⚠️ {alertas.length} alertas
+        <div className="p-6 border-b border-slate-800 bg-gradient-to-r from-orange-500/10 to-transparent">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center">
+                <Globe className="text-orange-500 w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-white font-black italic uppercase tracking-tighter text-xl">
+                  Historial <span className="text-orange-500">Web</span>
+                </h3>
+                <p className="text-[10px] uppercase font-black text-slate-500 tracking-widest mt-1">
+                  {alumnoNombre} | {deviceId}
                 </p>
               </div>
             </div>
-          </div>
-          <div className="flex gap-2">
-            <button 
-              onClick={handleRefresh} 
-              disabled={refreshing}
-              className="p-3 rounded-xl bg-slate-800 text-slate-400 hover:text-orange-500 transition-all"
-              title="Actualizar en tiempo real"
-            >
-              <RefreshCw size={18} className={refreshing ? 'animate-spin' : ''} />
-            </button>
-            <button 
-              onClick={() => setShowFilters(!showFilters)} 
-              className={`p-3 rounded-xl transition-all ${showFilters ? 'bg-orange-500 text-white' : 'bg-slate-800 text-slate-400'}`}
-            >
-              <Calendar size={18} />
-            </button>
             <button onClick={onClose} className="p-3 bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-all">
               <X size={18} />
+            </button>
+          </div>
+
+          {/* Botones de control */}
+          <div className="flex flex-wrap gap-3 mt-5">
+            <button
+              onClick={() => setModoVista('ultimas10')}
+              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 ${
+                modoVista === 'ultimas10' 
+                  ? 'bg-orange-500 text-white' 
+                  : 'bg-slate-800 text-slate-400 hover:text-white'
+              }`}
+            >
+              <Eye size={12} /> ÚLTIMAS 10
+            </button>
+            <button
+              onClick={() => setModoVista('historialDia')}
+              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 ${
+                modoVista === 'historialDia' 
+                  ? 'bg-orange-500 text-white' 
+                  : 'bg-slate-800 text-slate-400 hover:text-white'
+              }`}
+            >
+              <Calendar size={12} /> HISTORIAL DEL DÍA
+            </button>
+            <button
+              onClick={() => setModoVista('todas')}
+              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 ${
+                modoVista === 'todas' 
+                  ? 'bg-orange-500 text-white' 
+                  : 'bg-slate-800 text-slate-400 hover:text-white'
+              }`}
+            >
+              <Globe size={12} /> TODAS
+            </button>
+            
+            <div className="flex-1" />
+            
+            <button
+              onClick={limpiarVista}
+              disabled={limpiando}
+              className="px-4 py-2 rounded-xl bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white transition-all text-[10px] font-black uppercase flex items-center gap-2"
+            >
+              <Trash2 size={12} /> LIMPIAR PANTALLA
+            </button>
+            
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-orange-500 transition-all"
+              title="Actualizar en tiempo real"
+            >
+              <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+            </button>
+            
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className={`p-2 rounded-xl transition-all ${showFilters ? 'bg-orange-500 text-white' : 'bg-slate-800 text-slate-400'}`}
+            >
+              <Calendar size={16} />
             </button>
           </div>
         </div>
@@ -370,8 +480,13 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
           </div>
         )}
 
-        {/* Info de última actualización */}
-        <div className="px-6 pt-3 pb-1 flex justify-end">
+        {/* Info de estado */}
+        <div className="px-6 pt-3 pb-1 flex justify-between items-center">
+          <div className="flex gap-4">
+            <p className="text-[8px] text-green-500">✅ Permitidas: {totalPermitidas}</p>
+            <p className="text-[8px] text-red-500">🚫 Bloqueadas: {totalBloqueadas}</p>
+            <p className="text-[8px] text-orange-500">📋 Mostrando: {filteredHistory.length}</p>
+          </div>
           <p className="text-[7px] text-slate-600 font-mono">
             Última actualización: {lastUpdate.toLocaleTimeString()}
           </p>
@@ -392,9 +507,9 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
                 Reintentar
               </button>
             </div>
-          ) : displayHistory.length > 0 ? (
+          ) : filteredHistory.length > 0 ? (
             <div className="space-y-2">
-              {displayHistory.map((item) => (
+              {filteredHistory.map((item) => (
                 <div 
                   key={item.id} 
                   className={`group p-4 rounded-xl border transition-all flex items-center justify-between ${
@@ -426,6 +541,11 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
                         }`}>
                           {item.bloqueada ? 'BLOQUEADA' : 'PERMITIDA'}
                         </span>
+                        {item.fuente === 'nextdns' && (
+                          <span className="text-[6px] px-1 py-0.5 rounded-full bg-orange-500/20 text-orange-400">
+                            NEXTDNS
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -450,30 +570,11 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
             <div className="py-20 text-center opacity-40">
               <ShieldAlert size={48} className="mx-auto mb-4 text-slate-700" />
               <p className="text-[10px] font-black uppercase text-slate-600 tracking-widest">Sin historial de navegación</p>
-              <p className="text-[8px] text-slate-700 mt-2">No hay registros de URLs visitadas para este dispositivo</p>
-            </div>
-          )}
-          
-          {/* Botón Ver más */}
-          {filteredHistory.length > 20 && !showAllHistory && (
-            <div className="text-center mt-4">
-              <button
-                onClick={() => setShowAllHistory(true)}
-                className="text-[9px] text-orange-500 hover:text-orange-400 font-black uppercase"
-              >
-                + Ver {filteredHistory.length - 20} registros más...
-              </button>
-            </div>
-          )}
-          
-          {showAllHistory && filteredHistory.length > 20 && (
-            <div className="text-center mt-4">
-              <button
-                onClick={() => setShowAllHistory(false)}
-                className="text-[9px] text-slate-500 hover:text-white font-black uppercase"
-              >
-                Mostrar menos
-              </button>
+              <p className="text-[8px] text-slate-700 mt-2">
+                {modoVista === 'ultimas10' && 'No hay URLs recientes para mostrar'}
+                {modoVista === 'historialDia' && 'El alumno no ha navegado hoy'}
+                {modoVista === 'todas' && 'No hay registros de URLs visitadas para este dispositivo'}
+              </p>
             </div>
           )}
         </div>
@@ -481,7 +582,7 @@ export function WebHistoryModal({ isOpen, onClose, deviceId, alumnoNombre, insti
         {/* Footer */}
         <div className="p-5 bg-slate-950/50 border-t border-slate-800 flex justify-between items-center">
           <p className="text-[8px] text-slate-600 font-black uppercase tracking-[0.2em]">
-            EFAS SERVICONTROL V2.4
+            EFAS SERVICONTROL V2.4 - NEXTDNS INTEGRATION
           </p>
           <div className="flex gap-3">
             <button 

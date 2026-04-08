@@ -12,7 +12,7 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "preserve",
-    "incremental": false, 
+    "incremental": false,
     "plugins": [
       {
         "name": "next"
@@ -21,8 +21,7 @@
     "paths": {
       "@/*": ["./src/*"]
     },
-    "typeRoots": ["./node_modules/@types"],
-    "types": ["node"],
+    "types": [],
     "strictNullChecks": true
   },
   "include": [

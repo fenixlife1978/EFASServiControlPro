@@ -14,7 +14,7 @@ import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
 import { toast } from "sonner"; 
 import { GlobalControls } from '@/components/admin/config/GlobalControls';
 import { WebHistoryModal } from '@/components/admin/monitoring/WebHistoryModal';
-import { IncidentsTable } from '@/components/admin/security/IncidentsTable';
+import { ConsultasInfracciones } from '@/components/dashboard/ConsultasInfracciones';
 import { MonitorDocente } from '@/components/admin/monitoreo/MonitorDocente';
 
 interface Dispositivo {
@@ -295,11 +295,9 @@ export default function DirectorView() {
         </div>
       </div>
 
-      {/* TABLA DE INFRACCIONES */}
-      <IncidentsTable 
-        institutionId={institutionId}
-        onViewHistory={(deviceId, alumnoNombre) => setHistoryModal({ isOpen: true, tabletId: deviceId, alumnoNombre })}
-        onSendMessage={(deviceId, alumnoNombre) => setMessageModal({ isOpen: true, tabletId: deviceId, alumnoNombre, text: '' })}
+      {/* CONSULTAS DE INFRACCIONES */}
+      <ConsultasInfracciones 
+        institutoId={institutionId}
       />
 
       {/* SUPERVISIÓN POR AULAS */}
