@@ -549,7 +549,7 @@ public class MainActivity extends BridgeActivity
         rtdb.child("status_dispositivos").child(deviceId).child("shield_mode_enable")
             .addValueEventListener(new ValueEventListener() {
                 @Override public void onDataChange(DataSnapshot s) {
-                    boolean blockMode = s.exists() && Boolean.TRUE.equals(s.getValue(Boolean.class));
+                    boolean blockMode = s.exists() && "true".equals(String.valueOf(s.getValue()));
                     getSharedPreferences(CAPACITOR_PREFS, MODE_PRIVATE).edit().putBoolean(KEY_BLOCK_MODE, blockMode).apply();
                     AdminReceiver.setBlockMode(MainActivity.this, blockMode);
                     if (blockMode) lanzarBloqueoTotal();

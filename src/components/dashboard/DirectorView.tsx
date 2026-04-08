@@ -295,9 +295,9 @@ export default function DirectorView() {
         </div>
       </div>
 
-      {/* CONSULTAS DE INFRACCIONES */}
+      {/* CONSULTAS DE INFRACCIONES - CORREGIDO */}
       <ConsultasInfracciones 
-        institutoId={institutionId}
+        institutionId={institutionId}
       />
 
       {/* SUPERVISIÓN POR AULAS */}

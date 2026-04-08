@@ -1,35 +1,17 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { db, rtdb } from '@/firebase/config';
-import { collection, onSnapshot } from 'firebase/firestore';
-import { ref, onValue, off, set } from 'firebase/database';
+import { collection, onSnapshot, query as fsQuery, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { ref, onValue, off, get, orderByChild, limitToLast, startAt, query as rtdbQuery } from 'firebase/database';
 import { 
-  ShieldAlert, Download, Trash2, ChevronLeft, ChevronRight, X, History, Eraser, 
-  AlertTriangle, MessageSquare
+  ShieldX, Globe, Clock, Tablet, Loader2, AlertTriangle, 
+  Smartphone, ShieldAlert, Lock, ChevronLeft, ChevronRight, 
+  Send, History, Calendar, Eye
 } from 'lucide-react';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
-
-interface Alerta {
-  id: string;
-  descripcion?: string;
-  urlIntentada?: string;
-  timestamp: number;
-  tipo?: string;
-  deviceId?: string;
-  detalle?: string;
-}
-
-interface Dispositivo {
-  id: string;
-  alumno_asignado: string;
-  aulaId: string;
-  seccion: string;
-  ultimaUrl?: string;
-  online?: boolean;
-}
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 
 interface Aula {
   id: string;
@@ -37,414 +19,486 @@ interface Aula {
   seccion: string;
 }
 
-type VistaActual = 'infracciones_dia' | 'historial_30d' | null;
+interface Alumno {
+  deviceId: string;
+  nombre: string;
+  aulaId: string;
+  seccion: string;
+}
 
-export function ConsultasInfracciones({ institutoId }: { institutoId: string }) {
+interface Infraccion {
+  id: string;
+  timestamp: number;
+  dominio?: string;
+  categoria?: string;
+  dispositivo?: string;
+  alumno?: string;
+}
+
+interface HistorialNavegacion {
+  id: string;
+  url: string;
+  timestamp: number;
+  deviceId: string;
+  titulo?: string;
+}
+
+export function ConsultasInfracciones({ institutionId }: { institutionId: string }) {
   const [aulas, setAulas] = useState<Aula[]>([]);
-  const [dispositivos, setDispositivos] = useState<Dispositivo[]>([]);
-  const [aulaSeleccionada, setAulaSeleccionada] = useState<string>('');
-  const [seccionSeleccionada, setSeccionSeleccionada] = useState<string>('');
-  const [alumnoSeleccionado, setAlumnoSeleccionado] = useState<Dispositivo | null>(null);
+  const [alumnos, setAlumnos] = useState<Alumno[]>([]);
+  const [selectedAula, setSelectedAula] = useState<string>('');
+  const [selectedSeccion, setSelectedSeccion] = useState<string>('');
+  const [selectedAlumno, setSelectedAlumno] = useState<Alumno | null>(null);
   
-  const [alertasMostradas, setAlertasMostradas] = useState<Alerta[]>([]);
-  const [vistaActual, setVistaActual] = useState<VistaActual>(null);
-  const [cargando, setCargando] = useState(false);
+  const [infracciones, setInfracciones] = useState<Infraccion[]>([]);
+  const [historialNavegacion, setHistorialNavegacion] = useState<HistorialNavegacion[]>([]);
+  const [modoHistorial, setModoHistorial] = useState<'infracciones' | 'historial'>('infracciones');
+  const [rangoHistorial, setRangoHistorial] = useState<'dia' | '30dias'>('dia');
   
-  const [mensajeModalOpen, setMensajeModalOpen] = useState(false);
-  const [mensajeTexto, setMensajeTexto] = useState('');
-  const [enviandoMensaje, setEnviandoMensaje] = useState(false);
-  
+  const [loading, setLoading] = useState(true);
+  const [loadingData, setLoadingData] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage] = useState(10);
-  const [alertasCache, setAlertasCache] = useState<Record<string, Alerta[]>>({});
+  const itemsPerPage = 15;
   
+  const logsRef = useRef<HTMLDivElement>(null);
+
+  // Cargar aulas
   useEffect(() => {
-    if (!institutoId) return;
-    const aulasRef = collection(db, 'institutions', institutoId, 'Aulas');
+    if (!institutionId) return;
+    const aulasRef = collection(db, "institutions", institutionId, "Aulas");
     const unsubscribe = onSnapshot(aulasRef, (snapshot) => {
       const aulasList = snapshot.docs.map(doc => ({
         id: doc.id,
-        aulaId: doc.data().aulaId,
-        seccion: doc.data().seccion
-      }));
+        ...doc.data()
+      })) as Aula[];
       setAulas(aulasList);
     });
     return () => unsubscribe();
-  }, [institutoId]);
-  
+  }, [institutionId]);
+
+  // Cargar alumnos
   useEffect(() => {
-    if (!institutoId) return;
-    const dispositivosRef = ref(rtdb, 'dispositivos');
-    const unsubscribe = onValue(dispositivosRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const dispositivosList: Dispositivo[] = [];
-        Object.entries(data).forEach(([id, device]: [string, any]) => {
-          if (device.InstitutoId === institutoId && (device.rol === 'alumno' || device.alumno_asignado)) {
-            dispositivosList.push({
-              id,
-              alumno_asignado: device.alumno_asignado || 'Sin nombre',
-              aulaId: device.aulaId || '',
-              seccion: device.seccion || '',
-              ultimaUrl: device.ultimaUrl || '',
-              online: device.online || false
-            });
-          }
-        });
-        setDispositivos(dispositivosList);
+    if (!institutionId) return;
+    const fetchAlumnos = async () => {
+      try {
+        const dispositivosRef = ref(rtdb, 'dispositivos');
+        const snapshot = await get(dispositivosRef);
+        const data = snapshot.val();
+        const alumnosList: Alumno[] = [];
+        if (data) {
+          Object.entries(data).forEach(([deviceId, device]: [string, any]) => {
+            if (device.InstitutoId === institutionId && device.rol === 'alumno') {
+              alumnosList.push({
+                deviceId: deviceId,
+                nombre: device.alumno_asignado || device.nombre || 'Sin nombre',
+                aulaId: device.aulaId || '',
+                seccion: device.seccion || ''
+              });
+            }
+          });
+        }
+        setAlumnos(alumnosList);
+        setLoading(false);
+      } catch (error) {
+        console.error('Error cargando alumnos:', error);
+        setLoading(false);
       }
-    });
-    return () => off(dispositivosRef);
-  }, [institutoId]);
-  
-  useEffect(() => {
-    if (!institutoId) return;
-    const alertasRef = ref(rtdb, 'alertas_seguridad');
-    const unsubscribe = onValue(alertasRef, (snapshot) => {
-      const data = snapshot.val();
-      const cache: Record<string, Alerta[]> = {};
-      if (data) {
-        Object.entries(data).forEach(([key, value]: [string, any]) => {
-          const alerta: Alerta = {
-            id: key,
-            timestamp: value.timestamp || 0,
-            tipo: value.tipo || 'desconocido',
-            descripcion: value.detalle || '',
-            urlIntentada: value.detalle || '',
-            deviceId: value.deviceId || ''
-          };
-          if (alerta.deviceId) {
-            if (!cache[alerta.deviceId]) cache[alerta.deviceId] = [];
-            cache[alerta.deviceId].push(alerta);
-          }
-        });
-        Object.keys(cache).forEach(deviceId => {
-          cache[deviceId].sort((a, b) => b.timestamp - a.timestamp);
-        });
-      }
-      setAlertasCache(cache);
-    });
-    return () => off(alertasRef);
-  }, [institutoId]);
-  
-  const aulasUnicas = useMemo(() => {
-    const aulasSet = new Set<string>();
-    aulas.forEach(a => aulasSet.add(a.aulaId));
-    return Array.from(aulasSet).sort();
-  }, [aulas]);
-  
+    };
+    fetchAlumnos();
+  }, [institutionId]);
+
+  // Opciones de secciones
   const seccionesDisponibles = useMemo(() => {
-    if (!aulaSeleccionada) return [];
-    const seccionesSet = new Set<string>();
-    aulas.filter(a => a.aulaId === aulaSeleccionada).forEach(a => seccionesSet.add(a.seccion));
-    return Array.from(seccionesSet).sort();
-  }, [aulas, aulaSeleccionada]);
-  
+    const alumnosFiltrados = alumnos.filter(a => a.aulaId === selectedAula);
+    const secciones = [...new Set(alumnosFiltrados.map(a => a.seccion))];
+    return secciones.filter(s => s);
+  }, [alumnos, selectedAula]);
+
+  // Alumnos filtrados
   const alumnosFiltrados = useMemo(() => {
-    if (!aulaSeleccionada) return [];
-    return dispositivos.filter(d => d.aulaId === aulaSeleccionada && (!seccionSeleccionada || d.seccion === seccionSeleccionada));
-  }, [dispositivos, aulaSeleccionada, seccionSeleccionada]);
-  
-  const getStartOfDay = (): number => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return today.getTime();
+    return alumnos.filter(a => a.aulaId === selectedAula && a.seccion === selectedSeccion);
+  }, [alumnos, selectedAula, selectedSeccion]);
+
+  // Limpiar filtros
+  const handleClearFilters = () => {
+    setSelectedAula('');
+    setSelectedSeccion('');
+    setSelectedAlumno(null);
+    setInfracciones([]);
+    setHistorialNavegacion([]);
+    setModoHistorial('infracciones');
+    toast.success('Filtros limpiados');
   };
-  
-  const get30DaysAgo = (): number => {
-    return Date.now() - (30 * 24 * 60 * 60 * 1000);
-  };
-  
-  const verInfraccionesDia = () => {
-    if (!alumnoSeleccionado) return;
-    setCargando(true);
-    const alertasAlumno = alertasCache[alumnoSeleccionado.id] || [];
-    const startOfDay = getStartOfDay();
-    const filtradas = alertasAlumno.filter(a => a.timestamp >= startOfDay);
-    setAlertasMostradas(filtradas);
-    setVistaActual('infracciones_dia');
-    setCurrentPage(1);
-    setCargando(false);
-    toast.success(`📋 ${filtradas.length} infracciones encontradas hoy`);
-  };
-  
-  const verHistorial30Dias = () => {
-    if (!alumnoSeleccionado) return;
-    setCargando(true);
-    const alertasAlumno = alertasCache[alumnoSeleccionado.id] || [];
-    const thirtyDaysAgo = get30DaysAgo();
-    const filtradas = alertasAlumno.filter(a => a.timestamp >= thirtyDaysAgo);
-    setAlertasMostradas(filtradas);
-    setVistaActual('historial_30d');
-    setCurrentPage(1);
-    setCargando(false);
-    toast.success(`📋 ${filtradas.length} infracciones en los últimos 30 días`);
-  };
-  
-  const limpiarHistorialDia = () => {
-    if (!alumnoSeleccionado) return;
-    setAlertasMostradas([]);
-    setVistaActual(null);
-    toast.info('🧹 Historial limpiado de la pantalla (los datos persisten en el sistema)');
-  };
-  
-  const enviarMensajeDirector = async () => {
-    if (!alumnoSeleccionado || !mensajeTexto.trim()) return;
-    setEnviandoMensaje(true);
-    try {
-      const mensajeRef = ref(rtdb, `mensajes_dispositivos/${alumnoSeleccionado.id}/ultimo_mensaje`);
-      await set(mensajeRef, {
-        texto: mensajeTexto,
-        remitente: "Dirección Institucional",
-        timestamp: Date.now(),
-        leido: false,
-        id: "msg_" + Date.now(),
-        titulo: "Mensaje de Dirección"
-      });
-      toast.success('Mensaje enviado correctamente');
-      setMensajeTexto('');
-      setMensajeModalOpen(false);
-    } catch (error) {
-      console.error(error);
-      toast.error('Error al enviar mensaje');
-    } finally {
-      setEnviandoMensaje(false);
-    }
-  };
-  
-  const exportarPDF = () => {
-    if (!vistaActual) {
-      toast.warning('Seleccione una consulta primero');
+
+  // Exportar a PDF
+  const handleExportPDF = async () => {
+    if (!logsRef.current) {
+      toast.error('No hay datos para exportar');
       return;
     }
+    toast.info('Generando PDF...');
     try {
-      const docPDF = new jsPDF();
-      docPDF.setFillColor(15, 17, 23);
-      docPDF.rect(0, 0, 210, 40, 'F');
-      docPDF.setTextColor(255, 255, 255);
-      docPDF.setFontSize(16);
-      docPDF.text('EDUCONTROLPRO - REPORTE', 15, 20);
-      docPDF.setFontSize(8);
-      docPDF.setTextColor(249, 115, 22);
-      docPDF.text(`Generado: ${new Date().toLocaleString()}`, 15, 28);
-      docPDF.text(`Alumno: ${alumnoSeleccionado?.alumno_asignado}`, 15, 36);
-      docPDF.text(`Aula: ${alumnoSeleccionado?.aulaId} - Sección: ${alumnoSeleccionado?.seccion}`, 15, 44);
-      
-      const rows = alertasMostradas.map(a => [
-        new Date(a.timestamp).toLocaleString(),
-        a.tipo || 'Alerta',
-        a.descripcion?.substring(0, 50) || a.urlIntentada?.substring(0, 50) || ''
-      ]);
-      autoTable(docPDF, {
-        head: [['Fecha/Hora', 'Tipo', 'Descripción']],
-        body: rows,
-        startY: 52,
-        styles: { fontSize: 7 },
-        headStyles: { fillColor: [249, 115, 22] }
-      });
-      docPDF.save(`EDUControlPro_${alumnoSeleccionado?.alumno_asignado}_${Date.now()}.pdf`);
+      const element = logsRef.current;
+      const canvas = await html2canvas(element, { scale: 2, backgroundColor: '#0f1117', logging: false });
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const imgWidth = 210;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+      const titulo = modoHistorial === 'infracciones' ? 'infracciones' : 'historial_navegacion';
+      pdf.save(`${titulo}_${selectedAlumno?.nombre || 'general'}_${new Date().toISOString().split('T')[0]}.pdf`);
       toast.success('PDF exportado correctamente');
     } catch (error) {
-      console.error(error);
-      toast.error('Error al exportar PDF');
+      console.error('Error exportando PDF:', error);
+      toast.error('Error al generar el PDF');
     }
   };
-  
-  const limpiarTodo = () => {
-    setAulaSeleccionada('');
-    setSeccionSeleccionada('');
-    setAlumnoSeleccionado(null);
-    setAlertasMostradas([]);
-    setVistaActual(null);
-    setCurrentPage(1);
-    toast.success('🧹 Todo ha sido limpiado');
-  };
-  
-  const getNombreVista = (): string => {
-    switch(vistaActual) {
-      case 'infracciones_dia': return 'Infracciones del día';
-      case 'historial_30d': return 'Historial de infracciones (30 días)';
-      default: return 'Reporte';
+
+  // Cargar infracciones de NextDNS (desde Firestore)
+  const cargarInfracciones = useCallback(async () => {
+    if (!selectedAlumno || !institutionId) return;
+    setLoadingData(true);
+    try {
+      const logsRef = collection(db, "institutions", institutionId, "logs");
+      const q = fsQuery(logsRef, where("deviceId", "==", selectedAlumno.deviceId));
+      const snapshot = await getDocs(q);
+      const infraccionesList: Infraccion[] = [];
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        infraccionesList.push({
+          id: doc.id,
+          timestamp: data.timestamp || 0,
+          dominio: data.dominio || data.url || '',
+          categoria: data.categoria || 'bloqueado',
+          dispositivo: data.deviceId,
+          alumno: selectedAlumno.nombre
+        });
+      });
+      infraccionesList.sort((a, b) => b.timestamp - a.timestamp);
+      setInfracciones(infraccionesList);
+    } catch (error) {
+      console.error('Error cargando infracciones:', error);
+      toast.error('Error al cargar infracciones');
+    } finally {
+      setLoadingData(false);
     }
-  };
-  
-  const datosMostrados = alertasMostradas;
+  }, [selectedAlumno, institutionId]);
+
+  // Cargar historial de navegación del Monitor Service
+  const cargarHistorialNavegacion = useCallback(async () => {
+    if (!selectedAlumno) return;
+    setLoadingData(true);
+    try {
+      const historialRef = ref(rtdb, `historial_navegacion/${selectedAlumno.deviceId}`);
+      const timeLimit = Date.now() - (rangoHistorial === 'dia' ? 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000);
+      const historyQuery = rtdbQuery(historialRef, orderByChild('timestamp'), startAt(timeLimit));
+      const snapshot = await get(historyQuery);
+      const data = snapshot.val();
+      const historialList: HistorialNavegacion[] = [];
+      if (data) {
+        Object.entries(data).forEach(([key, value]: [string, any]) => {
+          historialList.push({
+            id: key,
+            url: value.url || '',
+            timestamp: value.timestamp || 0,
+            deviceId: value.deviceId || selectedAlumno.deviceId,
+            titulo: value.titulo || ''
+          });
+        });
+      }
+      historialList.sort((a, b) => b.timestamp - a.timestamp);
+      setHistorialNavegacion(historialList);
+    } catch (error) {
+      console.error('Error cargando historial:', error);
+      toast.error('Error al cargar historial de navegación');
+    } finally {
+      setLoadingData(false);
+    }
+  }, [selectedAlumno, rangoHistorial]);
+
+  // Efecto para cargar según el modo
+  useEffect(() => {
+    if (selectedAlumno) {
+      if (modoHistorial === 'infracciones') {
+        cargarInfracciones();
+      } else {
+        cargarHistorialNavegacion();
+      }
+    }
+  }, [selectedAlumno, modoHistorial, rangoHistorial, cargarInfracciones, cargarHistorialNavegacion]);
+
+  // Paginación
+  const datosMostrados = modoHistorial === 'infracciones' ? infracciones : historialNavegacion;
   const totalPages = Math.ceil(datosMostrados.length / itemsPerPage);
   const datosPaginados = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
     return datosMostrados.slice(start, start + itemsPerPage);
-  }, [datosMostrados, currentPage, itemsPerPage]);
-  
+  }, [datosMostrados, currentPage]);
+
   useEffect(() => {
     setCurrentPage(1);
-  }, [vistaActual]);
-  
+  }, [selectedAlumno, modoHistorial, rangoHistorial]);
+
+  const formatDate = (timestamp: number) => {
+    const date = new Date(timestamp);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (date.toDateString() === today.toDateString()) {
+      return `Hoy ${date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return `Ayer ${date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+    } else {
+      return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) + ' ' + date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="bg-[#0f1117] border border-white/5 rounded-[2.5rem] p-12 text-center">
+        <Loader2 className="animate-spin w-8 h-8 text-orange-500 mx-auto mb-4" />
+        <p className="text-orange-500 font-black text-[11px] uppercase">Cargando...</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="bg-[#0f1117] border border-slate-800 rounded-[2.5rem] p-6 shadow-2xl">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <div>
-          <h3 className="text-white font-black uppercase italic text-lg flex items-center gap-3">
-            <ShieldAlert className="text-orange-500" size={24} />
-            CONSULTAS DE <span className="text-orange-500">INFRACCIONES</span>
-          </h3>
-          <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mt-1">
-            SELECCIONE AULA, SECCIÓN Y ALUMNO PARA VER SUS INFRACCIONES
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={exportarPDF} disabled={!vistaActual} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-[9px] font-black flex items-center gap-2 disabled:opacity-50 transition-all">
-            <Download size={14} /> PDF
-          </button>
-          <button onClick={limpiarTodo} className="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-xl text-[9px] font-black flex items-center gap-2 transition-all">
-            <Trash2 size={14} /> LIMPIAR TODO
-          </button>
-        </div>
-      </div>
-      
-      <div className="bg-black/40 p-5 rounded-3xl border border-slate-800 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-          <div>
-            <label className="text-[8px] text-slate-400 uppercase block mb-1">Aula</label>
-            <select value={aulaSeleccionada} onChange={(e) => { setAulaSeleccionada(e.target.value); setSeccionSeleccionada(''); setAlumnoSeleccionado(null); }} className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-white text-[11px] font-medium focus:outline-none focus:border-orange-500 transition-colors">
-              <option value="">-- SELECCIONAR AULA --</option>
-              {aulasUnicas.map(aula => <option key={aula} value={aula}>{aula}</option>)}
-            </select>
+    <div className="bg-[#0f1117] border border-white/5 rounded-[2.5rem] p-8 shadow-2xl space-y-6 mt-8">
+      {/* TÍTULO Y BOTONES */}
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div className="flex items-center gap-3">
+          <div className="bg-red-500/10 p-2 rounded-xl">
+            <ShieldX className="text-red-500 w-5 h-5" />
           </div>
           <div>
-            <label className="text-[8px] text-slate-400 uppercase block mb-1">Sección</label>
-            <select value={seccionSeleccionada} onChange={(e) => { setSeccionSeleccionada(e.target.value); setAlumnoSeleccionado(null); }} disabled={!aulaSeleccionada} className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-white text-[11px] font-medium disabled:opacity-50 focus:outline-none focus:border-orange-500 transition-colors">
-              <option value="">-- SELECCIONAR SECCIÓN --</option>
-              {seccionesDisponibles.map(seccion => <option key={seccion} value={seccion}>{seccion}</option>)}
-            </select>
+            <h2 className="text-lg font-black italic uppercase text-white tracking-tighter">
+              Consultas de <span className="text-red-500">Infracciones</span>
+            </h2>
+            <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">
+              NextDNS | Bloqueos de dominios
+            </p>
           </div>
-          <div>
-            <label className="text-[8px] text-slate-400 uppercase block mb-1">Alumno</label>
-            <select 
-              value={alumnoSeleccionado?.id || ''} 
-              onChange={(e) => { 
-                const alumno = alumnosFiltrados.find(a => a.id === e.target.value); 
-                setAlumnoSeleccionado(alumno || null); 
-                setAlertasMostradas([]); 
-                setVistaActual(null); 
-              }} 
-              disabled={!seccionSeleccionada} 
-              className="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 px-4 text-white text-[11px] font-medium disabled:opacity-50 focus:outline-none focus:border-orange-500 transition-colors"
+        </div>
+        <div className="flex gap-3">
+          <button
+            onClick={handleClearFilters}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-white text-[10px] font-black uppercase italic transition-all"
+          >
+            Limpiar Filtros
+          </button>
+          {selectedAlumno && datosMostrados.length > 0 && (
+            <button
+              onClick={handleExportPDF}
+              className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-500 rounded-xl text-white text-[10px] font-black uppercase italic transition-all"
             >
-              <option value="">-- SELECCIONAR --</option>
-              {alumnosFiltrados.map(alumno => (
-                <option key={alumno.id} value={alumno.id}>{alumno.alumno_asignado}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-        
-        <div className="flex flex-wrap gap-3 mt-4 pt-4 border-t border-slate-800">
-          <button onClick={verInfraccionesDia} disabled={!alumnoSeleccionado} className="bg-orange-500/20 hover:bg-orange-500 text-orange-400 hover:text-white px-4 py-2 rounded-xl text-[9px] font-black flex items-center gap-2 transition-all disabled:opacity-50">
-            <AlertTriangle size={12} /> INFRACCIONES DEL DÍA
-          </button>
-          <button onClick={verHistorial30Dias} disabled={!alumnoSeleccionado} className="bg-orange-500/20 hover:bg-orange-500 text-orange-400 hover:text-white px-4 py-2 rounded-xl text-[9px] font-black flex items-center gap-2 transition-all disabled:opacity-50">
-            <History size={12} /> HISTORIAL 30 DÍAS
-          </button>
-          <button onClick={() => setMensajeModalOpen(true)} disabled={!alumnoSeleccionado} className="bg-green-500/20 hover:bg-green-500 text-green-400 hover:text-white px-4 py-2 rounded-xl text-[9px] font-black flex items-center gap-2 transition-all disabled:opacity-50 ml-auto">
-            <MessageSquare size={12} /> ENVIAR MENSAJE
-          </button>
-        </div>
-      </div>
-      
-      {vistaActual && (
-        <div className="mt-6">
-          <div className="flex justify-between items-center mb-4">
-            <h4 className="text-white font-bold text-sm flex items-center gap-2">
-              <div className="bg-orange-500 p-1 rounded-lg"><ShieldAlert size={12} /></div>
-              {getNombreVista()}
-            </h4>
-            <button onClick={limpiarHistorialDia} className="text-[9px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg flex items-center gap-1">
-              <Eraser size={10} /> LIMPIAR PANTALLA
+              Exportar PDF
             </button>
-          </div>
-          
-          {cargando ? (
-            <div className="text-center py-12">
-              <div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full mx-auto mb-3"></div>
-              <p className="text-slate-500 text-xs">Cargando datos...</p>
-            </div>
-          ) : datosPaginados.length === 0 ? (
-            <div className="text-center py-12 bg-slate-900/30 rounded-2xl">
-              <AlertTriangle className="text-slate-600 mx-auto mb-2" size={32} />
-              <p className="text-slate-500 text-xs">No hay infracciones para mostrar</p>
-            </div>
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead className="border-b border-slate-800">
-                    <tr className="text-slate-400">
-                      <th className="text-left py-2 px-2">FECHA/HORA</th>
-                      <th className="text-left py-2 px-2">TIPO</th>
-                      <th className="text-left py-2 px-2">DESCRIPCIÓN</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {datosPaginados.map((item, idx) => (
-                      <tr key={idx} className="border-b border-slate-800/50 hover:bg-slate-900/30">
-                        <td className="py-2 px-2 text-slate-300 whitespace-nowrap">
-                          {new Date(item.timestamp).toLocaleString()}
-                        </td>
-                        <td className="py-2 px-2">
-                          <span className="bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full text-[9px]">
-                            {item.tipo || 'Bloqueo'}
-                          </span>
-                        </td>
-                        <td className="py-2 px-2 text-slate-400">
-                          {item.descripcion?.substring(0, 80)}...
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              
-              {totalPages > 1 && (
-                <div className="flex justify-center items-center gap-2 mt-6">
-                  <button onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1} className="p-2 bg-slate-800 rounded-lg disabled:opacity-50">
-                    <ChevronLeft size={14} />
-                  </button>
-                  <span className="text-[9px] text-slate-400">Página {currentPage} de {totalPages}</span>
-                  <button onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages} className="p-2 bg-slate-800 rounded-lg disabled:opacity-50">
-                    <ChevronRight size={14} />
-                  </button>
-                </div>
-              )}
-            </>
           )}
         </div>
+      </div>
+
+      {/* FILTROS */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="space-y-2">
+          <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Aula</label>
+          <select
+            value={selectedAula}
+            onChange={(e) => {
+              setSelectedAula(e.target.value);
+              setSelectedSeccion('');
+              setSelectedAlumno(null);
+            }}
+            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-[11px] font-bold uppercase"
+          >
+            <option value="">-- SELECCIONAR AULA --</option>
+            {aulas.map(aula => (
+              <option key={aula.id} value={aula.aulaId}>{aula.aulaId}</option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-2">
+          <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Sección</label>
+          <select
+            value={selectedSeccion}
+            onChange={(e) => {
+              setSelectedSeccion(e.target.value);
+              setSelectedAlumno(null);
+            }}
+            disabled={!selectedAula}
+            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-[11px] font-bold uppercase disabled:opacity-50"
+          >
+            <option value="">-- SELECCIONAR SECCIÓN --</option>
+            {seccionesDisponibles.map(seccion => (
+              <option key={seccion} value={seccion}>{seccion}</option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-2">
+          <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Alumno</label>
+          <select
+            value={selectedAlumno?.deviceId || ''}
+            onChange={(e) => {
+              const alumno = alumnosFiltrados.find(a => a.deviceId === e.target.value);
+              setSelectedAlumno(alumno || null);
+            }}
+            disabled={!selectedSeccion}
+            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-[11px] font-bold uppercase disabled:opacity-50"
+          >
+            <option value="">-- SELECCIONAR ALUMNO --</option>
+            {alumnosFiltrados.map(alumno => (
+              <option key={alumno.deviceId} value={alumno.deviceId}>{alumno.nombre}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* BOTONES DE MODO */}
+      {selectedAlumno && (
+        <div className="flex flex-wrap gap-3 pt-4 border-t border-white/5">
+          <button
+            onClick={() => {
+              setModoHistorial('infracciones');
+              setCurrentPage(1);
+            }}
+            className={`flex items-center gap-2 px-5 py-2 rounded-xl text-[10px] font-black uppercase italic transition-all ${
+              modoHistorial === 'infracciones' 
+                ? 'bg-orange-500 text-white' 
+                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+            }`}
+          >
+            <ShieldX size={12} />
+            Infracciones (NextDNS)
+          </button>
+          <button
+            onClick={() => {
+              setModoHistorial('historial');
+              setCurrentPage(1);
+              setRangoHistorial('dia');
+            }}
+            className={`flex items-center gap-2 px-5 py-2 rounded-xl text-[10px] font-black uppercase italic transition-all ${
+              modoHistorial === 'historial' && rangoHistorial === 'dia'
+                ? 'bg-orange-500 text-white' 
+                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+            }`}
+          >
+            <Calendar size={12} />
+            Historial del Día
+          </button>
+          <button
+            onClick={() => {
+              setModoHistorial('historial');
+              setCurrentPage(1);
+              setRangoHistorial('30dias');
+            }}
+            className={`flex items-center gap-2 px-5 py-2 rounded-xl text-[10px] font-black uppercase italic transition-all ${
+              modoHistorial === 'historial' && rangoHistorial === '30dias'
+                ? 'bg-orange-500 text-white' 
+                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+            }`}
+          >
+            <History size={12} />
+            Historial 30 Días
+          </button>
+        </div>
       )}
-      
-      {mensajeModalOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
-          <div className="bg-[#0f1117] border border-slate-800 w-full max-w-md rounded-2xl overflow-hidden">
-            <div className="p-5 border-b border-slate-800 flex justify-between items-center">
-              <h3 className="text-white font-black uppercase text-sm">Enviar Mensaje a {alumnoSeleccionado?.alumno_asignado}</h3>
-              <button onClick={() => setMensajeModalOpen(false)} className="text-slate-500 hover:text-white">
-                <X size={20} />
-              </button>
-            </div>
-            <div className="p-5">
-              <textarea
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm"
-                rows={4}
-                placeholder="Escribe el mensaje para el alumno..."
-                value={mensajeTexto}
-                onChange={(e) => setMensajeTexto(e.target.value)}
-              />
-              <div className="flex gap-3 mt-5">
-                <button onClick={() => setMensajeModalOpen(false)} className="flex-1 py-2 bg-slate-800 rounded-xl text-white text-xs">Cancelar</button>
-                <button onClick={enviarMensajeDirector} disabled={enviandoMensaje} className="flex-1 py-2 bg-orange-500 rounded-xl text-white text-xs font-black disabled:opacity-50">
-                  {enviandoMensaje ? 'ENVIANDO...' : 'ENVIAR'}
-                </button>
+
+      {/* CONTENIDO */}
+      <div ref={logsRef}>
+        {selectedAlumno ? (
+          <div className="space-y-3 pt-4">
+            {loadingData ? (
+              <div className="py-12 text-center">
+                <Loader2 className="animate-spin w-6 h-6 text-orange-500 mx-auto" />
+                <p className="text-[9px] text-slate-500 mt-2">Cargando...</p>
               </div>
-            </div>
+            ) : datosPaginados.length === 0 ? (
+              <div className="py-12 text-center border border-dashed border-white/5 rounded-3xl">
+                {modoHistorial === 'infracciones' ? (
+                  <>
+                    <ShieldX className="w-12 h-12 text-slate-600 mx-auto mb-4 opacity-30" />
+                    <p className="text-[10px] text-slate-500 font-black uppercase">
+                      No hay infracciones registradas para {selectedAlumno.nombre}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <Globe className="w-12 h-12 text-slate-600 mx-auto mb-4 opacity-30" />
+                    <p className="text-[10px] text-slate-500 font-black uppercase">
+                      No hay historial de navegación para {selectedAlumno.nombre}
+                    </p>
+                    <p className="text-[8px] text-slate-600 mt-1">
+                      {rangoHistorial === 'dia' ? '(últimas 24 horas)' : '(últimos 30 días)'}
+                    </p>
+                  </>
+                )}
+              </div>
+            ) : (
+              <>
+                <div className="flex justify-between items-center mb-2">
+                  <p className="text-[9px] text-slate-500">
+                    Mostrando {datosPaginados.length} de {datosMostrados.length} registros
+                  </p>
+                </div>
+                {datosPaginados.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between p-4 bg-white/[0.02] rounded-2xl border border-white/5 hover:bg-red-500/[0.03] transition-all">
+                    <div className="flex items-center gap-4 flex-1">
+                      <div className="p-3 rounded-xl bg-red-500/10">
+                        {modoHistorial === 'infracciones' ? (
+                          <Globe className="w-4 h-4 text-red-500" />
+                        ) : (
+                          <Eye className="w-4 h-4 text-blue-500" />
+                        )}
+                      </div>
+                      <div className="space-y-1 flex-1">
+                        <p className="text-[11px] font-black text-slate-200 truncate max-w-[350px] italic">
+                          {modoHistorial === 'infracciones' 
+                            ? (item as Infraccion).dominio || 'Dominio bloqueado'
+                            : (item as HistorialNavegacion).url || 'URL visitada'
+                          }
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <Clock size={10} className="text-slate-600" />
+                          <span className="text-[9px] font-mono text-slate-500">
+                            {formatDate(item.timestamp)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
+        ) : (
+          <div className="py-12 text-center border border-dashed border-white/5 rounded-3xl">
+            <ShieldX className="w-12 h-12 text-slate-600 mx-auto mb-4 opacity-30" />
+            <p className="text-[10px] text-slate-500 font-black uppercase">
+              Seleccione un alumno para ver sus consultas
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* PAGINACIÓN */}
+      {totalPages > 1 && (
+        <div className="flex justify-center items-center gap-4 pt-4 border-t border-white/5">
+          <button
+            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+          >
+            <ChevronLeft size={16} className="text-white" />
+          </button>
+          <span className="text-[10px] text-slate-400 font-mono">
+            Página {currentPage} de {totalPages}
+          </span>
+          <button
+            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+            className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+          >
+            <ChevronRight size={16} className="text-white" />
+          </button>
         </div>
       )}
     </div>
