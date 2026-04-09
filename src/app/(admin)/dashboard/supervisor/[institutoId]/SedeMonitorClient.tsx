@@ -1,13 +1,13 @@
-import { useLogout } from "@/hooks/useLogout";
 'use client';
 
+import { useLogout } from "@/hooks/useLogout";
 import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { db, rtdb, auth } from '@/firebase/config';
+import { db, rtdb } from '@/firebase/config';
 import { doc, getDoc, collection, query, where, onSnapshot, getDocs } from 'firebase/firestore';
-import { ref, onValue, off, update } from 'firebase/database';
+import { ref, onValue, off, update, get } from 'firebase/database';
 import { 
-  ChevronLeft, Building2, User, Globe, History, ShieldCheck, 
+  ChevronLeft, User, Globe, History, ShieldCheck, 
   MessageSquare, Loader2, Clock, Activity, ShieldX
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -21,6 +21,8 @@ interface UserDevice {
   nombre: string;
   role: string;
   email: string;
+  aulaId?: string;
+  seccion?: string;
   realtime?: {
     lastSeen?: number;
     url_actual?: string;
@@ -46,21 +48,13 @@ export default function SedeMonitorClient({ institutoId }: SedeMonitorClientProp
   const [historyModal, setHistoryModal] = useState({ isOpen: false, deviceId: '', nombre: '' });
   const [messageModal, setMessageModal] = useState({ isOpen: false, deviceId: '', nombre: '' });
 
-  // ============================================
-  // VERIFICACIÓN DE PERMISOS - Director Supervisor tiene ACCESO TOTAL
-  // ============================================
   useEffect(() => {
     if (!loadingPermissions) {
-      // Director-Supervisor tiene privilegios de SUPER ADMIN - sin restricciones
       const hasAccess = userRole === 'super-admin' || 
                        userRole === 'director-supervisor' || 
                        userRole === 'supervisor';
       
-      console.log('Verificando permisos en SedeMonitorClient:', {
-        userRole,
-        hasAccess,
-        institutoId
-      });
+      console.log('Verificando permisos:', { userRole, hasAccess, institutoId });
       
       if (!hasAccess) {
         toast.error('No tienes permisos para acceder a esta sección');
@@ -69,15 +63,12 @@ export default function SedeMonitorClient({ institutoId }: SedeMonitorClientProp
     }
   }, [userRole, loadingPermissions, router, institutoId]);
 
-  // Buscar la institución por InstitutoId o por ID real
+  // Buscar institución
   useEffect(() => {
     if (!institutoId) return;
     
     const findInstitution = async () => {
       try {
-        console.log('Buscando institución con ID:', institutoId);
-        
-        // Primero, intentar buscar por ID real (Firestore ID)
         const docRef = doc(db, "institutions", institutoId);
         const docSnap = await getDoc(docRef);
         
@@ -85,11 +76,9 @@ export default function SedeMonitorClient({ institutoId }: SedeMonitorClientProp
           const data = docSnap.data();
           setNombreSede(data.nombre || data.InstitutoId || 'Sede');
           setRealInstitutionId(institutoId);
-          console.log('Institución encontrada por ID real:', realInstitutionId);
           return;
         }
         
-        // Si no se encontró por ID real, buscar por campo InstitutoId
         const q = query(collection(db, "institutions"), where("InstitutoId", "==", institutoId));
         const querySnapshot = await getDocs(q);
         
@@ -98,52 +87,100 @@ export default function SedeMonitorClient({ institutoId }: SedeMonitorClientProp
           const data = institutionDoc.data();
           setNombreSede(data.nombre || data.InstitutoId || 'Sede');
           setRealInstitutionId(institutionDoc.id);
-          console.log('Institución encontrada por campo InstitutoId:', {
-            institutoId,
-            realId: institutionDoc.id
-          });
           return;
         }
         
-        // No se encontró la institución
-        console.error('Institución no encontrada:', institutoId);
         setNombreSede('Sede no encontrada');
         toast.error('No se encontró la institución');
         setTimeout(() => router.push('/dashboard'), 2000);
         
       } catch (error) {
-        console.error('Error al buscar institución:', error);
+        console.error('Error:', error);
         setNombreSede('Error al cargar');
-        toast.error('Error al cargar la información de la sede');
       }
     };
     
     findInstitution();
   }, [institutoId, router]);
 
-  // Cargar personal usando el ID real de Firestore
+  // ============================================================
+  // Cargar personal desde DOS FUENTES:
+  // 1. Firestore (colección "usuarios")
+  // 2. RTDB (dispositivos con rol profesor/director)
+  // ============================================================
   useEffect(() => {
     if (!realInstitutionId) return;
     
     console.log('Cargando personal para institución:', realInstitutionId);
     
-    const q = query(
-      collection(db, "usuarios"), 
-      where("InstitutoId", "==", realInstitutionId),
-      where("role", "in", ["director", "profesor"])
-    );
-
-    const unsub = onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map(d => ({
-        id: d.id,
-        ...d.data()
-      })) as UserDevice[];
-      setPersonal(list);
+    const loadPersonal = async () => {
+      const personalList: UserDevice[] = [];
+      
+      // FUENTE 1: Firestore - colección "usuarios"
+      const firestoreQuery = query(
+        collection(db, "usuarios"), 
+        where("InstitutoId", "==", realInstitutionId),
+        where("role", "in", ["director", "profesor"])
+      );
+      
+      const firestoreSnapshot = await getDocs(firestoreQuery);
+      firestoreSnapshot.forEach(doc => {
+        const data = doc.data();
+        personalList.push({
+          id: doc.id,
+          deviceId: data.deviceId || doc.id,
+          nombre: data.nombre || 'Sin nombre',
+          role: data.role || 'profesor',
+          email: data.email || '',
+          aulaId: data.aulaId,
+          seccion: data.seccion
+        });
+      });
+      
+      console.log('📦 Personal desde Firestore:', personalList.length);
+      
+      // FUENTE 2: RTDB - dispositivos con rol profesor/director
+      const devicesSnapshot = await get(ref(rtdb, 'dispositivos'));
+      const devicesData = devicesSnapshot.val();
+      
+      if (devicesData) {
+        Object.entries(devicesData).forEach(([deviceId, device]: [string, any]) => {
+          // Solo profesores y directores, de la institución correcta
+          if ((device.rol === 'profesor' || device.rol === 'director') && 
+              device.InstitutoId === realInstitutionId &&
+              device.alumno_asignado) {
+            
+            // Verificar si ya existe en la lista (evitar duplicados)
+            const exists = personalList.some(p => p.deviceId === deviceId);
+            if (!exists) {
+              personalList.push({
+                id: deviceId,
+                deviceId: deviceId,
+                nombre: device.alumno_asignado || 'Sin nombre',
+                role: device.rol || 'profesor',
+                email: device.email || '',
+                aulaId: device.aulaId,
+                seccion: device.seccion
+              });
+            }
+          }
+        });
+      }
+      
+      console.log('📦 Total personal (Firestore + RTDB):', personalList.length);
+      setPersonal(personalList);
       setLoading(false);
-      console.log('Personal cargado:', list.length);
+    };
+    
+    loadPersonal();
+    
+    // Escuchar cambios en RTDB en tiempo real
+    const devicesRef = ref(rtdb, 'dispositivos');
+    const unsubscribe = onValue(devicesRef, () => {
+      loadPersonal(); // Recargar cuando haya cambios
     });
-
-    return () => unsub();
+    
+    return () => off(devicesRef);
   }, [realInstitutionId]);
 
   // Cargar estado en tiempo real de dispositivos
@@ -182,7 +219,7 @@ export default function SedeMonitorClient({ institutoId }: SedeMonitorClientProp
       await update(ref(rtdb), updates);
       toast.success(nuevoEstado ? "🛡️ Dispositivo BLOQUEADO" : "🔓 Dispositivo LIBERADO");
     } catch (e) {
-      console.error('Error al bloquear dispositivo:', e);
+      console.error('Error:', e);
       toast.error("Error al enviar comando");
     }
   };
@@ -204,25 +241,17 @@ export default function SedeMonitorClient({ institutoId }: SedeMonitorClientProp
     <div className="p-8 space-y-10 animate-in fade-in duration-700">
       <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
         <div className="flex items-start gap-6">
-          <button 
-            onClick={() => router.back()}
-            className="bg-[#0f1117] border border-slate-800 p-4 rounded-2xl text-slate-500 hover:text-orange-500 hover:scale-110 transition-all shadow-xl"
-          >
+          <button onClick={() => router.back()} className="bg-[#0f1117] border border-slate-800 p-4 rounded-2xl text-slate-500 hover:text-orange-500 hover:scale-110 transition-all shadow-xl">
             <ChevronLeft size={20} />
           </button>
           <div>
             <div className="flex items-center gap-2 mb-2">
               <span className="text-[10px] font-black text-orange-500 uppercase tracking-[0.4em] italic">Sede Monitorizada</span>
             </div>
-            <h1 className="text-4xl font-black italic uppercase text-white tracking-tighter leading-none">
-              {nombreSede}
-            </h1>
-            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-2">
-              Control Jerárquico de Director y Personal Docente
-            </p>
+            <h1 className="text-4xl font-black italic uppercase text-white tracking-tighter leading-none">{nombreSede}</h1>
+            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-2">Control Jerárquico de Director y Personal Docente</p>
           </div>
         </div>
-
         <div className="bg-[#0f1117] border border-slate-800 px-6 py-4 rounded-3xl flex items-center gap-4 shadow-2xl">
           <div className="flex flex-col items-end">
             <span className="text-[8px] font-black text-slate-500 uppercase">Estado Red</span>
@@ -261,77 +290,46 @@ export default function SedeMonitorClient({ institutoId }: SedeMonitorClientProp
             const isBlocked = p.realtime?.shield_mode_enable === true;
             
             return (
-              <div 
-                key={p.id} 
-                className={`bg-[#0f1117] border rounded-[2.5rem] p-8 shadow-2xl transition-all relative group ${
-                  isBlocked ? 'border-red-500/50 bg-red-500/5' : 'border-slate-800 hover:border-orange-500/40'
-                }`}
-              >
+              <div key={p.id} className={`bg-[#0f1117] border rounded-[2.5rem] p-8 shadow-2xl transition-all relative group ${isBlocked ? 'border-red-500/50 bg-red-500/5' : 'border-slate-800 hover:border-orange-500/40'}`}>
                 <div className={`absolute top-8 right-8 flex items-center gap-2 bg-black/40 px-3 py-1 rounded-full border ${isOnline ? 'border-green-500/20' : 'border-slate-800'}`}>
                   <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-slate-700'}`} />
-                  <span className={`text-[8px] font-black uppercase ${isOnline ? 'text-green-500' : 'text-slate-600'}`}>
-                    {isOnline ? 'ONLINE' : 'OFFLINE'}
-                  </span>
+                  <span className={`text-[8px] font-black uppercase ${isOnline ? 'text-green-500' : 'text-slate-600'}`}>{isOnline ? 'ONLINE' : 'OFFLINE'}</span>
                 </div>
-
                 <div className="flex items-center gap-5 mb-8">
                   <div className={`p-4 rounded-2xl ${p.role === 'director' ? 'bg-orange-500 text-white shadow-orange-500/20' : 'bg-slate-800 text-slate-400'} shadow-lg`}>
                     <User size={24} />
                   </div>
                   <div>
-                    <h3 className="text-xl font-black italic uppercase text-white truncate max-w-[180px] leading-none mb-1">
-                      {p.nombre}
-                    </h3>
-                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest italic">
-                      {p.role === 'director' ? 'Director de Sede' : 'Personal Docente'}
-                    </p>
+                    <h3 className="text-xl font-black italic uppercase text-white truncate max-w-[180px] leading-none mb-1">{p.nombre}</h3>
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest italic">{p.role === 'director' ? 'Director de Sede' : 'Personal Docente'}</p>
+                    {(p.aulaId || p.seccion) && (
+                      <p className="text-[8px] text-slate-500 mt-1">{p.aulaId} {p.seccion ? `- ${p.seccion}` : ''}</p>
+                    )}
                   </div>
                 </div>
-
                 <div className="space-y-4 mb-8">
                   <div className="bg-black/40 p-4 rounded-2xl border border-white/5 group-hover:border-orange-500/20 transition-all">
                     <div className="flex items-center gap-2 mb-2">
                       <Globe className="text-slate-600" size={12} />
                       <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Navegación Activa</span>
                     </div>
-                    <p className="text-[10px] text-blue-400 font-bold truncate lowercase italic">
-                      {p.realtime?.url_actual || 'Browser Inactivo'}
-                    </p>
+                    <p className="text-[10px] text-blue-400 font-bold truncate lowercase italic">{p.realtime?.url_actual || 'Browser Inactivo'}</p>
                   </div>
-
                   <div className="flex items-center gap-3 px-2">
                     <Clock className="text-slate-700" size={12} />
-                    <span className="text-[9px] font-bold text-slate-600 uppercase">
-                      Visto: {p.realtime?.lastSeen ? new Date(p.realtime.lastSeen).toLocaleTimeString() : '---'}
-                    </span>
+                    <span className="text-[9px] font-bold text-slate-600 uppercase">Visto: {p.realtime?.lastSeen ? new Date(p.realtime.lastSeen).toLocaleTimeString() : '---'}</span>
                   </div>
                 </div>
-
                 <div className="grid grid-cols-2 gap-3">
-                  <button 
-                    onClick={() => setHistoryModal({ isOpen: true, deviceId, nombre: p.nombre })}
-                    className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 py-3 rounded-xl transition-all"
-                  >
+                  <button onClick={() => setHistoryModal({ isOpen: true, deviceId, nombre: p.nombre })} className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 py-3 rounded-xl transition-all">
                     <History size={14} className="text-blue-400" />
                     <span className="text-[9px] font-black uppercase italic text-white">Historial</span>
                   </button>
-                  
-                  <button 
-                    onClick={() => setMessageModal({ isOpen: true, deviceId, nombre: p.nombre })}
-                    className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-orange-600 py-3 rounded-xl transition-all group/msg"
-                  >
+                  <button onClick={() => setMessageModal({ isOpen: true, deviceId, nombre: p.nombre })} className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-orange-600 py-3 rounded-xl transition-all group/msg">
                     <MessageSquare size={14} className="text-orange-500 group-hover/msg:text-white" />
                     <span className="text-[9px] font-black uppercase italic text-white">Mensaje</span>
                   </button>
-
-                  <button 
-                    onClick={() => handleToggleBlock(deviceId, isBlocked)}
-                    className={`col-span-2 flex items-center justify-center gap-2 py-4 rounded-xl font-black uppercase italic text-[10px] transition-all border-2 shadow-xl ${
-                      isBlocked 
-                        ? 'bg-green-600/10 border-green-500 text-green-500 hover:bg-green-600 hover:text-white' 
-                        : 'bg-red-600 border-red-600 text-white hover:bg-red-700'
-                    }`}
-                  >
+                  <button onClick={() => handleToggleBlock(deviceId, isBlocked)} className={`col-span-2 flex items-center justify-center gap-2 py-4 rounded-xl font-black uppercase italic text-[10px] transition-all border-2 shadow-xl ${isBlocked ? 'bg-green-600/10 border-green-500 text-green-500 hover:bg-green-600 hover:text-white' : 'bg-red-600 border-red-600 text-white hover:bg-red-700'}`}>
                     {isBlocked ? <ShieldCheck size={16} /> : <ShieldX size={16} />}
                     {isBlocked ? 'DESBLOQUEAR DISPOSITIVO' : 'BLOQUEO TOTAL'}
                   </button>
@@ -342,22 +340,8 @@ export default function SedeMonitorClient({ institutoId }: SedeMonitorClientProp
         )}
       </div>
 
-      <WebHistoryModal 
-        isOpen={historyModal.isOpen}
-        onClose={() => setHistoryModal({ ...historyModal, isOpen: false })}
-        deviceId={historyModal.deviceId}
-        alumnoNombre={historyModal.nombre}
-        institutoId={realInstitutionId || institutoId}
-      />
-
-      {messageModal.isOpen && (
-        <DirectMessage 
-          deviceId={messageModal.deviceId}
-          alumnoNombre={messageModal.nombre}
-          userRole="super-admin"
-          onClose={() => setMessageModal({ ...messageModal, isOpen: false })}
-        />
-      )}
+      <WebHistoryModal isOpen={historyModal.isOpen} onClose={() => setHistoryModal({ ...historyModal, isOpen: false })} deviceId={historyModal.deviceId} alumnoNombre={historyModal.nombre} institutoId={realInstitutionId || institutoId} />
+      {messageModal.isOpen && <DirectMessage deviceId={messageModal.deviceId} alumnoNombre={messageModal.nombre} userRole="super-admin" onClose={() => setMessageModal({ ...messageModal, isOpen: false })} />}
     </div>
   );
 }
