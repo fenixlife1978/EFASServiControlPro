@@ -1,3 +1,4 @@
+import { useLogout } from "@/hooks/useLogout";
 'use client';
 import React, { useState, useEffect } from 'react';
 import { db, rtdb } from '@/firebase/config';

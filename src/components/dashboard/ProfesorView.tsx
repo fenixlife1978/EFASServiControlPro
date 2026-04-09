@@ -1,4 +1,5 @@
 'use client';
+import { useLogout } from "@/hooks/useLogout";
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db, auth, rtdb } from '@/firebase/config';
@@ -54,15 +55,7 @@ export default function ProfesorView() {
   
   const bloqueandoRef = useRef<Set<string>>(new Set());
 
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      localStorage.removeItem('InstitutoId');
-      window.location.href = '/login';
-    } catch (error) {
-      console.error("Error al cerrar sesión:", error);
-    }
-  };
+  const { handleLogout } = useLogout();
 
   useEffect(() => {
     if (typeof window !== 'undefined') {

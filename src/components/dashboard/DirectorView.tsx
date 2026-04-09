@@ -1,4 +1,6 @@
 'use client';
+
+import { useLogout } from "@/hooks/useLogout";
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { db, auth, rtdb } from '@/firebase/config';
 import { ref, get, set, serverTimestamp as rtdbTimestamp, off, onValue } from 'firebase/database';
@@ -67,15 +69,7 @@ export default function DirectorView() {
   // OPTIMIZACIÓN: Cache de deviceIds de la institución para filtrar más rápido
   const deviceIdsCache = useRef<Set<string>>(new Set());
 
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      localStorage.removeItem('InstitutoId');
-      window.location.href = '/login';
-    } catch (error) {
-      console.error("Error al cerrar sesión:", error);
-    }
-  };
+  const { handleLogout } = useLogout();
 
   // OPTIMIZACIÓN: Actualizar cache cuando cambian los dispositivos
   useEffect(() => {
