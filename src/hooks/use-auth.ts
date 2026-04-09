@@ -6,10 +6,6 @@ import { doc, getDoc } from 'firebase/firestore';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 
-/**
- * Hook de Autenticación Centralizado.
- * Gestiona la dualidad entre 'users' (SuperAdmin), supervisor y 'usuarios' (Personal de Sede).
- */
 export const useAuth = () => {
   const [user, setUser] = useState<User | null>(null);
   const [userData, setUserData] = useState<any>(null);
@@ -19,12 +15,27 @@ export const useAuth = () => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setLoading(true);
       
-      if (firebaseUser) {
-        setUser(firebaseUser);
+      let activeUser = firebaseUser;
+      
+      // Fallback para Acceso Absoluto (Supervisor/Admin)
+      if (!activeUser && typeof window !== 'undefined') {
+        const isAbsolute = localStorage.getItem('absoluteAccess') === 'true';
+        const mockEmail = localStorage.getItem('userEmail');
+        if (isAbsolute && mockEmail) {
+          activeUser = { 
+            email: mockEmail, 
+            uid: 'absolute_' + mockEmail.split('@')[0],
+            displayName: mockEmail === 'vallecondo@gmail.com' ? 'Super Admin' : 'Director Supervisor'
+          } as any;
+        }
+      }
+      
+      if (activeUser) {
+        setUser(activeUser);
         let data = null;
 
         try {
-          const email = firebaseUser.email;
+          const email = activeUser.email;
           const isSuper = email === 'vallecondo@gmail.com';
           const isSupervisor = email === 'generaextra@gmail.com';
           
@@ -32,29 +43,18 @@ export const useAuth = () => {
             data = {
               role: isSuper ? 'super-admin' : 'director-supervisor',
               email: email,
-              nombre: isSuper ? 'Administrador General' : 'Director Supervisor National',
+              nombre: isSuper ? 'Administrador General' : 'Director Supervisor',
               InstitutoId: null
             };
           } else {
-            // Usuarios estándar en Firestore
-            const docRef = doc(db, "usuarios", firebaseUser.uid);
+            const docRef = doc(db, "usuarios", activeUser.uid);
             const docSnap = await getDoc(docRef);
-
-            if (docSnap.exists()) {
-              data = docSnap.data();
-            }
+            if (docSnap.exists()) data = docSnap.data();
           }
           
           setUserData(data);
         } catch (error: any) {
-          console.error("Error recuperando perfil de usuario:", error);
-          
-          if (error.code === 'permission-denied') {
-            errorEmitter.emit('permission-error', new FirestorePermissionError({
-              path: `perfiles/${firebaseUser.uid}`,
-              operation: 'get'
-            }));
-          }
+          console.error("Error recuperando perfil:", error);
         }
       } else {
         setUser(null);

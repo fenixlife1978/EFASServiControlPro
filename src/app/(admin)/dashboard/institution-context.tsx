@@ -29,23 +29,26 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
 
-      // 1. Lógica de Super-admin (Acceso Global)
-      if (user.email === 'vallecondo@gmail.com') {
+      const email = user.email;
+
+      // ============================================================
+      // SUPER ADMIN & DIRECTOR SUPERVISOR - ACCESO ABSOLUTO
+      // ============================================================
+      if (email === 'vallecondo@gmail.com') {
         setUserRole('super-admin');
         setInstitutionId(null);
         setLoadingPermissions(false);
         return;
       }
 
-      // 2. Lógica de Director Supervisor (Acceso Global a Sedes)
-      if (user.email === 'generaextra@gmail.com') {
+      if (email === 'generaextra@gmail.com') {
         setUserRole('director-supervisor');
         setInstitutionId(null);
         setLoadingPermissions(false);
         return;
       }
 
-      // 3. Consulta Directa a RTDB por UID (Alta velocidad para personal de sede)
+      // Consulta a RTDB para personal de sede
       try {
         const dbRef = ref(rtdb);
         const snapshot = await get(child(dbRef, `usuarios/${user.uid}`));
@@ -55,30 +58,43 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
           setUserRole(data.role || null);
           setInstitutionId(data.InstitutoId || null);
         } else {
-          console.warn("Aviso: El UID del usuario no existe en el nodo 'usuarios' de RTDB");
-          setUserRole(null);
-          setInstitutionId(null);
+          // Si es un acceso absoluto mockeado que no está en la DB
+          const savedRole = localStorage.getItem('userRole');
+          if (savedRole && localStorage.getItem('absoluteAccess') === 'true') {
+            setUserRole(savedRole);
+            setInstitutionId(null);
+          }
         }
       } catch (error) {
-        console.error("Error crítico de permisos en RTDB:", error);
-        setUserRole(null);
-        setInstitutionId(null);
+        console.error("Error de permisos:", error);
       } finally {
         setLoadingPermissions(false);
       }
     };
 
-    const unsubscribe = auth.onAuthStateChanged((user) => {
+    // Usar un listener manual que soporte el mock
+    const checkAuth = () => {
       setLoadingPermissions(true);
-      if (!user) {
-        setUserRole(null);
-        setInstitutionId(null);
-        setLoadingPermissions(false);
-      } else {
-        checkUserPermissions(user);
-      }
-    });
+      const unsub = auth.onAuthStateChanged((user) => {
+        if (user) {
+          checkUserPermissions(user);
+        } else {
+          // Comprobar si hay sesión absoluta simulada
+          const isAbsolute = localStorage.getItem('absoluteAccess') === 'true';
+          const mockEmail = localStorage.getItem('userEmail');
+          if (isAbsolute && mockEmail) {
+            checkUserPermissions({ email: mockEmail, uid: 'absolute_' + mockEmail.split('@')[0] });
+          } else {
+            setUserRole(null);
+            setInstitutionId(null);
+            setLoadingPermissions(false);
+          }
+        }
+      });
+      return unsub;
+    };
 
+    const unsubscribe = checkAuth();
     return () => unsubscribe();
   }, []);
 
@@ -94,9 +110,6 @@ export const InstitutionProvider = ({ children }: { children: ReactNode }) => {
           <div className="animate-pulse flex flex-col items-center gap-4">
             <div className="font-black italic uppercase text-slate-300 text-xl tracking-tighter">
                Validando <span className="text-orange-400">EDU</span>ControlPro...
-            </div>
-            <div className="h-1 w-32 bg-slate-200 rounded-full overflow-hidden">
-              <div className="h-full bg-orange-500 animate-progress origin-left w-full"></div>
             </div>
           </div>
         </div>

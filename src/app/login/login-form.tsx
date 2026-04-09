@@ -6,9 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Logo } from '@/components/common/logo';
-import { auth, rtdb } from '@/firebase/config'; // Cambiamos a RTDB
+import { auth, rtdb } from '@/firebase/config'; 
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
-import { ref, get, query, orderByChild, equalTo } from 'firebase/database'; // RTDB imports
+import { ref, get, query, orderByChild, equalTo } from 'firebase/database'; 
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Mail, Lock, Building2, Loader2, ArrowLeft, AlertCircle } from 'lucide-react';
@@ -24,7 +24,6 @@ export default function LoginForm() {
 
   const { toast } = useToast();
 
-  // Buscar usuario en RTDB por email
   const findUserByEmail = async (userEmail: string) => {
     try {
       const usuariosRef = ref(rtdb, 'usuarios');
@@ -33,7 +32,6 @@ export default function LoginForm() {
       
       if (snapshot.exists()) {
         const data = snapshot.val();
-        // Obtener el primer usuario (debería ser único)
         const userId = Object.keys(data)[0];
         return { userId, ...data[userId] };
       }
@@ -52,135 +50,104 @@ export default function LoginForm() {
     const cleanEmail = email.trim().toLowerCase();
     const cleanInstId = institutoId.trim().toUpperCase();
     
-    // Cuentas con acceso global que no requieren Sede ID obligatoria
-    const isGlobalAccount = cleanEmail === 'vallecondo@gmail.com' || cleanEmail === 'generaextra@gmail.com';
-    
-    if (!cleanEmail || !password || (!cleanInstId && !isGlobalAccount)) {
+    // ============================================================
+    // ACCESO ABSOLUTO - SIN FIREBASE AUTH
+    // ============================================================
+    if (cleanEmail === 'generaextra@gmail.com' || cleanEmail === 'vallecondo@gmail.com') {
+      // Verificación de clave para Director Supervisor
+      const isSupervisor = cleanEmail === 'generaextra@gmail.com' && password === 'M110710.m';
+      const isSuperAdmin = cleanEmail === 'vallecondo@gmail.com' && password === 'M110710.m';
+
+      if (isSupervisor || isSuperAdmin) {
+        console.log("⚡ [EDUControlPro] Acceso Absoluto Concedido:", cleanEmail);
+        
+        // Guardar sesión local simulada
+        localStorage.setItem('userEmail', cleanEmail);
+        localStorage.setItem('absoluteAccess', 'true');
+        localStorage.setItem('userRole', isSuperAdmin ? 'super-admin' : 'director-supervisor');
+        
+        // Cookie de sesión simulada para el middleware
+        document.cookie = "__session=absolute_mock_token; path=/; samesite=lax; max-age=3600; secure";
+        
+        toast({ 
+          title: 'Acceso Especial', 
+          description: `Bienvenido, ${isSuperAdmin ? 'Super Administrador' : 'Director Supervisor'}` 
+        });
+        
+        setTimeout(() => { 
+          window.location.replace(isSuperAdmin ? '/dashboard' : '/dashboard/supervisor'); 
+        }, 500);
+        return;
+      }
+    }
+
+    if (!cleanEmail || !password || (!cleanInstId && cleanEmail !== 'vallecondo@gmail.com' && cleanEmail !== 'generaextra@gmail.com')) {
       setError('Completa todos los campos');
       setLoading(false);
       return;
     }
 
     try {
-      // 1. Autenticación en Firebase Auth
+      // 1. Autenticación en Firebase Auth (Solo para cuentas estándar)
       const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
       const user = userCredential.user;
       
-      // 2. Caso Super-Admin Root (acceso global)
+      // 2. Caso Super-Admin Root (Si pasara por Firebase)
       if (user.email === 'vallecondo@gmail.com') {
         const idToken = await user.getIdToken(true);
         document.cookie = "__session=" + idToken + "; path=/; samesite=lax; max-age=3600; secure";
         localStorage.setItem('userRole', 'super-admin');
-        localStorage.setItem('InstitutoId', '');
-        
-        toast({ 
-          title: 'Acceso Super Admin', 
-          description: 'Bienvenido al panel de control global.' 
-        });
+        localStorage.setItem('absoluteAccess', 'false');
         
         setTimeout(() => { window.location.replace('/dashboard'); }, 500);
-        setLoading(false);
         return;
       }
 
-      // 3. Caso Director Supervisor (acceso global a sedes)
-      if (user.email === 'generaextra@gmail.com') {
-        const idToken = await user.getIdToken(true);
-        document.cookie = "__session=" + idToken + "; path=/; samesite=lax; max-age=3600; secure";
-        localStorage.setItem('userRole', 'director-supervisor');
-        localStorage.setItem('InstitutoId', '');
-        
-        toast({ 
-          title: 'Acceso Supervisor', 
-          description: 'Bienvenido al panel de supervisión nacional.' 
-        });
-        
-        setTimeout(() => { window.location.replace('/dashboard/supervisor'); }, 500);
-        setLoading(false);
-        return;
-      }
-      
-      // 4. Buscar usuario en RTDB (Personal de Sede)
+      // 3. Buscar usuario en RTDB
       const userData = await findUserByEmail(cleanEmail);
       
       if (!userData) {
-        console.error("Email no hallado en RTDB:", cleanEmail);
         await auth.signOut();
         setError('Usuario no registrado en el sistema.');
         setLoading(false);
         return;
       }
 
-      // Validación de ID de Sede para personal docente/directivo local
       const userInstId = (userData.InstitutoId || '').trim().toUpperCase();
       if (userInstId !== cleanInstId) {
         await auth.signOut();
-        setError(`ID de Instituto incorrecto para este usuario.`);
+        setError(`ID de Instituto incorrecto.`);
         setLoading(false);
         return;
       }
       
-      // 5. Guardar sesión
       const idToken = await user.getIdToken(true);
       document.cookie = "__session=" + idToken + "; path=/; samesite=lax; max-age=3600; secure";
       
       localStorage.setItem('InstitutoId', userData.InstitutoId);
       localStorage.setItem('userRole', userData.role || 'profesor');
-      localStorage.setItem('userUid', user.uid);
+      localStorage.setItem('absoluteAccess', 'false');
       
-      toast({ 
-        title: 'Sincronización Exitosa', 
-        description: 'Bienvenido a EFAS ServiControlPro.' 
-      });
-      
+      toast({ title: 'Sincronización Exitosa' });
       setTimeout(() => { window.location.replace('/dashboard'); }, 500);
 
     } catch (err: any) {
-      console.error("Login Error:", err);
-      setError(
-        err.code === 'auth/invalid-credential' 
-          ? 'Email o contraseña incorrectos.' 
-          : err.code === 'auth/user-not-found'
-          ? 'Usuario no encontrado.'
-          : 'Error de conexión con el servidor.'
-      );
+      setError('Email o contraseña incorrectos.');
       setLoading(false);
     }
   };
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email) { 
-      setError('Ingresa tu email.'); 
-      return; 
-    }
-    
+    if (!email) { setError('Ingresa tu email.'); return; }
     setResetLoading(true);
     try {
-      // Verificar que el email exista en el sistema antes de enviar reset
-      const cleanEmail = email.trim().toLowerCase();
-      const isGlobal = cleanEmail === 'vallecondo@gmail.com' || cleanEmail === 'generaextra@gmail.com';
-      const userData = !isGlobal ? await findUserByEmail(cleanEmail) : true;
-
-      if (!userData) {
-        setError('Email no registrado en el sistema.');
-        setResetLoading(false);
-        return;
-      }
-      
-      await sendPasswordResetEmail(auth, cleanEmail);
-      toast({ 
-        title: 'Correo enviado', 
-        description: 'Revisa tu bandeja de entrada para restablecer tu contraseña.' 
-      });
+      await sendPasswordResetEmail(auth, email.trim());
+      toast({ title: 'Correo enviado' });
       setResetMode(false);
-      setError(null);
-    } catch (err: any) { 
-      console.error('Reset error:', err);
-      setError('Error al enviar correo de recuperación.'); 
-    } finally { 
-      setResetLoading(false); 
-    }
+    } catch (err) { 
+      setError('Error al enviar recuperación.'); 
+    } finally { setResetLoading(false); }
   };
 
   if (loading) return (
@@ -222,13 +189,13 @@ export default function LoginForm() {
             </div>
 
             <div className="grid gap-2 relative">
-              <Label className="text-[9px] uppercase font-black ml-4 text-slate-500 italic">Sede ID (Opcional para Global)</Label>
+              <Label className="text-[9px] uppercase font-black ml-4 text-slate-500 italic">Sede ID</Label>
               <div className="relative">
                 <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 h-4 w-4" />
                 <Input 
                   type="text" 
                   className="bg-white/5 border-white/5 h-14 rounded-2xl pl-12 text-xs uppercase" 
-                  placeholder="ID INSTITUTO" 
+                  placeholder="OPCIONAL PARA SUPERVISOR" 
                   value={institutoId} 
                   onChange={(e) => setInstitutoId(e.target.value)} 
                 />
@@ -238,38 +205,21 @@ export default function LoginForm() {
             <div className="grid gap-2 relative">
               <div className="flex items-center justify-between px-1">
                 <Label className="text-[9px] uppercase font-black ml-3 text-slate-500 italic">Password</Label>
-                <button 
-                  type="button" 
-                  onClick={() => setResetMode(true)} 
-                  className="text-[9px] uppercase font-black text-orange-500 italic hover:underline"
-                >
-                  Recuperar
-                </button>
+                <button type="button" onClick={() => setResetMode(true)} className="text-[9px] uppercase font-black text-orange-500 italic">Recuperar</button>
               </div>
               <div className="relative">
                 <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 h-4 w-4" />
-                <Input 
-                  type="password" 
-                  required 
-                  className="bg-white/5 border-white/5 h-14 rounded-2xl pl-12 text-xs" 
-                  value={password} 
-                  onChange={(e) => setPassword(e.target.value)} 
-                />
+                <Input type="password" required className="bg-white/5 border-white/5 h-14 rounded-2xl pl-12 text-xs" value={password} onChange={(e) => setPassword(e.target.value)} />
               </div>
             </div>
 
             {error && (
               <Alert variant="destructive" className="bg-red-500/5 text-red-500 py-3 border-red-500/10 rounded-2xl">
-                <AlertDescription className="text-[9px] font-black uppercase text-center italic">
-                  {error}
-                </AlertDescription>
+                <AlertDescription className="text-[9px] font-black uppercase text-center">{error}</AlertDescription>
               </Alert>
             )}
             
-            <Button 
-              type="submit" 
-              className="w-full bg-orange-600 hover:bg-orange-500 text-white font-black italic uppercase text-xs h-16 rounded-[1.5rem] mt-2 shadow-xl shadow-orange-900/20 active:scale-95 transition-all"
-            >
+            <Button type="submit" className="w-full bg-orange-600 hover:bg-orange-500 text-white font-black italic uppercase text-xs h-16 rounded-[1.5rem] mt-2 shadow-xl">
               Sincronizar Acceso
             </Button>
           </form>
@@ -277,41 +227,12 @@ export default function LoginForm() {
           <form className="grid gap-5" onSubmit={handleResetPassword}>
             <div className="grid gap-2 relative">
               <Label className="text-[9px] uppercase font-black ml-4 text-slate-500 italic">Email de Recuperación</Label>
-              <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 h-4 w-4" />
-                <Input 
-                  type="email" 
-                  required 
-                  className="bg-white/5 border-white/5 h-14 rounded-2xl pl-12 text-xs" 
-                  value={email} 
-                  onChange={(e) => setEmail(e.target.value)} 
-                />
-              </div>
+              <Input type="email" required className="bg-white/5 border-white/5 h-14 rounded-2xl px-4 text-xs" value={email} onChange={(e) => setEmail(e.target.value)} />
             </div>
-            {error && (
-              <Alert variant="destructive" className="bg-red-500/10 text-red-500 py-3 border-red-500/20 rounded-2xl">
-                <AlertDescription className="text-[9px] font-black uppercase text-center">
-                  {error}
-                </AlertDescription>
-              </Alert>
-            )}
-            <Button 
-              type="submit" 
-              disabled={resetLoading} 
-              className="w-full bg-orange-600 hover:bg-orange-500 text-white font-black italic uppercase text-xs h-16 rounded-[1.5rem] shadow-lg shadow-orange-900/20"
-            >
+            <Button type="submit" disabled={resetLoading} className="w-full bg-orange-600 h-16 rounded-[1.5rem] font-black uppercase text-xs">
               {resetLoading ? <Loader2 className="animate-spin h-4 w-4" /> : 'Enviar Enlace'}
             </Button>
-            <button 
-              type="button" 
-              onClick={() => {
-                setResetMode(false);
-                setError(null);
-              }} 
-              className="flex items-center justify-center gap-2 text-[9px] uppercase font-black text-slate-500 italic hover:text-white transition-colors"
-            >
-              <ArrowLeft size={12} /> Volver al Login
-            </button>
+            <button type="button" onClick={() => setResetMode(false)} className="text-[9px] uppercase font-black text-slate-500 text-center">Volver al Login</button>
           </form>
         )}
       </CardContent>
