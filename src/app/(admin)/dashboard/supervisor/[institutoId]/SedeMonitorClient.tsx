@@ -227,7 +227,7 @@ export default function SedeMonitorClient({ institutoId }: SedeMonitorClientProp
             <span className="text-[8px] font-black text-slate-500 uppercase">Estado Red</span>
             <span className="text-xs font-black text-green-500 uppercase italic">Sincronización Live</span>
           </div>
-          <div className="w-10 h-10 bg-green-500/10 rounded-xl flex items-center justify-center border border-green-500/20">
+          <div className="width-10 h-10 bg-green-500/10 rounded-xl flex items-center justify-center border border-green-500/20">
             <Activity className="text-green-500 animate-pulse" size={20} />
           </div>
         </div>
