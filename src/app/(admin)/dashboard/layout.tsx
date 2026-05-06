@@ -4,10 +4,7 @@ import React, { useEffect, useState, Suspense } from 'react';
 import { 
   ShieldCheck, 
   LogOut, 
-  LayoutDashboard, 
-  Settings, 
-  Download,
-  School
+  Download
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useSearchParams, useRouter } from 'next/navigation';
@@ -18,14 +15,12 @@ import { usePWAInstall } from '@/hooks/usePWAInstall';
 import { DatabaseSelector } from '@/components/DatabaseSelector';
 
 const AdminNavbar = () => {
-  const pathname = usePathname();
   const { installApp, isInstallable, isStandalone } = usePWAInstall();
 
   const handleLogout = () => {
     auth.signOut().then(() => {
       document.cookie = "__session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;";
       
-      // Mantenemos tu lógica de preservación de configuración:
       localStorage.removeItem('userRole');
       localStorage.removeItem('InstitutoId');
       localStorage.removeItem('deviceId');
@@ -50,27 +45,7 @@ const AdminNavbar = () => {
           </div>
         </Link>
 
-        {/* Navegación Principal - Respetando tus rutas */}
-        <div className="hidden lg:flex items-center gap-8">
-          <Link 
-            href="/dashboard" 
-            className={`text-[11px] font-black uppercase italic flex items-center gap-2 transition-colors ${pathname === '/dashboard' ? 'text-orange-500' : 'text-slate-400 hover:text-white'}`}
-          >
-            <LayoutDashboard className="w-4 h-4" /> Dashboard
-          </Link>
-          <Link 
-            href="/dashboard/classrooms" 
-            className={`text-[11px] font-black uppercase italic flex items-center gap-2 transition-colors ${pathname?.includes('classrooms') ? 'text-orange-500' : 'text-slate-400 hover:text-white'}`}
-          >
-            <School className="w-4 h-4" /> Aulas
-          </Link>
-          <Link 
-            href="/institutions" 
-            className={`text-[11px] font-black uppercase italic flex items-center gap-2 transition-colors ${pathname?.includes('institutions') ? 'text-orange-500' : 'text-slate-400 hover:text-white'}`}
-          >
-            <Settings className="w-4 h-4" /> Instituciones
-          </Link>
-        </div>
+        {/* Navegación Principal - ELIMINADA */}
 
         <div className="flex items-center gap-6">
           {isInstallable && !isStandalone && (
