@@ -17,23 +17,21 @@ const firebaseConfig = {
 // Inicialización Singleton segura
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-// --- CORRECCIÓN SOLO PARA EL BUILD (Mantiene tu lógica de persistencia) ---
+// --- Mantiene tu lógica de persistencia:
 const firestore = (typeof window !== "undefined") 
   ? initializeFirestore(app, {
       localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
     })
-  : initializeFirestore(app, {}); // Evita el error en la terminal durante el build
+  : initializeFirestore(app, {});
 
 const auth = getAuth(app);
 const storage = getStorage(app);
 const realtimeDb = getDatabase(app); 
 
-// Tipos de modo de conexión para el ecosistema
 export type DbMode = 'cloud' | 'local' | 'hybrid';
 
-// ====================================================
-// FUNCIONES DE CONFIGURACIÓN Y PERSISTENCIA LOCAL (TUS 50+ LÍNEAS)
-// ====================================================
+// Configuración global del endpoint por defecto (Vercel):
+const DEFAULT_API_URL = "https://efas-control.vercel.app";
 
 /**
  * Obtiene el modo de base de datos actual desde el almacenamiento local.
@@ -63,13 +61,14 @@ export const getLocalServerUrl = (): string => {
     if (config) {
       try {
         const { url } = JSON.parse(config);
-        return url || "http://localhost:5000";
+        // SI url está vacía, usa el endpoint de Vercel para asegurar funcionalidad en el .exe:
+        return url || DEFAULT_API_URL;
       } catch (e) {
-        return "http://localhost:5000";
+        return DEFAULT_API_URL;
       }
     }
   }
-  return "http://localhost:5000";
+  return DEFAULT_API_URL;
 };
 
 /**
@@ -81,26 +80,23 @@ export const setDbMode = (mode: DbMode, localUrl?: string) => {
   }
 };
 
-// ====================================================
-// API CLIENT PARA MODO LOCAL/HÍBRIDO
-// ====================================================
-
 /**
- * Crea un cliente de API para interactuar con el servidor local de la sede.
- * Útil para funciones que no pueden esperar a la sincronización de Firebase.
+ * Crea un cliente de API para interactuar con el servidor local o la nube.
  */
 export const createApiClient = (baseUrl: string) => {
+  // Usa la URL base pasada o el endpoint default:
+  const apiBase = baseUrl || DEFAULT_API_URL;
   const fetchOptions = {
     headers: { 'Content-Type': 'application/json' }
   };
 
   return {
     getDispositivos: async () => {
-      const res = await fetch(`${baseUrl}/api/dispositivos`);
+      const res = await fetch(`${apiBase}/api/dispositivos`);
       return res.json();
     },
     updateDispositivo: async (id: string, data: any) => {
-      const res = await fetch(`${baseUrl}/api/dispositivos/${id}`, {
+      const res = await fetch(`${apiBase}/api/dispositivos/${id}`, {
         method: 'PUT',
         ...fetchOptions,
         body: JSON.stringify(data)
@@ -108,12 +104,12 @@ export const createApiClient = (baseUrl: string) => {
       return res.json();
     },
     getWebHistory: async (deviceId: string) => {
-      const res = await fetch(`${baseUrl}/api/web-history/${deviceId}`);
+      const res = await fetch(`${apiBase}/api/web-history/${deviceId}`);
       return res.json();
     },
-    // Envía un comando de bloqueo instantáneo al servidor local
+    // Envía un comando de bloqueo instantáneo al servidor local o nube
     sendInstantCommand: async (deviceId: string, command: string) => {
-      const res = await fetch(`${baseUrl}/api/commands`, {
+      const res = await fetch(`${apiBase}/api/commands`, {
         method: 'POST',
         ...fetchOptions,
         body: JSON.stringify({ deviceId, command })

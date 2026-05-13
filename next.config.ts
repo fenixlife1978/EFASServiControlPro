@@ -1,27 +1,33 @@
 /** @type {import('next').NextConfig} */
-const isAndroidBuild = process.env.IS_ANDROID_BUILD === 'true';
 
+// Detecta si es build para Android o para exportación estática (Electron)
+const isAndroidBuild = process.env.IS_ANDROID_BUILD === 'true';
+// Puedes usar también una variable IS_ELECTRON_BUILD si lo prefieres, pero para ahora con export es suficiente:
+
+const isStaticExport = isAndroidBuild || process.env.IS_DESKTOP_BUILD === 'true';
+
+// Next.js Config
 const nextConfig = {
-  // 1. Condicional de salida: 'export' para Capacitor, 'undefined' para Vercel
-  output: isAndroidBuild ? 'export' : undefined,
+  // Para Android o Escritorio (Electron): export estático
+  output: isStaticExport ? 'export' : undefined,
   
-  // 2. Directorio de salida: 'out' es lo que busca Capacitor por defecto
-  distDir: isAndroidBuild ? 'out' : '.next',
+  // Directorio de salida
+  distDir: isStaticExport ? 'out' : '.next',
   
-  // 3. Configuración de imágenes: Obligatorio 'unoptimized' para builds estáticos
+  // Imágenes sin optimización para exportación estática
   images: {
     unoptimized: true,
   },
 
-  // 4. Compatibilidad de rutas: Añade la barra final (ej: /login/) para evitar problemas en Android
+  // Compatibilidad de rutas (barra al final)
   trailingSlash: true,
 
-  // 5. Blindaje: Ignoramos errores de compilación solo si estamos en build de Android
+  // Blindaje: Ignora errores solo en build externos
   typescript: {
-    ignoreBuildErrors: isAndroidBuild,
+    ignoreBuildErrors: isStaticExport,
   },
   eslint: {
-    ignoreDuringBuilds: isAndroidBuild,
+    ignoreDuringBuilds: isStaticExport,
   },
 };
 

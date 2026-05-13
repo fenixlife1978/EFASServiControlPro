@@ -6,6 +6,9 @@ import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { useInstitution } from '@/app/(admin)/dashboard/institution-context';
 import { useRouter } from 'next/navigation';
 
+// CONFIGURA tu endpoint externo aquí:
+const DEFAULT_API_URL = "https://efas-control.vercel.app";
+
 export default function RegistroPersonal() {
   const { institutionId } = useInstitution();
   const router = useRouter();
@@ -24,8 +27,13 @@ export default function RegistroPersonal() {
     setMensaje({ tipo: '', texto: '' });
 
     try {
-      // Usar la ruta de API segura que creamos para no desloguear al admin
-      const res = await fetch('/api/admin/create-user', {
+      // Obtiene la URL base por entorno
+      const baseUrl =
+        typeof window !== "undefined" && window.location.origin
+          ? window.location.origin
+          : DEFAULT_API_URL;
+
+      const res = await fetch(`${baseUrl}/api/admin/create-user`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

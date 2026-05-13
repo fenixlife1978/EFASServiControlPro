@@ -9,7 +9,7 @@ const newAulaLogic = `  const [isExistingAula, setIsExistingAula] = useState(fal
     if (!newAula.nombre || !newAula.seccion) return;
     
     // Generamos un ID único combinando Nombre + Sección + InstId para evitar sobrescritura
-    const uniqueId = \`\${newAula.nombre.replace(/\s+/g, '_')}_\${newAula.seccion}_\${selectedConfig.instId}\`.toLowerCase();
+    const uniqueId = \`\${newAula.nombre.replace(/\\s+/g, '_')}_\${newAula.seccion}_\${selectedConfig.instId}\`.toLowerCase();
     
     try {
       await setDoc(doc(db, "aulas", uniqueId), {
@@ -77,7 +77,8 @@ const aulaModalUI = `                <div className="space-y-4 py-4">
                   </div>
                 </div>`;
 
-content = content.replace(/\{isAddingAula && \([\s\S]*?<div className="space-y-4 py-4">[\s\S]*?<\/div>/, \`{isAddingAula && ( \n \${aulaModalUI}\`);
+// CORREGIDO: La expresión regular estaba mal formada
+content = content.replace(/\{isAddingAula && \([\s\S]*?<div className="space-y-4 py-4">[\s\S]*?<\/div>\s*\)\s*\}/, `{isAddingAula && (\n${aulaModalUI}\n)}`);
 
 // 3. Corregir el Mapa de Aulas para agrupar por nombre y mostrar secciones
 const groupedAulasUI = `            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -105,6 +106,7 @@ const groupedAulasUI = `            <div className="grid grid-cols-2 md:grid-col
               })}
             </div>`;
 
+// CORREGIDO: La expresión regular estaba mal cerrada
 content = content.replace(/<div className="grid grid-cols-2 md:grid-cols-4 gap-4">[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/, groupedAulasUI + '\n            </div>\n          </div>');
 
 fs.writeFileSync(path, content);

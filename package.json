@@ -2,13 +2,23 @@
   "name": "nextn",
   "version": "0.1.0",
   "private": true,
+  "main": "electron-main.js",
   "scripts": {
+    "electron:build": "electron-builder --win",
     "dev": "next dev",
     "build": "next build",
     "build:vercel": "next build",
     "build:android": "node scripts/build-android.js",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "electron": "electron .",
+    "build:electron": "npm run build && npm run export && electron-builder",
+    "dist:electron": "electron-builder",
+    "export": "next export",
+    "predesktopbuild": "node scripts/hide-api.js",
+    "desktopbuild": "set IS_DESKTOP_BUILD=true && npm run build",
+    "postdesktopbuild": "node scripts/restore-api.js",
+    "desktop-export": "npm run predesktopbuild && npm run desktopbuild && npm run postdesktopbuild"
   },
   "dependencies": {
     "@capacitor/android": "^8.2.0",
@@ -53,7 +63,7 @@
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.577.0",
-    "next": "^15.5.13",
+    "next": "^15.5.18",
     "patch-package": "^8.0.0",
     "qrcode.react": "^3.1.0",
     "react": "^19.2.4",
@@ -80,10 +90,27 @@
     "@types/node": "^20.19.37",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "firebase": "^12.11.0",
+    "electron": "^41.5.2",
+    "electron-builder": "^26.8.1",
+    "firebase": "^12.13.0",
     "genkit-cli": "^1.20.0",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.9.3"
+  },
+  "build": {
+    "appId": "pro.efasservicontrol.desktop",
+    "productName": "EFAS ServiControl Pro",
+    "directories": {
+      "output": "dist_electron"
+    },
+    "files": [
+      "out/**/*",
+      "electron-main.js",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    }
   }
 }

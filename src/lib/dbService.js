@@ -20,6 +20,9 @@ const COLLECTION_ROUTES = {
   ]
 };
 
+// Cambia este valor SIEMPRE que cambies el URL de tu vercel.
+const DEFAULT_API_URL = "https://efas-control.vercel.app";
+
 export const dbService = {
   // Obtiene la configuración guardada por el usuario
   getSettings() {
@@ -37,7 +40,7 @@ export const dbService = {
   },
 
   // ============================================================
-  // NUEVO: Obtener incidencias de un dispositivo específico
+  // Obtener incidencias de un dispositivo específico
   // ============================================================
   async getIncidencias(deviceId) {
     const { mode, url } = this.getSettings();
@@ -80,9 +83,12 @@ export const dbService = {
     }
   },
 
+  // LA CORRECCIÓN CLAVE:
   async fetchIncidenciasLocal(url, deviceId) {
     try {
-      const response = await fetch(`${url}/api/incidencias?deviceId=${deviceId}`);
+      // Si url no está definida o está vacía, usa el backend público de Vercel:
+      const base = url || DEFAULT_API_URL;
+      const response = await fetch(`${base}/api/incidencias?deviceId=${deviceId}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return await response.json();
     } catch (error) {
@@ -127,9 +133,11 @@ export const dbService = {
     }
   },
 
+  // LA OTRA CORRECCIÓN CLAVE:
   async fetchExternal(url, collectionName) {
     try {
-      const response = await fetch(`${url}/api/${collectionName}`);
+      const base = url || DEFAULT_API_URL;
+      const response = await fetch(`${base}/api/${collectionName}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return await response.json();
     } catch (error) {
@@ -189,7 +197,6 @@ export const dbService = {
     return { success: false, mode: 'unknown' };
   }
 };
-
 
 if (typeof window !== 'undefined') {
   (window).dbService = dbService;
