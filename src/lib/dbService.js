@@ -1,3 +1,4 @@
+import { offlineSync } from "./offlineSync";
 import { db } from '@/firebase/config';
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 
@@ -164,6 +165,10 @@ export const dbService = {
   },
 
   async sendData(collectionName, data, method = 'POST') {
+    if (typeof navigator !== "undefined" && !navigator.onLine && offlineSync) {
+      console.log(`📦 Offline: Encolando ${collectionName}`);
+      return offlineSync.queueAction(collectionName, data, method);
+    }
     const { mode, url } = this.getSettings();
     
     if (mode !== 'firebase' && !url) {
