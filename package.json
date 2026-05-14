@@ -99,8 +99,8 @@
     "typescript": "^5.9.3"
   },
   "build": {
-    "appId": "pro.efasservicontrol.desktop",
-    "productName": "EFAS ServiControl Pro",
+    "appId": "com.educontrolpro.desktop",
+    "productName": "EDUControlPro",
     "directories": {
       "output": "dist_electron"
     },
@@ -110,6 +110,7 @@
       "package.json"
     ],
     "win": {
+    "icon": "public/favicon.ico",
       "target": "nsis"
     },
     "npmRebuild": false,
