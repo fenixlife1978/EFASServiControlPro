@@ -12,7 +12,7 @@
     "start": "next start",
     "lint": "next lint",
     "electron": "electron .",
-    "build:electron": "npm run build && npm run export && electron-builder",
+    "build:electron": "npm run build && electron-builder",
     "dist:electron": "electron-builder",
     "export": "next export",
     "predesktopbuild": "node scripts/hide-api.js",
