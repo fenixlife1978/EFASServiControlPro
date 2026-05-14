@@ -110,7 +110,7 @@
       "package.json"
     ],
     "win": {
-    "icon": "public/favicon.ico",
+    "icon": "public/icon.png",
       "target": "nsis"
     },
     "npmRebuild": false,
