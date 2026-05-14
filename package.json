@@ -113,7 +113,6 @@
       "target": "nsis"
     },
     "npmRebuild": false,
-    "nodeGypRebuild": false,
-    "includeSubNodeModules": false
+    "nodeGypRebuild": false
   }
 }
