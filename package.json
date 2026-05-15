@@ -105,17 +105,26 @@
       "output": "dist_electron"
     },
     "files": [
+      "electron-main.js",
       ".next/standalone/**/*",
       ".next/static/**/*",
-      "out/**/*",
-      "electron-main.js",
-      "package.json"
+      "public/**/*"
     ],
     "win": {
-    "icon": "public/icon.png",
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "public/icon.png"
     },
     "npmRebuild": false,
-    "nodeGypRebuild": false
+    "nodeGypRebuild": false,
+    "extraResources": [
+      {
+        "from": ".next/standalone",
+        "to": "standalone"
+      },
+      {
+        "from": ".next/static",
+        "to": "static"
+      }
+    ]
   }
 }
