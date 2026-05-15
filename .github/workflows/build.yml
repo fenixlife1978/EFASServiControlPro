@@ -33,8 +33,10 @@ jobs:
           npx next build
         shell: pwsh
 
-      - name: List out directory
-        run: dir out
+      - name: List output directory
+        run: |
+          if (Test-Path .next) { dir .next } else { Write-Host ".next folder not found" }
+          if (Test-Path out) { dir out } else { Write-Host "out folder not found" }
         shell: pwsh
 
       - name: Build Electron EXE

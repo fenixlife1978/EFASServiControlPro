@@ -1,22 +1,21 @@
 /** @type {import('next').NextConfig} */
 
 const isAndroidBuild = process.env.IS_ANDROID_BUILD === 'true';
-const isStaticExport = isAndroidBuild || process.env.IS_DESKTOP_BUILD === 'true';
+const isDesktopBuild = process.env.IS_DESKTOP_BUILD === 'true';
 
 const nextConfig = {
-  output: isStaticExport ? 'export' : undefined,
-  distDir: isStaticExport ? 'out' : '.next',
+  output: isAndroidBuild ? 'export' : 'standalone',
+  distDir: isAndroidBuild ? 'out' : '.next',
   images: {
-    unoptimized: true,
+    unoptimized: isAndroidBuild,
   },
   trailingSlash: true,
   typescript: {
-    ignoreBuildErrors: isStaticExport,
+    ignoreBuildErrors: true,
   },
   eslint: {
-    ignoreDuringBuilds: isStaticExport,
+    ignoreDuringBuilds: true,
   },
-  skipTrailingSlashRedirect: true,
 };
 
 export default nextConfig;

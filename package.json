@@ -105,6 +105,8 @@
       "output": "dist_electron"
     },
     "files": [
+      ".next/standalone/**/*",
+      ".next/static/**/*",
       "out/**/*",
       "electron-main.js",
       "package.json"
