@@ -20,6 +20,18 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
 
+      - name: Hide API folders for desktop build
+        run: |
+          if (Test-Path src/app/api) {
+            Rename-Item -Path src/app/api -NewName "api_hidden" -Force
+            Write-Host "API folder hidden"
+          }
+          if (Test-Path src/pages/api) {
+            Rename-Item -Path src/pages/api -NewName "api_hidden" -Force
+            Write-Host "Pages API folder hidden"
+          }
+        shell: pwsh
+
       - name: Build Next.js static files
         run: |
           $env:NEXT_PUBLIC_FIREBASE_API_KEY = "AIzaSyACK79dDRclgjFMEUokqpskC1ezyvmO11k"
@@ -33,10 +45,22 @@ jobs:
           npx next build
         shell: pwsh
 
-      - name: List output directory
+      - name: Restore API folders
         run: |
-          if (Test-Path .next) { dir .next } else { Write-Host ".next folder not found" }
-          if (Test-Path out) { dir out } else { Write-Host "out folder not found" }
+          if (Test-Path src/app/api_hidden) {
+            Remove-Item -Path src/app/api -Recurse -Force -ErrorAction SilentlyContinue
+            Rename-Item -Path src/app/api_hidden -NewName "api" -Force
+            Write-Host "API folder restored"
+          }
+          if (Test-Path src/pages/api_hidden) {
+            Remove-Item -Path src/pages/api -Recurse -Force -ErrorAction SilentlyContinue
+            Rename-Item -Path src/pages/api_hidden -NewName "api" -Force
+            Write-Host "Pages API folder restored"
+          }
+        shell: pwsh
+
+      - name: List out directory
+        run: dir out
         shell: pwsh
 
       - name: Build Electron EXE
