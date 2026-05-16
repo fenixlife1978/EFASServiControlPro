@@ -20,15 +20,15 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
 
-      - name: Hide API folders for desktop build
+      - name: Move API folders out of project
         run: |
           if (Test-Path src/app/api) {
-            Rename-Item -Path src/app/api -NewName "api_hidden" -Force
-            Write-Host "API folder hidden"
+            Move-Item -Path src/app/api -Destination ..\api_backup -Force
+            Write-Host "API folder moved out"
           }
           if (Test-Path src/pages/api) {
-            Rename-Item -Path src/pages/api -NewName "api_hidden" -Force
-            Write-Host "Pages API folder hidden"
+            Move-Item -Path src/pages/api -Destination ..\pages_api_backup -Force
+            Write-Host "Pages API folder moved out"
           }
         shell: pwsh
 
@@ -47,14 +47,12 @@ jobs:
 
       - name: Restore API folders
         run: |
-          if (Test-Path src/app/api_hidden) {
-            Remove-Item -Path src/app/api -Recurse -Force -ErrorAction SilentlyContinue
-            Rename-Item -Path src/app/api_hidden -NewName "api" -Force
+          if (Test-Path ..\api_backup) {
+            Move-Item -Path ..\api_backup -Destination src\app\api -Force
             Write-Host "API folder restored"
           }
-          if (Test-Path src/pages/api_hidden) {
-            Remove-Item -Path src/pages/api -Recurse -Force -ErrorAction SilentlyContinue
-            Rename-Item -Path src/pages/api_hidden -NewName "api" -Force
+          if (Test-Path ..\pages_api_backup) {
+            Move-Item -Path ..\pages_api_backup -Destination src\pages\api -Force
             Write-Host "Pages API folder restored"
           }
         shell: pwsh
