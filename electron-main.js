@@ -12,8 +12,11 @@ function createWindow() {
     title: "EDUControlPro - Sistema de Monitoreo"
   });
 
-  // Apuntamos de forma estricta y absoluta al archivo raíz para evitar la pantalla en blanco
+  // Intentamos la carga nativa con file:// apuntando al index.html
   win.loadURL(`file://${path.join(__dirname, "out", "index.html")}`);
+
+  // ACTIVA LAS DEVTOOLS: Esto te abrirá la consola de errores a la derecha en el .exe
+  win.webContents.openDevTools();
 }
 
 app.whenReady().then(createWindow);
