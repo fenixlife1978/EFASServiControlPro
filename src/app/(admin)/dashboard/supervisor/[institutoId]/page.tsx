@@ -1,12 +1,12 @@
-'use client';
-
 import SedeMonitorClient from './SedeMonitorClient';
 
-interface PageProps {
-  params: { institutoId: string };
+// Generar rutas estáticas para el export
+export async function generateStaticParams() {
+  // Si no hay institutos predefinidos, devolver array vacío
+  // En build estático, esto genera las rutas
+  return [];
 }
 
-export default function SedePage({ params }: PageProps) {
-  const { institutoId } = params;
-  return <SedeMonitorClient institutoId={institutoId} />;
+export default function Page({ params }: { params: { institutoId: string } }) {
+  return <SedeMonitorClient institutoId={params.institutoId} />;
 }
