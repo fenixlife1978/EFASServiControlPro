@@ -106,7 +106,8 @@
     },
     "files": [
       "out/**/*",
-      "electron-main.js"
+      "electron-main.js",
+      "package.json"
     ],
     "win": {
       "target": "nsis",
@@ -114,15 +115,6 @@
     },
     "npmRebuild": false,
     "nodeGypRebuild": false,
-    "extraResources": [
-      {
-        "from": ".next/standalone",
-        "to": "standalone"
-      },
-      {
-        "from": ".next/static",
-        "to": "static"
-      }
-    ]
+    "extraResources": []
   }
 }
