@@ -9,21 +9,19 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
     },
+    title: "EDUControlPro - Sistema de Monitoreo"
   });
 
-  win.loadFile(path.join(__dirname, "out", "index.html"));
+  // Apuntamos de forma estricta y absoluta al archivo raíz para evitar la pantalla en blanco
+  win.loadURL(`file://${path.join(__dirname, "out", "index.html")}`);
 }
 
 app.whenReady().then(createWindow);
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+  if (process.platform !== "darwin") app.quit();
 });
 
 app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
+  if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
