@@ -1,13 +1,12 @@
 'use client';
 
-import { use } from 'react';
 import SedeMonitorClient from './SedeMonitorClient';
 
 interface PageProps {
-  params: Promise<{ institutoId: string }>;
+  params: { institutoId: string };
 }
 
 export default function SedePage({ params }: PageProps) {
-  const { institutoId } = use(params);
+  const { institutoId } = params;
   return <SedeMonitorClient institutoId={institutoId} />;
 }
