@@ -113,7 +113,6 @@
       "icon": "public/icon.png"
     },
     "npmRebuild": false,
-    "nodeGypRebuild": false,
-    "extraResources": []
+    "nodeGypRebuild": false
   }
 }
