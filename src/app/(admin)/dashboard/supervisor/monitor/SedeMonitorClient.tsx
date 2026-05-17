@@ -54,16 +54,13 @@ export default function SedeMonitorClient({ institutoId }: SedeMonitorClientProp
                        userRole === 'director-supervisor' || 
                        userRole === 'supervisor';
       
-      console.log('Verificando permisos:', { userRole, hasAccess, institutoId });
-      
       if (!hasAccess) {
         toast.error('No tienes permisos para acceder a esta sección');
         router.push('/dashboard/unauthorized');
       }
     }
-  }, [userRole, loadingPermissions, router, institutoId]);
+  }, [userRole, loadingPermissions, router]);
 
-  // Buscar institución
   useEffect(() => {
     if (!institutoId) return;
     
@@ -103,20 +100,12 @@ export default function SedeMonitorClient({ institutoId }: SedeMonitorClientProp
     findInstitution();
   }, [institutoId, router]);
 
-  // ============================================================
-  // Cargar personal desde DOS FUENTES:
-  // 1. Firestore (colección "usuarios")
-  // 2. RTDB (dispositivos con rol profesor/director)
-  // ============================================================
   useEffect(() => {
     if (!realInstitutionId) return;
-    
-    console.log('Cargando personal para institución:', realInstitutionId);
     
     const loadPersonal = async () => {
       const personalList: UserDevice[] = [];
       
-      // FUENTE 1: Firestore - colección "usuarios"
       const firestoreQuery = query(
         collection(db, "usuarios"), 
         where("InstitutoId", "==", realInstitutionId),
@@ -137,20 +126,15 @@ export default function SedeMonitorClient({ institutoId }: SedeMonitorClientProp
         });
       });
       
-      console.log('📦 Personal desde Firestore:', personalList.length);
-      
-      // FUENTE 2: RTDB - dispositivos con rol profesor/director
       const devicesSnapshot = await get(ref(rtdb, 'dispositivos'));
       const devicesData = devicesSnapshot.val();
       
       if (devicesData) {
         Object.entries(devicesData).forEach(([deviceId, device]: [string, any]) => {
-          // Solo profesores y directores, de la institución correcta
           if ((device.rol === 'profesor' || device.rol === 'director') && 
               device.InstitutoId === realInstitutionId &&
               device.alumno_asignado) {
             
-            // Verificar si ya existe en la lista (evitar duplicados)
             const exists = personalList.some(p => p.deviceId === deviceId);
             if (!exists) {
               personalList.push({
@@ -167,23 +151,20 @@ export default function SedeMonitorClient({ institutoId }: SedeMonitorClientProp
         });
       }
       
-      console.log('📦 Total personal (Firestore + RTDB):', personalList.length);
       setPersonal(personalList);
       setLoading(false);
     };
     
     loadPersonal();
     
-    // Escuchar cambios en RTDB en tiempo real
     const devicesRef = ref(rtdb, 'dispositivos');
     const unsubscribe = onValue(devicesRef, () => {
-      loadPersonal(); // Recargar cuando haya cambios
+      loadPersonal();
     });
     
     return () => off(devicesRef);
   }, [realInstitutionId]);
 
-  // Cargar estado en tiempo real de dispositivos
   useEffect(() => {
     const statusRef = ref(rtdb, 'status_dispositivos');
     const unsubscribe = onValue(statusRef, (snapshot) => {
