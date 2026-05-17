@@ -106,8 +106,7 @@
     },
     "files": [
       "out/**/*",
-      "electron-main.js",
-      "package.json"
+      "electron-main.js"
     ],
     "win": {
       "target": "nsis",
