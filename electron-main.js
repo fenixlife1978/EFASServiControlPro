@@ -4,6 +4,7 @@ const express = require("express");
 const fs = require("fs");
 
 let server = null;
+let mainWindow = null;
 
 function startServer() {
   const appServer = express();
@@ -23,13 +24,13 @@ function startServer() {
   
   appServer.use(express.static(staticPath));
   
-  // Manejar todas las rutas - IMPORTANTE: siempre servir index.html para rutas de cliente
+  // Manejar todas las rutas
   appServer.get("*", (req, res) => {
     const indexPath = path.join(staticPath, "index.html");
     if (fs.existsSync(indexPath)) {
       res.sendFile(indexPath);
     } else {
-      console.error("ERROR: index.html no encontrado en:", indexPath);
+      console.error("ERROR: index.html no encontrado");
       res.status(404).send("index.html no encontrado");
     }
   });
@@ -42,7 +43,7 @@ function startServer() {
 }
 
 function createWindow() {
-  const win = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     webPreferences: {
@@ -51,16 +52,20 @@ function createWindow() {
     },
   });
   
-  win.loadURL("http://localhost:3000");
+  mainWindow.loadURL("http://localhost:3000");
   
-  // Manejar navegación dentro de la misma ventana
-  win.webContents.on("will-navigate", (event, url) => {
+  // Manejar redirecciones
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    console.log("Navegando a:", url);
     if (url.startsWith("http://localhost:3000")) {
-      // Permitir navegación local
       return;
     }
-    // Prevenir navegación externa
     event.preventDefault();
+  });
+  
+  // Manejar nuevas ventanas (prevenir popups)
+  mainWindow.webContents.setWindowOpenHandler(() => {
+    return { action: "deny" };
   });
 }
 
