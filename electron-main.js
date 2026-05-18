@@ -9,23 +9,21 @@ function startServer() {
   const appServer = express();
   const staticPath = path.join(__dirname, "out");
   
-  // Log para ver qué archivos se solicitan
   appServer.use((req, res, next) => {
     console.log("Solicitud:", req.url);
     next();
   });
   
-  // Verificar si la carpeta out existe
   if (!fs.existsSync(staticPath)) {
     console.error("ERROR: La carpeta out no existe en:", staticPath);
     return null;
   }
   
   console.log("Sirviendo archivos desde:", staticPath);
-  console.log("Archivos en out:", fs.readdirSync(staticPath));
   
   appServer.use(express.static(staticPath));
   
+  // Manejar todas las rutas - IMPORTANTE: siempre servir index.html para rutas de cliente
   appServer.get("*", (req, res) => {
     const indexPath = path.join(staticPath, "index.html");
     if (fs.existsSync(indexPath)) {
@@ -54,6 +52,16 @@ function createWindow() {
   });
   
   win.loadURL("http://localhost:3000");
+  
+  // Manejar navegación dentro de la misma ventana
+  win.webContents.on("will-navigate", (event, url) => {
+    if (url.startsWith("http://localhost:3000")) {
+      // Permitir navegación local
+      return;
+    }
+    // Prevenir navegación externa
+    event.preventDefault();
+  });
 }
 
 app.whenReady().then(() => {
@@ -64,4 +72,10 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (server) server.close();
   if (process.platform !== "darwin") app.quit();
+});
+
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
 });
