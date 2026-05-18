@@ -1,48 +1,45 @@
 const { app, BrowserWindow } = require("electron");
 const path = require("path");
-const http = require("http");
+const express = require("express");
 const fs = require("fs");
 
 let server = null;
 
 function startServer() {
+  const appServer = express();
   const staticPath = path.join(__dirname, "out");
   
-  server = http.createServer((req, res) => {
-    let filePath = path.join(staticPath, req.url === "/" ? "index.html" : req.url);
-    
-    // Seguridad: evitar salir de la carpeta out
-    if (!filePath.startsWith(staticPath)) {
-      res.writeHead(403);
-      res.end();
-      return;
-    }
-    
-    fs.readFile(filePath, (err, data) => {
-      if (err) {
-        res.writeHead(404);
-        res.end();
-        return;
-      }
-      
-      const ext = path.extname(filePath);
-      const contentType = {
-        '.html': 'text/html',
-        '.css': 'text/css',
-        '.js': 'text/javascript',
-        '.json': 'application/json',
-        '.png': 'image/png',
-        '.jpg': 'image/jpeg',
-        '.ico': 'image/x-icon',
-      }[ext] || 'text/plain';
-      
-      res.writeHead(200, { 'Content-Type': contentType });
-      res.end(data);
-    });
+  // Log para ver qué archivos se solicitan
+  appServer.use((req, res, next) => {
+    console.log("Solicitud:", req.url);
+    next();
   });
   
-  server.listen(3000);
-  console.log("Servidor iniciado en http://localhost:3000");
+  // Verificar si la carpeta out existe
+  if (!fs.existsSync(staticPath)) {
+    console.error("ERROR: La carpeta out no existe en:", staticPath);
+    return null;
+  }
+  
+  console.log("Sirviendo archivos desde:", staticPath);
+  console.log("Archivos en out:", fs.readdirSync(staticPath));
+  
+  appServer.use(express.static(staticPath));
+  
+  appServer.get("*", (req, res) => {
+    const indexPath = path.join(staticPath, "index.html");
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      console.error("ERROR: index.html no encontrado en:", indexPath);
+      res.status(404).send("index.html no encontrado");
+    }
+  });
+  
+  server = appServer.listen(3000, () => {
+    console.log("Servidor Express iniciado en http://localhost:3000");
+  });
+  
   return server;
 }
 
@@ -57,6 +54,7 @@ function createWindow() {
   });
   
   win.loadURL("http://localhost:3000");
+  win.webContents.openDevTools();
 }
 
 app.whenReady().then(() => {
@@ -67,10 +65,4 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (server) server.close();
   if (process.platform !== "darwin") app.quit();
-});
-
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
 });
