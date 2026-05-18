@@ -20,18 +20,6 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
 
-      - name: Move API folders out of project
-        run: |
-          if (Test-Path src/app/api) {
-            Move-Item -Path src/app/api -Destination ..\api_backup -Force
-            Write-Host "API folder moved out"
-          }
-          if (Test-Path src/pages/api) {
-            Move-Item -Path src/pages/api -Destination ..\pages_api_backup -Force
-            Write-Host "Pages API folder moved out"
-          }
-        shell: pwsh
-
       - name: Build Next.js static files
         run: |
           $env:NEXT_PUBLIC_FIREBASE_API_KEY = "AIzaSyACK79dDRclgjFMEUokqpskC1ezyvmO11k"
@@ -45,20 +33,15 @@ jobs:
           npx next build
         shell: pwsh
 
-      - name: Restore API folders
-        run: |
-          if (Test-Path ..\api_backup) {
-            Move-Item -Path ..\api_backup -Destination src\app\api -Force
-            Write-Host "API folder restored"
-          }
-          if (Test-Path ..\pages_api_backup) {
-            Move-Item -Path ..\pages_api_backup -Destination src\pages\api -Force
-            Write-Host "Pages API folder restored"
-          }
-        shell: pwsh
-
       - name: List out directory
-        run: dir out
+        run: |
+          if (Test-Path out) {
+            Write-Host "out folder exists"
+            dir out
+          } else {
+            Write-Host "out folder not found - checking .next"
+            dir .next
+          }
         shell: pwsh
 
       - name: Build Electron EXE

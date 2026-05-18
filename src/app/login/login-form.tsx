@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -6,9 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Logo } from '@/components/common/logo';
-import { auth, rtdb } from '@/firebase/config'; // Cambiamos a RTDB
+import { auth, rtdb } from '@/firebase/config';
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
-import { ref, get, query, orderByChild, equalTo } from 'firebase/database'; // RTDB imports
+import { ref, get, query, orderByChild, equalTo } from 'firebase/database';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Mail, Lock, Building2, Loader2, ArrowLeft, AlertCircle } from 'lucide-react';
@@ -24,7 +25,15 @@ export default function LoginForm() {
 
   const { toast } = useToast();
 
-  // Buscar usuario en RTDB por email
+  // LIMPIAR CAMPOS AL MONTAR EL COMPONENTE (después de logout o carga inicial)
+  useEffect(() => {
+    setEmail('');
+    setPassword('');
+    setInstitutoId('');
+    setError(null);
+    setResetMode(false);
+  }, []);
+
   const findUserByEmail = async (userEmail: string) => {
     try {
       const usuariosRef = ref(rtdb, 'usuarios');
@@ -33,7 +42,6 @@ export default function LoginForm() {
       
       if (snapshot.exists()) {
         const data = snapshot.val();
-        // Obtener el primer usuario (debería ser único)
         const userId = Object.keys(data)[0];
         return { userId, ...data[userId] };
       }
@@ -52,7 +60,6 @@ export default function LoginForm() {
     const cleanEmail = email.trim().toLowerCase();
     const cleanInstId = institutoId.trim().toUpperCase();
     
-    // Cuentas con acceso global que no requieren Sede ID obligatoria
     const isGlobalAccount = cleanEmail === 'vallecondo@gmail.com' || cleanEmail === 'generaextra@gmail.com';
     
     if (!cleanEmail || !password || (!cleanInstId && !isGlobalAccount)) {
@@ -62,11 +69,9 @@ export default function LoginForm() {
     }
 
     try {
-      // 1. Autenticación en Firebase Auth
       const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
       const user = userCredential.user;
       
-      // 2. Caso Super-Admin Root (acceso global)
       if (user.email === 'vallecondo@gmail.com') {
         const idToken = await user.getIdToken(true);
         document.cookie = "__session=" + idToken + "; path=/; samesite=lax; max-age=3600; secure";
@@ -83,7 +88,6 @@ export default function LoginForm() {
         return;
       }
 
-      // 3. Caso Director Supervisor (acceso global a sedes)
       if (user.email === 'generaextra@gmail.com') {
         const idToken = await user.getIdToken(true);
         document.cookie = "__session=" + idToken + "; path=/; samesite=lax; max-age=3600; secure";
@@ -100,7 +104,6 @@ export default function LoginForm() {
         return;
       }
       
-      // 4. Buscar usuario en RTDB (Personal de Sede)
       const userData = await findUserByEmail(cleanEmail);
       
       if (!userData) {
@@ -111,7 +114,6 @@ export default function LoginForm() {
         return;
       }
 
-      // Validación de ID de Sede para personal docente/directivo local
       const userInstId = (userData.InstitutoId || '').trim().toUpperCase();
       if (userInstId !== cleanInstId) {
         await auth.signOut();
@@ -120,7 +122,6 @@ export default function LoginForm() {
         return;
       }
       
-      // 5. Guardar sesión
       const idToken = await user.getIdToken(true);
       document.cookie = "__session=" + idToken + "; path=/; samesite=lax; max-age=3600; secure";
       
@@ -157,7 +158,6 @@ export default function LoginForm() {
     
     setResetLoading(true);
     try {
-      // Verificar que el email exista en el sistema antes de enviar reset
       const cleanEmail = email.trim().toLowerCase();
       const isGlobal = cleanEmail === 'vallecondo@gmail.com' || cleanEmail === 'generaextra@gmail.com';
       const userData = !isGlobal ? await findUserByEmail(cleanEmail) : true;
@@ -206,7 +206,7 @@ export default function LoginForm() {
 
       <CardContent className="pt-8 pb-10 px-8">
         {!resetMode ? (
-          <form className="grid gap-5" onSubmit={handleLogin}>
+          <form className="grid gap-5" onSubmit={handleLogin} autoComplete="off">
             <div className="grid gap-2 relative">
               <Label className="text-[9px] uppercase font-black ml-4 text-slate-500 italic">Email</Label>
               <div className="relative">
@@ -214,6 +214,7 @@ export default function LoginForm() {
                 <Input 
                   type="email" 
                   required 
+                  autoComplete="off"
                   className="bg-white/5 border-white/5 h-14 rounded-2xl pl-12 text-xs" 
                   value={email} 
                   onChange={(e) => setEmail(e.target.value)} 
@@ -227,6 +228,7 @@ export default function LoginForm() {
                 <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 h-4 w-4" />
                 <Input 
                   type="text" 
+                  autoComplete="off"
                   className="bg-white/5 border-white/5 h-14 rounded-2xl pl-12 text-xs uppercase" 
                   placeholder="ID INSTITUTO" 
                   value={institutoId} 
@@ -251,6 +253,7 @@ export default function LoginForm() {
                 <Input 
                   type="password" 
                   required 
+                  autoComplete="new-password"
                   className="bg-white/5 border-white/5 h-14 rounded-2xl pl-12 text-xs" 
                   value={password} 
                   onChange={(e) => setPassword(e.target.value)} 
@@ -274,7 +277,7 @@ export default function LoginForm() {
             </Button>
           </form>
         ) : (
-          <form className="grid gap-5" onSubmit={handleResetPassword}>
+          <form className="grid gap-5" onSubmit={handleResetPassword} autoComplete="off">
             <div className="grid gap-2 relative">
               <Label className="text-[9px] uppercase font-black ml-4 text-slate-500 italic">Email de Recuperación</Label>
               <div className="relative">
@@ -282,6 +285,7 @@ export default function LoginForm() {
                 <Input 
                   type="email" 
                   required 
+                  autoComplete="off"
                   className="bg-white/5 border-white/5 h-14 rounded-2xl pl-12 text-xs" 
                   value={email} 
                   onChange={(e) => setEmail(e.target.value)} 

@@ -300,13 +300,7 @@ export default function ProfesorView() {
             </div>
           </button>
 
-          <button
-            onClick={handleLogout}
-            className="bg-red-600/80 hover:bg-red-600 text-white px-4 py-3 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 transition-all"
-          >
-            <LogOut size={14} /> Cerrar Sesión
-          </button>
-
+          {/* Botón de búsqueda (se mantiene igual) */}
           <div className="relative flex-1 lg:w-64">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
             <input 

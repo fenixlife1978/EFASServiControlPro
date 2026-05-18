@@ -1,6 +1,5 @@
 'use client';
 
-import { useLogout } from "@/hooks/useLogout";
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { db, auth, rtdb } from '@/firebase/config';
 import { ref, get, set, serverTimestamp as rtdbTimestamp, off, onValue } from 'firebase/database';
@@ -64,21 +63,15 @@ export default function DirectorView() {
   const [messageModal, setMessageModal] = useState({ isOpen: false, tabletId: '', alumnoNombre: '', text: '' });
   const [historyModal, setHistoryModal] = useState({ isOpen: false, tabletId: '', alumnoNombre: '' });
   
-  // OPTIMIZACIÓN: Ref para controlar montaje/desmontaje
   const isMounted = useRef(true);
-  // OPTIMIZACIÓN: Cache de deviceIds de la institución para filtrar más rápido
   const deviceIdsCache = useRef<Set<string>>(new Set());
 
-  const { handleLogout } = useLogout();
-
-  // OPTIMIZACIÓN: Actualizar cache cuando cambian los dispositivos
   useEffect(() => {
     const newCache = new Set<string>();
     dispositivos.forEach(d => newCache.add(d.id));
     deviceIdsCache.current = newCache;
   }, [dispositivos]);
 
-  // 1. Escuchar estado en tiempo real desde RTDB (OPTIMIZADO: filtrar por cache)
   useEffect(() => {
     if (!institutionId) return;
 
@@ -90,7 +83,6 @@ export default function DirectorView() {
       const data = snapshot.val();
       if (data) {
         const map: Record<string, RealtimeStatus> = {};
-        // OPTIMIZACIÓN: Solo procesar dispositivos que están en cache
         Object.entries(data).forEach(([deviceId, info]: [string, any]) => {
           if (deviceIdsCache.current.has(deviceId)) {
             map[deviceId] = {
@@ -112,15 +104,12 @@ export default function DirectorView() {
     };
   }, [institutionId]);
 
-  // 2. Cargar datos desde Firestore (OPTIMIZADO: sin cambios funcionales)
   useEffect(() => {
     if (!institutionId) return;
 
-    // Cargar Nombre de Institución
     const instRef = doc(db, "institutions", institutionId);
     getDoc(instRef).then(s => s.exists() && setNombreInstituto(s.data()?.nombre || "Sede Principal"));
 
-    // Suscripción a Director
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (user?.email) {
         const qDir = query(collection(db, "usuarios"), where("email", "==", user.email.toLowerCase()));
@@ -131,15 +120,12 @@ export default function DirectorView() {
       }
     });
 
-    // Suscripción a Profesores
     const qProf = query(collection(db, "usuarios"), where("InstitutoId", "==", institutionId), where("role", "==", "profesor"));
     const unsubProf = onSnapshot(qProf, (s) => setProfesores(s.docs.map(d => ({ id: d.id, ...d.data() }))));
 
-    // Suscripción a Aulas
     const qAulas = query(collection(db, "institutions", institutionId, "Aulas"), orderBy("aulaId"));
     const unsubAulas = onSnapshot(qAulas, (s) => setAulas(s.docs.map(d => ({ id: d.id, ...d.data() })) as Aula[]));
 
-    // Cargar dispositivos con get() (OPTIMIZADO: mantener igual)
     const cargarDispositivos = async () => {
       try {
         const dispositivosRef = ref(rtdb, 'dispositivos');
@@ -166,7 +152,6 @@ export default function DirectorView() {
     };
   }, [institutionId]);
 
-  // 3. Combinar datos de dispositivos con estado en tiempo real (OPTIMIZADO: usar cache)
   const dispositivosConEstado = useMemo(() => {
     return dispositivos.map(device => {
       const rtStatus = realtimeStatusMap[device.id] || {};
@@ -182,7 +167,6 @@ export default function DirectorView() {
     });
   }, [dispositivos, realtimeStatusMap]);
 
-  // 4. Filtrar alumnos del aula seleccionada (OPTIMIZADO: usar useMemo)
   const alumnosAula = useMemo(() => {
     if (!aulaSeleccionada) return [];
     
@@ -194,7 +178,6 @@ export default function DirectorView() {
     });
   }, [dispositivosConEstado, aulaSeleccionada]);
 
-  // FUNCIONES ORIGINALES - COMPLETAMENTE INTACTAS
   const getCurrentUrl = (deviceId: string, fallbackUrl?: string) => {
     const rtInfo = realtimeStatusMap[deviceId];
     return rtInfo?.url_actual || fallbackUrl || 'Sin actividad';
@@ -227,7 +210,6 @@ export default function DirectorView() {
     }
   };
 
-  // Renderizado Condicional de carga (INTACTO)
   if (loadingPermissions) {
     return <div className="p-20 text-center text-slate-500 font-black animate-pulse">CARGANDO PERFIL...</div>;
   }
@@ -236,10 +218,9 @@ export default function DirectorView() {
     return <div className="p-20 text-center text-red-500 font-black animate-pulse">ERROR: No se pudo identificar la sede</div>;
   }
 
-  // RENDER (COMPLETAMENTE INTACTO - SIN CAMBIOS)
   return (
     <div className="animate-in fade-in duration-500 p-4 lg:p-0 relative space-y-8">
-      {/* HEADER */}
+      {/* HEADER - Solo se mantiene el header sin botón de cierre adicional */}
       <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
         <div>
           <h2 className="text-[10px] font-black text-orange-500 uppercase tracking-[0.3em] mb-2 italic">Director Management</h2>
@@ -252,12 +233,7 @@ export default function DirectorView() {
             </div>
           </div>
         </div>
-        <button 
-          onClick={handleLogout}
-          className="bg-red-600/80 hover:bg-red-600 text-white px-6 py-3 rounded-xl text-[10px] font-black uppercase italic flex items-center gap-2 border border-red-500/30 shadow-xl transition-all"
-        >
-          <LogOut size={14} /> Cerrar Sesión
-        </button>
+        {/* Se ELIMINA el botón rojo "Cerrar Sesión" que estaba aquí */}
       </header>
 
       {/* DASHBOARD GRID */}
@@ -289,7 +265,7 @@ export default function DirectorView() {
         </div>
       </div>
 
-      {/* CONSULTAS DE INFRACCIONES - CORREGIDO */}
+      {/* CONSULTAS DE INFRACCIONES */}
       <ConsultasInfracciones 
         institutionId={institutionId}
       />
