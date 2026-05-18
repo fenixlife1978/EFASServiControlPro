@@ -1,45 +1,36 @@
 const { app, BrowserWindow } = require("electron");
 const path = require("path");
-const express = require("express");
+const { spawn } = require("child_process");
 const fs = require("fs");
 
-let server = null;
+let serverProcess = null;
 let mainWindow = null;
 
 function startServer() {
-  const appServer = express();
-  const staticPath = path.join(__dirname, "out");
+  // Ruta al servidor generado por Next.js en modo standalone
+  const serverPath = path.join(__dirname, ".next", "standalone", "server.js");
   
-  appServer.use((req, res, next) => {
-    console.log("Solicitud:", req.url);
-    next();
-  });
-  
-  if (!fs.existsSync(staticPath)) {
-    console.error("ERROR: La carpeta out no existe en:", staticPath);
+  if (!fs.existsSync(serverPath)) {
+    console.error("ERROR: No se encontró el servidor standalone en:", serverPath);
+    console.error("Asegúrate de haber ejecutado 'next build' con IS_DESKTOP_BUILD=true");
     return null;
   }
+
+  console.log("🚀 Iniciando servidor standalone de Next.js...");
+  console.log("Ruta:", serverPath);
   
-  console.log("Sirviendo archivos desde:", staticPath);
-  
-  appServer.use(express.static(staticPath));
-  
-  // Manejar todas las rutas
-  appServer.get("*", (req, res) => {
-    const indexPath = path.join(staticPath, "index.html");
-    if (fs.existsSync(indexPath)) {
-      res.sendFile(indexPath);
-    } else {
-      console.error("ERROR: index.html no encontrado");
-      res.status(404).send("index.html no encontrado");
-    }
+  // Lanzamos el servidor como un proceso hijo
+  serverProcess = spawn("node", [serverPath], {
+    env: { ...process.env, PORT: "3000", NODE_ENV: "production" },
+    stdio: "inherit"
   });
-  
-  server = appServer.listen(3000, () => {
-    console.log("Servidor Express iniciado en http://localhost:3000");
+
+  serverProcess.on("error", (err) => {
+    console.error("❌ Error al iniciar el servidor:", err);
   });
-  
-  return server;
+
+  // Opcional: esperar señal de que el servidor está listo
+  return serverProcess;
 }
 
 function createWindow() {
@@ -51,31 +42,33 @@ function createWindow() {
       contextIsolation: true,
     },
   });
-  
+
+  // Cargar la URL del servidor local
   mainWindow.loadURL("http://localhost:3000");
-  
-  // Manejar redirecciones
+
+  // Opcional: abrir DevTools en desarrollo (comentar para producción)
+  // mainWindow.webContents.openDevTools();
+
+  // Manejar redirecciones dentro de la app (evitar popups externos)
   mainWindow.webContents.on("will-navigate", (event, url) => {
-    console.log("Navegando a:", url);
     if (url.startsWith("http://localhost:3000")) {
-      return;
+      return; // permitir navegación local
     }
     event.preventDefault();
-  });
-  
-  // Manejar nuevas ventanas (prevenir popups)
-  mainWindow.webContents.setWindowOpenHandler(() => {
-    return { action: "deny" };
   });
 }
 
 app.whenReady().then(() => {
   startServer();
-  createWindow();
+  
+  // Esperar 2 segundos para que el servidor arranque
+  setTimeout(() => {
+    createWindow();
+  }, 2000);
 });
 
 app.on("window-all-closed", () => {
-  if (server) server.close();
+  if (serverProcess) serverProcess.kill();
   if (process.platform !== "darwin") app.quit();
 });
 

@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
 
-      - name: Build Next.js static files
+      - name: Build Next.js (standalone for desktop)
         run: |
           $env:NEXT_PUBLIC_FIREBASE_API_KEY = "AIzaSyACK79dDRclgjFMEUokqpskC1ezyvmO11k"
           $env:NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN = "studio-7637044995-2342d.firebaseapp.com"
@@ -33,15 +33,12 @@ jobs:
           npx next build
         shell: pwsh
 
-      - name: List out directory
+      - name: List generated files
         run: |
-          if (Test-Path out) {
-            Write-Host "out folder exists"
-            dir out
-          } else {
-            Write-Host "out folder not found - checking .next"
-            dir .next
-          }
+          Write-Host "Checking .next/standalone folder:"
+          if (Test-Path .next/standalone) { dir .next/standalone -Recurse } else { Write-Host "Standalone folder not found" }
+          Write-Host "Checking .next/static folder:"
+          if (Test-Path .next/static) { dir .next/static } else { Write-Host "Static folder not found" }
         shell: pwsh
 
       - name: Build Electron EXE
@@ -52,3 +49,4 @@ jobs:
         with:
           name: EDUControlPro-Setup
           path: dist_electron/*.exe
+          

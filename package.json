@@ -106,8 +106,20 @@
       "output": "dist_electron"
     },
     "files": [
-      "out/**/*",
+      ".next/standalone/**/*",
+      ".next/static/**/*",
+      "public/**/*",
       "electron-main.js"
+    ],
+    "extraResources": [
+      {
+        "from": ".next/standalone",
+        "to": "standalone"
+      },
+      {
+        "from": ".next/static",
+        "to": "static"
+      }
     ],
     "win": {
       "target": "nsis",
