@@ -3,11 +3,14 @@
 const isAndroidBuild = process.env.IS_ANDROID_BUILD === 'true';
 const isDesktopBuild = process.env.IS_DESKTOP_BUILD === 'true';
 
-const isStaticExport = isAndroidBuild || isDesktopBuild;
+// Android -> export estático
+// Desktop -> standalone (servidor embebido)
+// Otros (desarrollo, Vercel) -> modo por defecto
+const outputType = isAndroidBuild ? 'export' : (isDesktopBuild ? 'standalone' : undefined);
 
 const nextConfig = {
-  output: isStaticExport ? 'export' : undefined,
-  distDir: isStaticExport ? 'out' : '.next',
+  output: outputType,
+  distDir: isAndroidBuild ? 'out' : (isDesktopBuild ? '.next' : '.next'),
   images: {
     unoptimized: true,
   },
@@ -17,18 +20,6 @@ const nextConfig = {
   },
   eslint: {
     ignoreDuringBuilds: true,
-  },
-  // ✅ Excluir rutas de API del export estático (con tipos correctos)
-  exportPathMap: async function (
-    defaultPathMap: Record<string, { page: string; query?: Record<string, string> }>
-  ): Promise<Record<string, { page: string; query?: Record<string, string> }>> {
-    const filteredPaths: Record<string, { page: string; query?: Record<string, string> }> = {};
-    for (const [path, config] of Object.entries(defaultPathMap)) {
-      if (!path.startsWith('/api')) {
-        filteredPaths[path] = config;
-      }
-    }
-    return filteredPaths;
   },
 };
 
