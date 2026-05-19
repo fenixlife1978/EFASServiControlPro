@@ -3,28 +3,22 @@
 const isAndroidBuild = process.env.IS_ANDROID_BUILD === 'true';
 const isDesktopBuild = process.env.IS_DESKTOP_BUILD === 'true';
 
-// Definimos el output según el tipo de build:
-// - Android: export (estático)
-// - Desktop: standalone (servidor embebido para que funcionen las APIs)
-// - Otros (desarrollo, Vercel): undefined (modo por defecto)
-const outputType = isAndroidBuild ? 'export' : (isDesktopBuild ? 'standalone' : undefined);
+// Usamos export para Android y también para Desktop (modo estático)
+const isStaticExport = isAndroidBuild || isDesktopBuild;
 
 const nextConfig = {
-  output: outputType,
-  // distDir: para Android usa 'out', para Desktop usa '.next' (standalone), para otros '.next'
-  distDir: (isAndroidBuild ? 'out' : (isDesktopBuild ? '.next' : '.next')),
+  output: isStaticExport ? 'export' : undefined,
+  distDir: isStaticExport ? 'out' : '.next',
   images: {
     unoptimized: true,
   },
-  // trailingSlash solo para Android (necesario para rutas relativas en APK)
-  trailingSlash: isAndroidBuild ? true : false,
+  trailingSlash: isAndroidBuild ? true : false,  // false para escritorio (rutas planas)
   typescript: {
     ignoreBuildErrors: true,
   },
   eslint: {
     ignoreDuringBuilds: true,
   },
-  // Solo necesario para export estático, pero no afecta a standalone
   skipTrailingSlashRedirect: true,
 };
 
