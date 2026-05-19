@@ -3,18 +3,16 @@
 const isAndroidBuild = process.env.IS_ANDROID_BUILD === 'true';
 const isDesktopBuild = process.env.IS_DESKTOP_BUILD === 'true';
 
-// Android -> export estático
-// Desktop -> standalone (servidor embebido)
-// Otros (desarrollo, Vercel) -> modo por defecto
-const outputType = isAndroidBuild ? 'export' : (isDesktopBuild ? 'standalone' : undefined);
+// Usamos export para Android y también para Desktop (modo estático)
+const isStaticExport = isAndroidBuild || isDesktopBuild;
 
 const nextConfig = {
-  output: outputType,
-  distDir: isAndroidBuild ? 'out' : (isDesktopBuild ? '.next' : '.next'),
+  output: isStaticExport ? 'export' : undefined,
+  distDir: isStaticExport ? 'out' : '.next',
   images: {
     unoptimized: true,
   },
-  trailingSlash: isAndroidBuild ? true : false,
+  trailingSlash: isAndroidBuild ? true : false,  // false para escritorio (rutas planas)
   typescript: {
     ignoreBuildErrors: true,
   },

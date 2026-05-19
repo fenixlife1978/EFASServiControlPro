@@ -106,6 +106,7 @@
       "output": "dist_electron"
     },
     "files": [
+      "out/**/*",
       "electron-main.js"
     ],
     "win": {
